@@ -161,6 +161,171 @@ describe('the film kit bundle', () => {
     expect(drawn).toEqual([0.5, 1]);
   });
 
+  it('says how to play it in the film\'s own language, never with its title, and only while it does not play', () => {
+    const listeners: Record<string, () => void> = {};
+    const hud = (film: Record<string, unknown>, pageLang: string | null = null) => {
+      const page = kitInSandbox({
+        window: { addEventListener(type: string, listener: () => void) { listeners[type] = listener; } },
+        document: { documentElement: { getAttribute: (name: string) => (name === 'lang' ? pageLang : null) } },
+      });
+      page.Film.run({ duration: 2, scenes: [{ from: 0, to: 2, draw() {} }], ...film });
+      return page.document.body.children.find((child: { className: string }) => child.className === 'awwo-film-hud');
+    };
+    // The film of 2026-11-09's check: a Chinese film whose title is its closing words.
+    const zh = hud({ title: '雨停了', type: { lang: 'zh' } });
+    expect(zh.textContent).toBe('点击播放（有声音）');
+    expect(zh.textContent).not.toContain('雨停了');
+    expect(zh.hidden).not.toBe(true);
+    listeners.click();   // plays (no AudioContext here: the picture plays on its own)
+    expect(zh.hidden).toBe(true);
+    listeners.click();   // pauses
+    expect(zh.hidden).toBe(false);
+    for (const lang of ['zh-CN', 'zh-Hans', 'zh-Hans-HK', 'ZH']) expect(hud({ type: { lang } }).textContent, lang).toBe('点击播放（有声音）');
+    for (const lang of ['zh-TW', 'zh-Hant', 'zh-HK', 'zh_MO', 'zh-Hant-TW']) expect(hud({ type: { lang } }).textContent, lang).toBe('點擊播放（有聲音）');
+    // A film that names no language takes its page's; one that names its own keeps it.
+    expect(hud({ title: '雨停了' }, 'zh-CN').textContent).toBe('点击播放（有声音）');
+    expect(hud({ title: 'Paper Boat', type: { lang: 'en' } }, 'zh-CN').textContent).toBe('click to play with sound');
+    expect(hud({ title: 'Paper Boat' }).textContent).toBe('click to play with sound');
+    for (const lang of ['fr', 'zhx', 'en-ZH']) expect(hud({ type: { lang } }).textContent, lang).toBe('click to play with sound');
+  });
+
+  it('shows the hint again whatever stops a play: its end, a key, a step, a scene that throws', () => {
+    const listeners: Record<string, (event?: unknown) => void> = {};
+    const frames: Array<() => void> = [];
+    let clock = 0;
+    let broken = false;
+    const page = kitInSandbox({ window: {
+      addEventListener(type: string, listener: (event?: unknown) => void) { listeners[type] = listener; },
+      requestAnimationFrame(callback: () => void) { frames.push(callback); },
+      performance: { now: () => clock },
+    } });
+    const drawn: number[] = [];
+    page.Film.run({ duration: 2, scenes: [{ from: 0, to: 2, draw(_g: unknown, _k: number, t: number) { drawn.push(t); if (broken) throw new Error('the scene broke'); } }] });
+    const hud = page.document.body.children.find((child: { className: string }) => child.className === 'awwo-film-hud');
+    const nextFrame = () => frames.shift()!();
+    const key = (code: string) => listeners.keydown({ code, preventDefault() {} });
+    // Played to its end: hidden on every frame until the last, which shows the hint and asks for no more.
+    listeners.click();
+    expect(hud.hidden).toBe(true);
+    clock = 1000; nextFrame();
+    expect(hud.hidden).toBe(true);
+    clock = 2500; nextFrame();
+    expect(hud.hidden).toBe(false);
+    expect(frames).toHaveLength(0);
+    // Space plays and pauses; an arrow while it plays pauses it, and a step while it is stopped keeps the hint.
+    key('Space');
+    expect(hud.hidden).toBe(true);
+    key('Space');
+    expect(hud.hidden).toBe(false);
+    key('Space');
+    expect(hud.hidden).toBe(true);
+    key('ArrowRight');
+    expect(hud.hidden).toBe(false);
+    key('ArrowLeft');
+    expect(hud.hidden).toBe(false);
+    // A scene that throws while the film plays ends the play: the hint is back, the error goes on to be reported, and a
+    // click plays again from the beginning, not from where it stopped (1 s) nor from where it threw (1.5 s).
+    frames.length = 0;
+    listeners.click();                      // plays from 0
+    clock += 1000; nextFrame();             // at 1 s
+    listeners.click();                      // pauses there
+    frames.length = 0;
+    listeners.click();                      // plays from 1 s
+    expect(hud.hidden).toBe(true);
+    broken = true; clock += 500;
+    expect(nextFrame).toThrow('the scene broke');   // at 1.5 s
+    expect(drawn[drawn.length - 1]).toBeCloseTo(1.5, 6);
+    expect(hud.hidden).toBe(false);
+    expect(frames).toHaveLength(0);
+    broken = false;
+    listeners.click();
+    expect(hud.hidden).toBe(true);
+    drawn.length = 0;
+    nextFrame();
+    expect(drawn).toEqual([0]);
+  });
+
+  it('gives its hint a backing of its own, which reads over the lightest picture', () => {
+    const page = kitInSandbox();
+    page.Film.run({ duration: 2, scenes: [{ from: 0, to: 2, draw() {} }] });
+    const css = page.document.head.children.map((child: { textContent: string }) => child.textContent).join('\n');
+    const rule = /\.awwo-film-hud\{[^}]*\}/.exec(css)?.[0] ?? '';
+    const backing = /background:rgba\(0,0,0,(\.\d+)\)/.exec(rule);
+    const ink = /color:#([0-9a-f]{6}|[0-9a-f]{3})(?=[;}])/i.exec(rule);
+    expect(backing, rule).not.toBeNull();
+    expect(ink, rule).not.toBeNull();
+    expect(rule).not.toMatch(/opacity/);
+    // WCAG contrast of the hint's ink over its backing laid on a white picture, the worst case.
+    const linear = (value: number) => { const c = value / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    const luminance = ([r, g, b]: number[]) => 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+    const hex = ink![1];
+    const channels = (hex.length === 3 ? [...hex].map(digit => digit + digit) : hex.match(/../g)!).map(pair => parseInt(pair, 16));
+    const over = [255, 255, 255].map(white => white * (1 - Number(backing![1])));
+    expect((luminance(channels) + 0.05) / (luminance(over) + 0.05)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('starts the next play from the beginning when a still it draws throws (a pause, a step)', () => {
+    const listeners: Record<string, (event?: unknown) => void> = {};
+    const frames: Array<() => void> = [];
+    let clock = 0;
+    const drawn: number[] = [];
+    const page = kitInSandbox({ window: {
+      addEventListener(type: string, listener: (event?: unknown) => void) { listeners[type] = listener; },
+      requestAnimationFrame(callback: () => void) { frames.push(callback); },
+      performance: { now: () => clock },
+    } });
+    // The scene cannot be drawn between 0.99 s and 1.1 s.
+    page.Film.run({ duration: 2, scenes: [{ from: 0, to: 2, draw(_g: unknown, _k: number, t: number) { drawn.push(t); if (t > 0.99 && t < 1.1) throw new Error('the scene broke'); } }] });
+    const hud = page.document.body.children.find((child: { className: string }) => child.className === 'awwo-film-hud');
+    // Paused at 1 s: the still there throws, the hint is back, and the next play starts at 0, not at 1 s.
+    listeners.click();
+    clock = 1000;
+    expect(() => listeners.click()).toThrow('the scene broke');
+    expect(hud.hidden).toBe(false);
+    frames.length = 0;
+    listeners.click();
+    drawn.length = 0;
+    frames.shift()!();
+    expect(drawn).toEqual([0]);
+    // Stepped onto 1 s (from a pause at 0.96 s): the same.
+    listeners.click();   // pauses at 0
+    frames.length = 0;
+    listeners.click();   // plays from 0 again
+    clock += 960;
+    listeners.click();   // pauses at 0.96 s
+    expect(() => listeners.keydown({ code: 'ArrowRight', preventDefault() {} })).toThrow('the scene broke');
+    frames.length = 0;
+    listeners.click();
+    drawn.length = 0;
+    frames.shift()!();
+    expect(drawn).toEqual([0]);
+  });
+
+  it('draws its still once its type has loaded, but never over a film that already plays', async () => {
+    const listeners: Record<string, () => void> = {};
+    const frames: Array<() => void> = [];
+    let clock = 0;
+    const drawn: number[] = [];
+    const page = kitInSandbox({ window: {
+      addEventListener(type: string, listener: () => void) { listeners[type] = listener; },
+      requestAnimationFrame(callback: () => void) { frames.push(callback); },
+      performance: { now: () => clock },
+    } });
+    page.Film.run({ duration: 2, scenes: [{ from: 0, to: 2, draw(_g: unknown, _k: number, t: number) { drawn.push(t); } }] });
+    listeners.click();   // played before its type has loaded
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(page.__ready).toBe(true);
+    expect(drawn).toEqual([]);   // its still (0.8 s) was not drawn over the playing film
+    clock = 500; frames.shift()!();
+    expect(drawn).toEqual([0.5]);
+    // A film that is not playing when its type loads shows its still.
+    const still = kitInSandbox();
+    const stillDrawn: number[] = [];
+    still.Film.run({ duration: 2, scenes: [{ from: 0, to: 2, draw(_g: unknown, _k: number, t: number) { stillDrawn.push(t); } }] });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(stillDrawn).toEqual([0.8]);
+  });
+
   it('reports a scene list with a hole as the film\'s own error, and is still ready', async () => {
     const page = kitInSandbox();
     page.Film.run({ duration: 2, scenes: [{ from: 0, to: 1, draw() {} }, undefined, { from: 1, to: 2, draw() {} }] });

@@ -1289,7 +1289,7 @@ function filmErrors() {
   return errs;
 }
 
-let READY = null, booted = false, started = false, rendering = false, hud = null, failure = '', said = false, thrown = false, aspect = '';
+let READY = null, booted = false, started = false, rendering = false, hud = null, failure = '', said = false, thrown = false, aspect = '', hintLang = 'en';
 // Not ready until a film has booted and its type has loaded: the renderer waits for __ready, so a page that calls
 // Film.run after an await still renders from its first frame.
 window.__ready = false;
@@ -1318,7 +1318,9 @@ function boot() {
   const style = document.createElement('style');
   style.textContent = 'html,body{margin:0;height:100%;background:#000;overflow:hidden}'
     + 'canvas.awwo-film{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:block}'
-    + '.awwo-film-hud{position:fixed;left:8px;bottom:6px;font:12px/1.4 ui-monospace,Menlo,monospace;color:#bbb;opacity:.7;pointer-events:none}';
+    // The hint sits on the picture (a preview frames a film at its own shape), so it has its own dark backing: light
+    // grey on the film alone could not be read over a light look's floor.
+    + '.awwo-film-hud{position:fixed;left:8px;bottom:8px;padding:2px 8px;border-radius:4px;background:rgba(0,0,0,.62);color:#eee;font:12px/1.4 ui-monospace,Menlo,monospace;pointer-events:none}';
   document.head.appendChild(style);
   canvas = document.createElement('canvas');
   canvas.className = 'awwo-film'; canvas.width = W; canvas.height = H;
@@ -1386,6 +1388,8 @@ function run(spec) {
   PALETTE = { ...LOOK.palette, ...(f.palette || {}) };
   const roles = (f.type && f.type.roles) || {};
   TYPE = { lang: 'en', ...(f.type || {}), roles: { display: filmRole(roles.display), text: filmRole(roles.text), mono: filmRole(roles.mono) } };
+  // The play hint's language: the film's own (type.lang), else the page's (its html lang).
+  hintLang = String((f.type && f.type.lang) || (document.documentElement && document.documentElement.getAttribute('lang')) || 'en');
   CUES = f.cues || {}; VO = Array.isArray(f.vo) ? f.vo : []; SCENES = Array.isArray(f.scenes) ? f.scenes : [];
   SFX = Array.isArray(f.sfx) ? f.sfx : []; ROOM = { ...ROOM, ...(f.room || {}) };
   ARRANGEMENT = Array.isArray(f.arrangement) ? f.arrangement : []; CAST = f.cast || {};
@@ -1448,36 +1452,54 @@ window.renderAudio = async (o = {}) => {
   return buf;
 };
 
+// The line a running preview shows until the film plays: in the film's own language (its type.lang, else the page's),
+// and never its title, which can be the film's closing words (a check of 2026-11-09 saw「雨停了」 under the frame from
+// the first one). Chinese in traditional characters where the language says so (zh-Hant, zh-TW, zh-HK, zh-MO).
+const PLAY_HINT = { zh: '点击播放（有声音）', 'zh-Hant': '點擊播放（有聲音）', en: 'click to play with sound' };
+const playHint = () => {
+  const lang = hintLang.trim().toLowerCase();
+  if (!/^zh(?:[-_]|$)/.test(lang)) return PLAY_HINT.en;
+  return /^zh[-_](?:hant|tw|hk|mo)(?:[-_]|$)/.test(lang) ? PLAY_HINT['zh-Hant'] : PLAY_HINT.zh;
+};
+
 // A running preview shows one still of the film (its poster) and plays it, picture and sound together, on a click;
 // nothing plays by itself. Space plays or pauses, the arrows step a frame. Nothing here runs once the renderer has
-// called renderAt, and it draws only while the film plays or after a step.
+// called renderAt, and it draws only while the film plays or after a step. Its hint is hidden while the film plays.
 function startPreview() {
   if (rendering) return;   // a film that boots after the renderer's first frame is the renderer's alone
   hud = document.createElement('div');
   hud.className = 'awwo-film-hud';
-  hud.textContent = TITLE + ' · click to play with sound';
+  hud.textContent = playHint();
   document.body.appendChild(hud);
+  const hint = (on) => { if (hud) hud.hidden = !on; };
   // The number in run names the current play: a pause, the end or a later play leaves an older one's wait for its sound moot, so
   // only one sound and one frame loop ever run. The sound is made once, however often a click comes while it is made.
   let audio = null, source = null, making = null, playing = false, live = false, run = 0;
   let from = 0, t0 = 0, clock = 0, held = POSTER;
   const show = (t) => { if (!rendering) renderFrame(Math.floor(t * FPS + 1e-6), t); };
+  // A still drawn while the film is stopped (a pause, a step, the end, the type loading): a scene that throws there
+  // leaves the next play to start from the beginning, and the error goes on to be reported.
+  const still = (t) => { try { show(t); } catch (e) { held = POSTER; throw e; } };
   // Until its picture starts (its sound may still be in the making) a play stands where it will start.
   const now = () => (!live ? from : source ? audio.currentTime - t0 + from : (performance.now() - clock) / 1000 + from);
+  // Whatever stops a play (a pause, the end, a scene that throws) shows the hint again, before anything is drawn.
   const stop = () => {
     run += 1; playing = false; live = false;
     if (source) { source.onended = null; try { source.stop(); } catch (e) { /* already ended */ } source = null; }
+    hint(true);
   };
   const tick = (id) => {
     if (id !== run || rendering) return;
     const t = now();
-    if (t >= DURATION) { stop(); held = POSTER; show(held); return; }
-    show(t);
+    if (t >= DURATION) { stop(); held = POSTER; still(held); return; }
+    // A scene that throws ends the play (a later click starts again from the beginning) and the error is reported.
+    try { show(t); } catch (e) { stop(); held = POSTER; throw e; }
     requestAnimationFrame(() => tick(id));
   };
   const play = async () => {
     if (rendering || playing) return;
     playing = true;
+    hint(false);
     const id = ++run;
     from = held >= DURATION - 1 / FPS || held === POSTER ? 0 : held;
     try {
@@ -1496,17 +1518,18 @@ function startPreview() {
     clock = performance.now(); live = true;
     requestAnimationFrame(() => tick(id));
   };
-  const pause = () => { held = Math.min(DURATION - 1e-3, now()); stop(); show(held); };
+  const pause = () => { held = Math.min(DURATION - 1e-3, now()); stop(); still(held); };
   addEventListener('click', () => { if (playing) pause(); else play(); });
   addEventListener('keydown', (e) => {
     if (e.code === 'Space') { e.preventDefault(); if (playing) pause(); else play(); }
     if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
       if (playing) pause();
       held = Math.min(DURATION - 1e-3, Math.max(0, held + (e.code === 'ArrowRight' ? 1 : -1) / FPS));
-      show(held);
+      still(held);
     }
   });
-  READY.then(() => { if (!failure) show(held); });
+  // The still, once the film's type has loaded; a film already playing by then draws its own frames.
+  READY.then(() => { if (!failure && !playing) still(held); });
 }
 
 // The film's own type by role, for a page that sets type itself: font() is a ctx.font string, setFont() sets it with the
