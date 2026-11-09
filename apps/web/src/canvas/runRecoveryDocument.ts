@@ -594,8 +594,9 @@ const showsDelivery = (shown: NodeOutput | null | undefined, delivery: NodeOutpu
 
 /**
  * Merge one confirmed recovery batch without letting normal freshness invalidation erase a
- * downstream result from that same coherent run. The caller writes this returned document
- * directly; passing it through invalidateOutputs a second time would recreate the bug.
+ * downstream result from that same coherent run: its own steps and revisions keep what it delivered, while what lies
+ * after a step whose result changed goes stale (the second pass below). The caller writes this returned document
+ * directly; passing it through invalidateOutputs again would erase what the run delivered downstream.
  */
 export function applyRecoveredDocument(
   doc: CanvasDocument,
@@ -645,11 +646,12 @@ export function applyRecoveredDocument(
     return { ...next, lastOutput: delivery };
   });
   const merged = nodes.some((node, index) => node !== doc.nodes[index]) ? { ...invalidated, nodes } : invalidated;
-  if (journal.manual) return merged;
-  // A canvas run's results make stale what lies after each step whose result they change, as a step's result does when
-  // it lands live (patchDoc): the pass above saw only the results it cleared, so a step that showed none and gets one
-  // left what follows it as it was. Results alone count (issue ids are server evidence); the run's own steps keep what
-  // it delivered, and a revision keeps its place.
+  // A run's results make stale what lies after each step whose result they change, as a step's result does when it lands
+  // live (patchDoc): the pass above saw only the results it cleared, so a step that showed none and gets one left what
+  // follows it as it was. So do a chat's (a picture's first generation, a reply that finishes a failed run), which a page
+  // publishes here too. Results alone count (issue ids are server evidence), as invalidateOutputs reads them (a failed
+  // run's evidence where there was nothing is none); the run's own steps keep what it delivered, and a revision keeps
+  // its place.
   const resultsOnly = { ...doc, nodes: doc.nodes.map((node, index) => merged.nodes[index].lastOutput === node.lastOutput ? node
     : { ...node, lastOutput: merged.nodes[index].lastOutput }) };
   const stale = invalidateOutputs(doc, resultsOnly);

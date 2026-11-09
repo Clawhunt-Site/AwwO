@@ -686,7 +686,7 @@ CHANGELOG entry "treg for a person's own Agent".
     nothing gives them a note naming it, so a change of its title or kind does; and a node whose result stays through
     a change (a case recording, a hand-in) passes on a change of what they are given besides that text (its name and
     kind, the fields they read out of it and which are required, a market Agent's framing). Its first result takes
-    back what it feeds when this page lays it down: on this device, or from a cloud run or a review loop
+    back what it feeds when this page lays it down: on this device, or from a cloud run, a chat or a review loop
     (`applyRecoveredDocument`). A failed run's evidence is no result, and a result an agent hands in arrives as the
     agent's own change, which takes nothing back. A replaced result reaches everything below it, a wire into a node
     takes the node's result back whatever its source (a wire changes what the node is given), and a form always has its

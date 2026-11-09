@@ -106,6 +106,32 @@ describe('canvas run document recovery', () => {
     expect(recovered.nodes[1].lastOutput).toMatchObject({ partial: true });
   });
 
+  it('takes back what a first result feeds when it lands over a failed run’s evidence', () => {
+    // b's first run failed and left half an answer; the person finishes it in its chat (a manual journal); c holds a hand-in.
+    const original = graph();
+    original.nodes = original.nodes.map(node => node.id === 'c' ? { ...node, lastOutput: { text: 'Checklist by the agent', at: 5, source: 'manual' as const } }
+      : node.id === 'b' ? { ...node, lastOutput: { text: 'half an answer', at: 50, source: 'run' as const, partial: true } } : node);
+    const chat = { ...journal(original, true), scope: ['b'] };
+    chat.nodes = { b: { ...chat.nodes.b, output: '{"result":"## The whole answer"}' } };
+    chat.inputFingerprint = runInputFingerprint(original, chat.scope);
+    const recovered = applyRecoveredDocument(original, chat);
+    expect(recovered.nodes.map(node => node.lastOutput?.text ?? null)).toEqual(['old-a', '{"result":"## The whole answer"}', null]);
+  });
+
+  it('takes back what a picture’s first generation in its own chat feeds', () => {
+    const record = JSON.stringify({ type: 'awwo.media', version: 1, kind: 'image', model: 'jm.image-cinema',
+      items: [{ artifactId: 'aAAAAAAAAAAA', name: 'image-1.png', contentType: 'image/png', size: 2048 }] });
+    const poster: SessionNode = { ...createSessionNode('image', { x: 0, y: 0 }), id: 'poster', title: 'Poster', model: 'jm.image-cinema',
+      binding: { companyId: 'company-1', agentId: 'agent-poster', agentName: 'Poster' }, issueId: 'issue-poster', lastOutput: null };
+    const page = { ...session('c', 'C'), lastOutput: { text: 'Page by the agent', at: 5, source: 'manual' as const } };
+    const doc: CanvasDocument = { ...emptyDocument(), nodes: [poster, page],
+      edges: [{ id: 'poster:result->c:in:brief', fromNode: 'poster', fromPort: 'result', toNode: 'c', toPort: 'in:brief', dataType: 'image' }] };
+    const value: CanvasRunJournal = { version: 1, id: 'chat-journal-1', startedAt: 200, scope: ['poster'], manual: true,
+      nodes: { poster: { nodeId: 'poster', threadId: 'default', companyId: 'company-1', agentId: 'agent-poster', issueId: 'issue-poster', runId: 'run-poster', state: 'done', output: record } } };
+    const recovered = applyRecoveredDocument(doc, { ...value, inputFingerprint: runInputFingerprint(doc, value.scope) });
+    expect(recovered.nodes.map(node => node.lastOutput?.text ?? null)).toEqual([record, null]);
+  });
+
   it('takes nothing back below a result the canvas already shows', () => {
     const original = graph();
     original.nodes = original.nodes.map(node => node.id === 'a' ? { ...node, lastOutput: { text: 'new-a', at: 100, source: 'run' as const } }
