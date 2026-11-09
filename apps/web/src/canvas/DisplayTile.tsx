@@ -13,6 +13,7 @@ import { DeliverableMarkdown } from './DeliverableMarkdown';
 import { clampZoom, DISPLAY_LIVE_MIN_PX, DISPLAY_ZOOM_STEPS, displayLinkPath, stepZoom, type DisplayNode, type DisplaySource } from './displayNodes';
 import { useDisplayText, type DisplayTranslate } from './displayCopy';
 import { useCanvasI18n } from './i18n';
+import { agentPageProps, useAgentPage, useHeldPageNodes } from './agentPages';
 import { useMarketPage } from './marketPages';
 import { ModelPreview } from './ModelPreview';
 import { PdfPreview } from './PdfPreview';
@@ -137,8 +138,11 @@ function EntryView({ entry, canvasEntries, zoom, onOpenStudio }: EntryViewProps)
   const mime = file ? file.contentType.split(';')[0].trim() || mimeOfName(name) : '';
   const blobUrl = useObjectUrl(entry.source.type === 'stored' && file && playable ? file.bytes : null, mime);
   const mediaUrl = entry.source.type === 'media' ? entryMediaUrl(entry) : blobUrl;
-  const resolve = useMemo(() => canvasResolver(canvasEntries, entry.id), [canvasEntries, entry.id]);
+  const heldNode = useHeldPageNodes();
+  const resolve = useMemo(() => canvasResolver(canvasEntries, entry.id, heldNode), [canvasEntries, entry.id, heldNode]);
   const market = useMarketPage(entry.nodeId);
+  // A page made from words an invited Agent wrote is held too (agentPages.ts); a hand-in is named by its entry.
+  const agentHold = agentPageProps(useAgentPage(entry.nodeId));
 
   const fileBox = (note?: string, warning = false) => <div className={`awwo-display-empty${warning ? ' is-warning' : ''}`}>
     {warning ? <AlertTriangle size={20} aria-hidden="true" /> : <FileText size={20} aria-hidden="true" />}
@@ -150,7 +154,8 @@ function EntryView({ entry, canvasEntries, zoom, onOpenStudio }: EntryViewProps)
   if (kind === 'missing') body = fileBox(t('studio.missingFile', { name: entry.source.type === 'missing' ? entry.source.claimed : entry.name }), true);
   else if (bytes.state === 'loading') body = <div className="awwo-display-empty" role="status"><Loader2 size={18} className="awwo-studio-spin" aria-hidden="true" /></div>;
   else if (bytes.state === 'failed') body = fileBox(d('display.unreadable'), true);
-  else if (kind === 'page' && resolved.text !== null) body = <LivePage html={resolved.text} title={entry.name} path={entry.name} resolve={resolve} market={market} handedInBy={entry.handedInBy} delivery={entry.deliveredAt} />;
+  else if (kind === 'page' && resolved.text !== null) body = <LivePage html={resolved.text} title={entry.name} path={entry.name} resolve={resolve} market={market}
+    handedInBy={entry.handedInBy ?? agentHold.handedInBy} agentWords={entry.handedInBy === undefined ? agentHold.agentWords : undefined} delivery={entry.deliveredAt} />;
   else if (kind === 'image' && mediaUrl) body = <img className="awwo-display-picture" src={mediaUrl} alt={entry.name} draggable={false} />;
   else if (kind === 'video' && mediaUrl) body = <video className="awwo-display-picture" src={mediaUrl} controls playsInline preload="metadata" />;
   else if (kind === 'audio' && mediaUrl) body = <div className="awwo-display-audio"><audio src={mediaUrl} controls preload="metadata" /><span>{name}</span></div>;

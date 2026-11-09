@@ -1,5 +1,7 @@
+import { useMemo } from 'react';
+import { agentRunHolds } from '../canvas/agentPages';
 import { ArtifactPreview, StoredArtifactPreview } from '../canvas/ArtifactPreview';
-import { nodeContract } from '../canvas/canvasDoc';
+import { nodeContract, sanitizeDocument } from '../canvas/canvasDoc';
 import { marketPageNodes } from '../canvas/marketPages';
 import { normalizeContract, parseContractOutput } from '../canvas/nodeContracts';
 import { readableOutput, type ReadableOutput } from '../canvas/readableTranscript';
@@ -27,6 +29,15 @@ function plainHistoricalFields(source: string, historicalContract: unknown): Rea
 /** A reading projection of one historical graph result; it never republishes output. */
 export function GraphNodeOutput({ graph, node }: { graph: GraphRunSnapshot; node: GraphNodeResult }) {
   const { t } = useSaaSPreferences();
+  // The results a run made from words an Agent invited to the canvas wrote, by the canvas it ran (agentPages.ts): their
+  // pages show still until their reader runs them, as on the canvas. A run read without its canvas is held already. What
+  // the run made anew (all it ran but what it reused) is read by what made it, never by the result its node had then.
+  const ranKey = (graph.nodes ?? []).filter(item => item.state !== 'cached').map(item => item.nodeId).join('\n');
+  const agentHolds = useMemo(() => {
+    if (!Array.isArray(graph.document?.nodes)) return null;
+    const admitted = sanitizeDocument(graph.document);
+    return agentRunHolds(admitted.nodes, admitted.edges, new Set(ranKey ? ranKey.split('\n') : []));
+  }, [graph.document, ranKey]);
   if (!node.output) return null;
   const final = node.state === 'done' && !node.partial
     && (!graph.collaboration || (graph.status === 'completed' && node.nodeId === graph.collaboration.synthesizerNodeId));
@@ -42,6 +53,7 @@ export function GraphNodeOutput({ graph, node }: { graph: GraphRunSnapshot; node
   // still until their reader runs them. A run read without its canvas cannot say, so it is held to the same.
   const market = !Array.isArray(graph.document?.nodes)
     || marketPageNodes(graph.document.nodes, Array.isArray(graph.document.edges) ? graph.document.edges : []).has(node.nodeId);
+  const agentWords = agentHolds?.get(node.nodeId)?.names;
   const historicalContract = snapshot ? nodeContract(snapshot) : undefined;
   const output = readableOutput({ id: 0, role: 'agent', text: node.output,
     presentation: { outputState: final ? 'final' : 'failed', outputContract: historicalContract } });
@@ -57,8 +69,8 @@ export function GraphNodeOutput({ graph, node }: { graph: GraphRunSnapshot; node
         {fields.map(({ field, value, pendingFile }) => <section className="saas-graph-output-field" key={field.id} aria-label={field.label || field.id}>
           <h3>{field.label || field.id}</h3>
           {pendingFile ? <PendingFileDelivery file={pendingFile} /> : field.type === 'html' || field.type === 'markdown'
-            ? <ArtifactPreview source={value} type={field.type} title={field.label || field.id} renderMarkdown={renderMarkdown} market={market} />
-            : field.type === 'file' ? <StoredArtifactPreview reference={value} title={field.label || field.id} market={market}
+            ? <ArtifactPreview source={value} type={field.type} title={field.label || field.id} renderMarkdown={renderMarkdown} market={market} agentWords={agentWords} />
+            : field.type === 'file' ? <StoredArtifactPreview reference={value} title={field.label || field.id} market={market} agentWords={agentWords}
                 identity={`${graph.id}:${node.nodeId}:${field.id}`} renderMarkdown={renderMarkdown} />
               : <div className="saas-graph-output-value">{value}</div>}
         </section>)}

@@ -52,6 +52,9 @@ interface CanvasNodeBase {
   /** The node has run a market Agent or taken one's output in (marketPages.ts): its deliveries, past ones too, keep the
    *  stricter preview even once it is wired otherwise. Never taken back by the canvas itself. */
   marketFed?: true;
+  /** The fingerprints of the texts an Agent invited to the canvas wrote on this node, and of its results held for an
+   *  Agent's words (agentPages.ts): the server's, never this page's own. */
+  agentWritten?: AgentWrittenEntry[];
 }
 
 export interface WorkspaceAgentReference {
@@ -173,8 +176,8 @@ export interface NodeOutput {
   /** For a case recording, the model that produced it (the copy may run another one). */
   model?: string;
   /** For a result an Agent invited to the canvas handed in over MCP, that Agent: the server stamps it on every result an
-   *  Agent writes, and this page writes none. Its page is held until its reader runs it (agentPages.ts). A member's own
-   *  write is applied as sent, so a member could put one on their own result, which only holds their page. */
+   *  Agent writes, and this page writes none. Its page is held until its reader runs it (agentPages.ts). On a member's
+   *  write the server keeps it only on a text an Agent handed in on that node (canvas_agent_words.go). */
   by?: OutputAuthor;
 }
 
@@ -184,14 +187,49 @@ export interface OutputAuthor { kind: 'agent'; name: string }
 /** The longest name a canvas's Agent token has (canvas_agent_tokens.go canvasAgentTokenNameMax). */
 const AGENT_NAME_MAX = 60;
 
+/** An Agent's name as the server keeps it: trimmed, at most AGENT_NAME_MAX characters. */
+const agentName = (name: string): string => Array.from(name.trim()).slice(0, AGENT_NAME_MAX).join('');
+
 /** The Agent that handed a result in, read as the server stamps it: `{kind: "agent", name}`, its name text of at most
  *  AGENT_NAME_MAX characters ('' where it is not text). Any other author, or none, is undefined. */
 export function sanitizeOutputAuthor(raw: unknown): OutputAuthor | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const author = raw as Record<string, unknown>;
   if (author.kind !== 'agent') return undefined;
-  const name = typeof author.name === 'string' ? Array.from(author.name.trim()).slice(0, AGENT_NAME_MAX).join('') : '';
+  const name = typeof author.name === 'string' ? agentName(author.name) : '';
   return { kind: 'agent', name };
+}
+
+/** One fingerprint the server keeps on a node (canvas_agent_words.go): of a text an Agent invited to the canvas wrote
+ *  there, or of a result of the node held for an Agent's words, with that Agent's name. Only the server writes them;
+ *  the page keeps them as it reads them (agentPages.ts). */
+export interface AgentWrittenEntry { h: string; by: string }
+
+const FINGERPRINT = /^[0-9a-f]{16}$/;
+
+/** A node's fingerprints read as the server writes them, in their order, each once; undefined for none. None is cut:
+ *  the server keeps one of every text a node holds (a form may hold hundreds), and bounds the rest itself. */
+export function sanitizeAgentWritten(raw: unknown): AgentWrittenEntry[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: AgentWrittenEntry[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const { h, by } = item as Record<string, unknown>;
+    if (typeof h !== 'string' || !FINGERPRINT.test(h)) continue;
+    const entry = { h, by: agentName(typeof by === 'string' ? by : '') };
+    const key = JSON.stringify([entry.h, entry.by]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out.length ? out : undefined;
+}
+
+/** The fingerprints field of a node as read, to spread into it. */
+function agentWrittenField(r: Record<string, unknown>): { agentWritten?: AgentWrittenEntry[] } {
+  const agentWritten = sanitizeAgentWritten(r.agentWritten);
+  return agentWritten ? { agentWritten } : {};
 }
 
 /** "qwen3.8-27b-p6 · 2026-10-03": the model that made a case recording and the day it ran (UTC). A media model's id is
@@ -512,6 +550,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       title: str(r.title, '需求表单'),
       fields,
       ...(r.marketFed === true ? { marketFed: true as const } : {}),
+      ...agentWrittenField(r),
       lastOutput: sanitizeOutput(r.lastOutput),
     };
   }
@@ -532,6 +571,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       contract,
       ...(typeof r.fileName === 'string' && r.fileName.trim() ? { fileName: r.fileName } : {}),
       ...(r.marketFed === true ? { marketFed: true as const } : {}),
+      ...agentWrittenField(r),
       lastOutput: sanitizeOutput(r.lastOutput),
     };
   }
@@ -548,6 +588,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       title: str(r.title, '剪辑'),
       timeline: str(r.timeline),
       ...(r.marketFed === true ? { marketFed: true as const } : {}),
+      ...agentWrittenField(r),
       lastOutput: sanitizeOutput(r.lastOutput),
     };
   }
@@ -608,6 +649,7 @@ function sanitizeNode(raw: unknown): CanvasNode | null {
       } : {}),
       ...(typeof r.deliverablesOpen === 'boolean' ? { deliverablesOpen: r.deliverablesOpen } : {}),
       ...(r.marketFed === true ? { marketFed: true as const } : {}),
+      ...agentWrittenField(r),
       ...(threads ? { threads } : {}),
       ...(typeof r.activeThreadId === 'string' && threads?.some(thread => thread.id === r.activeThreadId)
         ? { activeThreadId: r.activeThreadId } : {}),

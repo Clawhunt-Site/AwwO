@@ -61,12 +61,14 @@ export function pickCanvasFile(entries: ReadonlyArray<StudioEntry>, path: string
     || (folder && candidates.find(entry => entry.source.type === 'stored' && entry.label.toLowerCase() === whole)) || candidates[0];
 }
 
-/** Relative URLs of a page resolved against the canvas's other files (pickCanvasFile). */
-export function canvasResolver(entries: ReadonlyArray<StudioEntry>, self?: string): AssetResolver {
+/** Relative URLs of a page resolved against the canvas's other files (pickCanvasFile), each said to be held where its node's
+ *  result is (an invited Agent's hand-in, or what `held` says: agentPages.ts useHeldPageNodes): a held file reaches only a
+ *  page held itself (liveDocument.ts buildLiveDocument). */
+export function canvasResolver(entries: ReadonlyArray<StudioEntry>, self?: string, held?: (nodeId: string) => boolean): AssetResolver {
   return async path => {
     const match = pickCanvasFile(entries, path, self);
     if (!match) return null;
     const file = await canvasFileBytes(match);
-    return file ? { bytes: file.bytes, name: file.name || match.name } : null;
+    return file ? { bytes: file.bytes, name: file.name || match.name, held: match.handedInBy !== undefined || Boolean(held?.(match.nodeId)) } : null;
   };
 }

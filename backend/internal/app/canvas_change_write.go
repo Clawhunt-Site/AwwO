@@ -517,6 +517,9 @@ func (a *App) applyCanvasChange(ctx context.Context, tx pgx.Tx, tid, cid string,
 	}
 	dropDanglingEdges(work)
 	reconcileCanvasWires(work)
+	// What an Agent's change wrote, and each result made from an Agent's words, are fingerprinted; a person's write keeps
+	// an Agent's name only on what an Agent handed in (canvas_agent_words.go).
+	settleAgentWords(before, work, actor)
 	if n, e := len(collectionOf(work, "nodes")), len(collectionOf(work, "edges")); (n > maxGraphNodes && n > nodesBefore) || (e > maxGraphEdges && e > edgesBefore) {
 		return out, canvasChangeRefusal{409, "canvas_limit", fmt.Sprintf("A canvas holds at most %d nodes and %d wires", maxGraphNodes, maxGraphEdges)}
 	}
@@ -630,9 +633,9 @@ func canvasOpNodes(op canvasOp, doc map[string]any) []string {
 }
 
 // The fields of a running node anyone may change: where it is and its drawer, and the results every page watching the
-// run publishes alike.
+// run publishes alike; and agentWritten, which only the server writes (a page's copy of it is no change).
 var (
-	freeRunningNodeFields   = map[string]bool{"x": true, "y": true, "w": true, "h": true, "deliverablesOpen": true, "lastOutput": true, "preview": true, "issueId": true}
+	freeRunningNodeFields   = map[string]bool{"x": true, "y": true, "w": true, "h": true, "deliverablesOpen": true, "lastOutput": true, "preview": true, "issueId": true, agentWrittenKey: true}
 	freeRunningThreadFields = map[string]bool{"lastOutput": true, "outputValues": true, "preview": true, "issueId": true}
 )
 

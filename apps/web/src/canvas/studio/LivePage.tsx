@@ -1,9 +1,9 @@
 // One delivered page, running (liveDocument.ts) in an opaque-origin sandbox. Used by the studio and by enlarged cards.
-// A page holding a market Agent's words, or one an Agent invited to the canvas handed in (agentPages.ts), shows still,
-// its scripts not run, until the reader chooses to run it.
+// A page holding a market Agent's words, or one an Agent invited to the canvas handed in or wrote words of (agentPages.ts),
+// shows still, its scripts not run, until the reader chooses to run it.
 import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
 import { Loader2 } from 'lucide-react';
-import { agentDisplayName } from '../agentPages';
+import { agentDisplayName, agentNamesList, agentNamesShown } from '../agentPages';
 import { htmlPreviewDocument } from '../htmlDeliverable';
 import { useCanvasI18n } from '../i18n';
 import { buildLiveDocument, LIVE_LINK_MESSAGE, LIVE_PAGE_ALLOW, LIVE_PAGE_SANDBOX, type AssetResolver } from './liveDocument';
@@ -33,6 +33,9 @@ export interface LivePageProps {
   /** An Agent invited to the canvas handed the page in (agentPages.ts), by this name ('' where it has none): it is held
    *  as a market Agent's page is, and says who wrote it. */
   handedInBy?: string;
+  /** The page is made from words Agents invited to the canvas wrote (agentPages.ts), by these names ('' for one with
+   *  none): it is held as a market Agent's page is, and says whose words they are. */
+  agentWords?: ReadonlyArray<string>;
   /** Which delivery the page is (its result's time): a held page runs for the delivery its reader chose, so the same
    *  page delivered again asks again. */
   delivery?: number;
@@ -41,12 +44,13 @@ export interface LivePageProps {
   className?: string;
 }
 
-export function LivePage({ html, title, path, resolve, device = 'desktop', reloadKey = 0, onLink, onDocument, passive = false, market = false, handedInBy, delivery, runChosen = false, className }: LivePageProps) {
-  const { t } = useCanvasI18n();
+export function LivePage({ html, title, path, resolve, device = 'desktop', reloadKey = 0, onLink, onDocument, passive = false, market = false, handedInBy, agentWords, delivery, runChosen = false, className }: LivePageProps) {
+  const { locale, t } = useCanvasI18n();
   const frame = useRef<HTMLIFrameElement>(null);
-  // A held page (a market Agent's words, or an invited Agent's hand-in) runs only once its reader chooses to, under the
-  // policy that loads no pictures or media by URL but from the CDNs (liveDocument.ts MARKET_PAGE_CSP).
-  const held = market || handedInBy !== undefined;
+  // A held page (a market Agent's words, an invited Agent's hand-in or a page made from its words) runs only once its
+  // reader chooses to, under the policy that loads no pictures or media by URL but from the CDNs (liveDocument.ts
+  // MARKET_PAGE_CSP).
+  const held = market || handedInBy !== undefined || agentWords !== undefined;
   const agent = handedInBy === undefined ? '' : agentDisplayName(handedInBy);
   // A build is of one page under one policy: a page that comes to be held is built again.
   const [built, setBuilt] = useState<{ source: string; held: boolean; document: string; id: number } | null>(null);
@@ -129,9 +133,17 @@ export function LivePage({ html, title, path, resolve, device = 'desktop', reloa
     const timer = window.setTimeout(() => setHeldNote(false), 8000);
     return () => { window.clearTimeout(timer); setHeldNote(false); };
   }, [held, passive, builtId, still, chosen]);
-  // Who wrote a held page, said in its own words: an invited Agent's hand-in names that Agent.
-  const stillText = handedInBy === undefined ? t('studio.marketPageStill') : agent ? t('studio.agentPageStill', { name: agent }) : t('studio.agentPageStillUnnamed');
-  const noteText = handedInBy === undefined ? t('studio.marketPageNote') : agent ? t('studio.agentPageNote', { name: agent }) : t('studio.agentPageNoteUnnamed');
+  // Who wrote a held page, said in its own words: an invited Agent's hand-in names that Agent, and a page made from
+  // invited Agents' words names them.
+  const words = agentWords === undefined ? [] : agentNamesShown(agentWords);
+  const stillText = handedInBy !== undefined ? agent ? t('studio.agentPageStill', { name: agent }) : t('studio.agentPageStillUnnamed')
+    : agentWords !== undefined ? words.length === 1 ? t('studio.agentWordsStill', { name: words[0] })
+      : words.length ? t('studio.agentWordsStillMany', { names: agentNamesList(words, locale) }) : t('studio.agentWordsStillUnnamed')
+    : t('studio.marketPageStill');
+  const noteText = handedInBy !== undefined ? agent ? t('studio.agentPageNote', { name: agent }) : t('studio.agentPageNoteUnnamed')
+    : agentWords !== undefined ? words.length === 1 ? t('studio.agentWordsNote', { name: words[0] })
+      : words.length ? t('studio.agentWordsNoteMany', { names: agentNamesList(words, locale) }) : t('studio.agentWordsNoteUnnamed')
+    : t('studio.marketPageNote');
   const width = DEVICE_WIDTH[device];
   const ready = built?.source === html && built.held === held;
   return <div className={`awwo-live-page is-${device}${className ? ` ${className}` : ''}`}>

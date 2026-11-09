@@ -70,7 +70,9 @@ const LINK_GUARD = `(()=>{const send=h=>{try{parent.postMessage({type:'${LIVE_LI
   + `try{window.open=function(u){send(u||'');return null}}catch(e){}})();`;
 
 /** Something a page refers to by a relative URL, and the bytes the studio can put in its place. */
-export type AssetResolver = (path: string) => Promise<{ bytes: Uint8Array; name: string } | null>;
+/** A file a page names, by its path. `held`: a held result stored it (an invited Agent's hand-in or a page made from its
+ *  words, a market Agent's page): it reaches a held page only (buildLiveDocument). */
+export type AssetResolver = (path: string) => Promise<{ bytes: Uint8Array; name: string; held?: boolean } | null>;
 
 const RELATIVE = /^(?![a-z][a-z0-9+.-]*:|\/\/|#|data:|blob:)/i;
 const URL_ATTRIBUTES: ReadonlyArray<readonly [string, string]> = [
@@ -199,11 +201,23 @@ export interface LiveDocumentOptions {
   market?: boolean;
 }
 
+/** What a page's build reads the files it names with: a held file (AssetResolver's `held`) reaches only a page held itself,
+ *  so a page that is not held gets nothing for it and its bytes never run there, a script it names included. */
+function pageResolver(options: LiveDocumentOptions): AssetResolver | undefined {
+  const resolve = options.resolve;
+  if (!resolve || options.market) return resolve;
+  return async path => {
+    const asset = await resolve(path);
+    return asset && !asset.held ? asset : null;
+  };
+}
+
 /**
  * The page as its author wrote it, plus the guards above. Parsed with DOMParser, which never runs scripts or loads
  * resources while the host inspects the document; only the serialized text reaches the sandboxed iframe.
  */
 export async function buildLiveDocument(value: string, options: LiveDocumentOptions = {}): Promise<string> {
+  const resolve = pageResolver(options);
   const source = htmlDocumentSource(value);
   const parsed = new DOMParser().parseFromString(source, 'text/html');
   const path = options.path ?? 'index.html';
@@ -211,8 +225,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   const inlined: Inlined = { specifiers: new Set<string>(), sources: [], styles: [] };
   // The preview cannot be sent elsewhere by the page's own metadata.
   parsed.querySelectorAll('meta[http-equiv="refresh" i], base').forEach(element => element.remove());
-  if (options.resolve) {
-    const resolve = options.resolve;
+  if (resolve) {
     for (const [tag, attribute] of URL_ATTRIBUTES) {
       for (const element of Array.from(parsed.querySelectorAll(`${tag}[${attribute}]`))) {
         const url = element.getAttribute(attribute)?.trim() ?? '';
@@ -259,7 +272,7 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   // Files a script loads by a canvas path (a model, a texture, a sound: `hero/model-1.glb`) come from the same bytes,
   // handed to fetch, XMLHttpRequest and media elements by that path (scriptAssets below); read before any library is
   // inlined, so only the page's own scripts are searched.
-  const assets = options.resolve ? await scriptAssets(parsed, path, options.resolve, budget, inlined.sources) : {};
+  const assets = resolve ? await scriptAssets(parsed, path, resolve, budget, inlined.sources) : {};
   const needs = previewScriptNeeds(source, [...inlined.specifiers], [...inlined.sources, ...inlined.styles]);
   const supplied = needs.libraries.length ? await loadPreviewLibraries(needs).catch(() => null) : null;
   if (supplied) {

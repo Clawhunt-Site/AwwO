@@ -398,7 +398,10 @@ func (a *App) createCanvas(w http.ResponseWriter, r *http.Request) {
 		a.skillFailure(w, err)
 		return
 	}
-	// Its maker is kept: they, or a workspace owner or admin, delete it (deleteObject).
+	// Its maker is kept: they, or a workspace owner or admin, delete it (deleteObject). A canvas made from a document (a
+	// copy, a case) keeps what its nodes carry of invited Agents' words, and the results made from them are fingerprinted
+	// (canvas_agent_words.go).
+	b.Document = settleCanvasDocument(nil, b.Document, canvasActorOf(r, ""))
 	a.mutateObject(w, r, "canvas.created", randomID(), 201, func(tx pgx.Tx, id string) (json.RawMessage, error) {
 		return oneJSON(r.Context(), tx, "INSERT INTO canvases(id,tenant_id,name,document,created_by) VALUES($1,$2,$3,$4,$5) RETURNING "+canvasJSON, id, r.PathValue("tenantId"), b.Name, b.Document, currentUser(r).ID)
 	})
@@ -460,6 +463,9 @@ func (a *App) updateCanvas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.Document = preserveCanvasSkills(savedDocument, preserveCanvasTaskFrames(savedDocument, b.Document))
+	// Each node keeps the fingerprints of what invited Agents wrote on it, and an Agent's name stays only on what one
+	// handed in (canvas_agent_words.go).
+	b.Document = settleCanvasDocument(savedDocument, b.Document, canvasActorOf(r, ""))
 	if err := validateCanvasTaskFrames(b.Document); err != nil {
 		fail(w, 400, "invalid_task_frame", err.Error())
 		return

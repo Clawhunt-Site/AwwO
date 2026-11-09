@@ -8,6 +8,7 @@ import { parseMediaOutput } from './mediaOutput';
 import { isPageRepairMessage, pageRepairDelivery } from './pageRepair';
 import type { CanvasRunJournal } from './runJournal';
 import { activeThreadId, updateThreadIssueId } from './nodeThreads';
+import { recordAgentPages } from './agentPages';
 import { reconcileEdges } from './ports';
 import type { ServerTurnPresentation, TurnPresentation } from './sessions';
 
@@ -646,12 +647,24 @@ export function applyRecoveredDocument(
     return { ...next, lastOutput: delivery };
   });
   const merged = nodes.some((node, index) => node !== doc.nodes[index]) ? { ...invalidated, nodes } : invalidated;
-  // A run's results make stale what lies after each step whose result they change, as a step's result does when it lands
-  // live (patchDoc): the pass above saw only the results it cleared, so a step that showed none and gets one left what
-  // follows it as it was. So do a chat's (a picture's first generation, a reply that finishes a failed run), which a page
-  // publishes here too. Results alone count (issue ids are server evidence), as invalidateOutputs reads them (a failed
-  // run's evidence where there was nothing is none); the run's own steps keep what it delivered, and a revision keeps
-  // its place.
+  // A result landing held for an invited Agent's words (an assemble page a hand-in fed, a session's page its persona
+  // asked for) is fingerprinted as it lands, as the server does at every write (agentPages.ts): it stays held though what
+  // fed it goes before the result reaches the server.
+  return recordAgentPages(doc, staleAfterRun(doc, merged, selected, revised));
+}
+
+/** A run's results make stale what lies after each step whose result they change, as a step's result does when it lands
+ *  live (patchDoc): the pass in applyRecoveredDocument saw only the results it cleared, so a step that showed none and
+ *  gets one left what follows it as it was. So do a chat's (a picture's first generation, a reply that finishes a failed
+ *  run), which a page publishes here too. Results alone count (issue ids are server evidence), as invalidateOutputs
+ *  reads them (a failed run's evidence where there was nothing is none); the run's own steps keep what it delivered, and
+ *  a revision keeps its place. */
+function staleAfterRun(
+  doc: CanvasDocument,
+  merged: CanvasDocument,
+  selected: ReadonlySet<string>,
+  revised: ReadonlySet<string>,
+): CanvasDocument {
   const resultsOnly = { ...doc, nodes: doc.nodes.map((node, index) => merged.nodes[index].lastOutput === node.lastOutput ? node
     : { ...node, lastOutput: merged.nodes[index].lastOutput }) };
   const stale = invalidateOutputs(doc, resultsOnly);

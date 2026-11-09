@@ -15,7 +15,7 @@ import { readCapabilities } from '../saas/capabilitiesApi';
 import { marketSettingsOf, type MarketSettings } from '../saas/marketApi';
 import { useCanvasMarket } from './canvasMarket';
 import { keepMarketMark, MarketPagesContext, marketPageNodes, unmarkedMarketNodes } from './marketPages';
-import { handedInBy } from './agentPages';
+import { AgentPagesContext, agentPageHolds, handedInBy, keepAgentWritten, recordAgentPages, sameAgentInputs, type AgentPageHold } from './agentPages';
 import { currentSaaSCanvas, flushSaaSCanvas, initializeSaaSCanvas, subscribeCanvasKnowledge, confirmSaaSPlanningCancellation } from '../saas/canvasBridge';
 import { submitCloudGraph, mergeGraphSnapshot, cancelCloudGraph, graphAdmissionRejected, graphIdOfOperation, graphRefusedNodeId, type GraphCollaborationPolicy, type GraphObservation } from '../saas/graphRuns';
 // CanvasSurface — the session canvas (owner-directed rebuild, 2026-08).
@@ -355,8 +355,10 @@ function sameAsSource(a: CanvasNode | undefined, b: CanvasNode | undefined): boo
 function nodeSubstance(node: CanvasNode): string {
   const { x: _x, y: _y, w: _w, h: _h, ...rest } = node as CanvasNode & { deliverablesOpen?: boolean };
   delete (rest as { deliverablesOpen?: boolean }).deliverablesOpen;
-  // Marking a node as fed by a market Agent (marketPages.ts) changes nothing it runs.
+  // Marking a node as fed by a market Agent (marketPages.ts) changes nothing it runs, nor do the server's fingerprints of
+  // what invited Agents wrote (agentPages.ts).
   delete (rest as { marketFed?: true }).marketFed;
+  delete (rest as { agentWritten?: unknown }).agentWritten;
   // People write their next message while the node works; the run already holds the one it was sent.
   if (node.kind === 'session') (rest as { threads?: unknown }).threads = getNodeThreads(node).map(({ draft: _draft, ...thread }) => thread);
   return JSON.stringify(rest);
@@ -722,6 +724,19 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   const edges = useMemo(() => reconcileEdges(nodes, doc.edges), [nodes, doc.edges]);
   // The nodes whose pages hold a market Agent's words, for every view below that shows a page (marketPages.ts).
   const marketPages = useMemo(() => marketPageNodes(nodes, edges), [nodes, edges]);
+  // The results held for an invited Agent, handed in or made from its words (agentPages.ts), for the same views: the
+  // same map while they are the same, so a moved card hands the views nothing new.
+  const agentPagesSeen = useRef<{ key: string; holds: ReadonlyMap<string, AgentPageHold>; read: Pick<CanvasDocument, 'nodes' | 'edges'> | null }>(
+    { key: '[]', holds: new globalThis.Map(), read: null });
+  const agentPages = useMemo(() => {
+    const seen = agentPagesSeen.current;
+    // A drag moves nodes on every frame: what is held is worked out again only when what it is read from changes.
+    if (seen.read && sameAgentInputs(seen.read, { nodes, edges })) return seen.holds;
+    const holds = agentPageHolds(nodes, edges);
+    const key = JSON.stringify([...holds]);
+    agentPagesSeen.current = key === seen.key ? { ...seen, read: { nodes, edges } } : { key, holds, read: { nodes, edges } };
+    return agentPagesSeen.current.holds;
+  }, [nodes, edges]);
   // Read by callbacks that must keep their identity (the tiles are memoised on them) and by what the displays read.
   const edgesRef = useRef(edges);
   edgesRef.current = edges;
@@ -801,8 +816,11 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       if (opts?.lane === undefined && laneGuard.current.exclusive()) return;
       const prev = docRef.current;
       const proposed = mut(prev);
-      // A node's effort set by anything but the change whose mark it carries takes the mark away.
-      const next = dropOverriddenEvolutionMarks(prev, opts?.serverIdentity ? proposed : invalidateOutputs(prev, proposed));
+      // A node's effort set by anything but the change whose mark it carries takes the mark away. A node keeps the
+      // server's fingerprints of what invited Agents wrote, and a result held for an Agent's words is fingerprinted here
+      // as the server does it, so it stays held before the server answers (agentPages.ts).
+      const next = recordAgentPages(prev, keepAgentWritten(prev,
+        dropOverriddenEvolutionMarks(prev, opts?.serverIdentity ? proposed : invalidateOutputs(prev, proposed))));
       if (next === prev) return;
       const busy = laneGuard.current.busy(opts?.lane);
       if (busy.size && touchesBusyNodes(prev, next, busy)) {
@@ -914,8 +932,11 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       // rather than leaving the key out, which it reads as an older client's save and answers with the skills.
       return !Object.hasOwn(kept, 'skills') && current.skills?.length ? { ...kept, skills: [] } : kept;
     }) });
-    docRef.current = restored;
-    setDoc(restored);
+    // The step keeps every fingerprint of what invited Agents wrote that the canvas has now (agentPages.ts): an undo may
+    // bring an Agent's text back, which then shows held again.
+    const marked = recordAgentPages(live, keepAgentWritten(live, restored));
+    docRef.current = marked;
+    setDoc(marked);
   }, []);
 
   // The planning section says which step is its plan's, and hears when an undo steps back over it (by the
@@ -5444,6 +5465,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
 
   return (
     <MarketPagesContext.Provider value={marketPages}>
+    <AgentPagesContext.Provider value={agentPages}>
     <AgentWorkspace simple={simple} readOnly={readOnly} storageMode={storageMode} workspaceName={workspaceName} workspaceCaption={workspaceCaption} nodes={nodes} edges={edges} selectedIds={selection} runs={runs} running={exclusiveNow}
       modelShelf={modelShelf}
       modelCatalogue={currentModelCatalogue}
@@ -5781,6 +5803,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       onRest={() => answerRerun('rest')} onWhole={() => answerRerun('whole')} onCancel={() => setRerunChoice(null)} />}
     {market.dialogs}
     </AgentWorkspace>
+    </AgentPagesContext.Provider>
     </MarketPagesContext.Provider>
   );
 }

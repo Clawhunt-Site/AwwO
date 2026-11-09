@@ -14,6 +14,7 @@ import {
 import type { CanvasEdge, CanvasNode, ReviewGraphPolicy } from '../canvasDoc';
 import { useCanvasI18n, type CanvasTextKey } from '../i18n';
 import { DeliverableMarkdown } from '../DeliverableMarkdown';
+import { agentPageHolds, agentPageProps } from '../agentPages';
 import { marketPageNodes } from '../marketPages';
 import { ModelPreview } from '../ModelPreview';
 import { PdfPreview } from '../PdfPreview';
@@ -130,6 +131,8 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   if (selectedSource && selectedSource.id === selectedId) lastShown.current = selectedSource;
   const selected = selectedSource ? shown(selectedSource, loadedOf(loaded, selectedSource)) : null;
   const marketNodes = useMemo(() => marketPageNodes(nodes, edges), [nodes, edges]);
+  // The results held for an invited Agent's words, as the canvas reads them (agentPages.ts).
+  const agentHolds = useMemo(() => agentPageHolds(nodes, edges), [nodes, edges]);
   const [mode, setMode] = useState<'preview' | 'code'>('preview');
   const [device, setDevice] = useState<LiveDevice>('desktop');
   const [reloadKey, setReloadKey] = useState(0);
@@ -311,8 +314,10 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
     const candidate = pickCanvasFile(pool, path, entry.id, item => shown(item, loadedOf(loadedRef.current, item)).name);
     if (!candidate) return null;
     const file = await load(candidate);
-    return file ? { bytes: file.bytes, name: file.name || candidate.name } : null;
-  }, [members, flat, load, assetEntries]);
+    // A file a held result stored reaches only a held page (liveDocument.ts buildLiveDocument).
+    const held = candidate.handedInBy !== undefined || marketNodes.has(candidate.nodeId) || agentHolds.has(candidate.nodeId);
+    return file ? { bytes: file.bytes, name: file.name || candidate.name, held } : null;
+  }, [members, flat, load, assetEntries, marketNodes, agentHolds]);
   const selectedResolver = useMemo(() => selected ? resolverFor(selected) : undefined, [selected?.id, resolverFor]);
   // The 成果 view's step list picks a step: show its main deliverable.
   useEffect(() => {
@@ -429,7 +434,10 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
   const selectedLoaded = selected ? loadedOf(loaded, selected) : undefined;
   const selectedText = selected ? textOf(selected) : null;
   // A page shown under the policy that loads no pictures by URL, and only once its reader runs it (LivePage).
-  const selectedHeld = selected ? marketNodes.has(selected.nodeId) || selected.handedInBy !== undefined : false;
+  const selectedHold = selected ? agentPageProps(agentHolds.get(selected.nodeId)) : {};
+  const selectedHandedIn = selected?.handedInBy ?? selectedHold.handedInBy;
+  const selectedWords = selected?.handedInBy === undefined ? selectedHold.agentWords : undefined;
+  const selectedHeld = selected ? marketNodes.has(selected.nodeId) || selectedHandedIn !== undefined || selectedWords !== undefined : false;
   /** The live page's own build of the page shown now, under the policy it is shown with; null until it has one. */
   const builtPage = (): string | null => {
     const value = pageDocument.current;
@@ -523,7 +531,7 @@ export function DeliverableStudio({ nodes, edges, execution, nodeId, initialEntr
       line={jump?.entryId === selected.id ? jump.line : undefined} query={lowered} t={t} />;
   else if (selected.kind === 'page') body = selectedText === null ? <Pending loaded={selectedLoaded} t={t} />
     : <LivePage key={selected.id} html={selectedText} title={selected.name} path={selected.source.type === 'member' ? selected.source.path : selected.name}
-      resolve={selectedResolver} device={device} reloadKey={reloadKey} market={marketNodes.has(selected.nodeId)} handedInBy={selected.handedInBy} delivery={selected.deliveredAt}
+      resolve={selectedResolver} device={device} reloadKey={reloadKey} market={marketNodes.has(selected.nodeId)} handedInBy={selectedHandedIn} agentWords={selectedWords} delivery={selected.deliveredAt}
       onDocument={document => { pageDocument.current = document === null ? null : { entryId: selected.id, source: selectedText, held: selectedHeld, html: document }; setPageBuilds(count => count + 1); }}
       onLink={href => setNotice({ text: t('studio.linkBlocked'), href })} />;
   else if (selected.kind === 'markdown') body = selectedText === null ? <Pending loaded={selectedLoaded} t={t} />

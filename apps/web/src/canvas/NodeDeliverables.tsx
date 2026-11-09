@@ -8,7 +8,7 @@ import { activeNodeThread } from './nodeThreads';
 import { getAgentTemplateForNode } from './agentTemplates';
 import { useCanvasI18n } from './i18n';
 import { ArtifactPreview, StoredArtifactPreview } from './ArtifactPreview';
-import { agentDisplayName, handedInBy } from './agentPages';
+import { agentDisplayName, fingerprintNames, handedInBy, useAgentPage, useHeldPageNodes } from './agentPages';
 import { useMarketPage } from './marketPages';
 import { currentSaaSCanvas, storedArtifactUrl } from '../saas/canvasBridge';
 import { appendDeliveryProfile, deliveryCapabilityNotice, deliveryProfiles, type DeliveryProfileId } from './deliveryProfiles';
@@ -125,7 +125,9 @@ function MissingFile({ value, onRerun, readOnly }: { value: string; onRerun?: ()
 /** Only published output is a deliverable. Editing a form never creates one implicitly. */
 export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs, presentation = 'drawer', editorOpen = false, editorRequest = 0, onRerun, initialFieldId, canvasEntries }: NodeDeliverablesProps) {
   const { locale, t } = useCanvasI18n();
-  const resolveAsset = useMemo(() => canvasEntries?.length ? canvasResolver(canvasEntries) : undefined, [canvasEntries]);
+  // A file another node's held result stored reaches only a held page (agentPages.ts useHeldPageNodes).
+  const heldNode = useHeldPageNodes();
+  const resolveAsset = useMemo(() => canvasEntries?.length ? canvasResolver(canvasEntries, undefined, heldNode) : undefined, [canvasEntries, heldNode]);
   const market = useMarketPage(node.id);
   const editor = useRef<HTMLDetailsElement>(null);
   // A collapsed <details> keeps its own state; each edit request opens it again.
@@ -146,6 +148,11 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
   // A result an Agent invited to the canvas handed in (agentPages.ts): its page is held, and it is said to be the Agent's.
   const agent = handedInBy(output);
   const agentName = agent === undefined ? '' : agentDisplayName(agent);
+  // A run's result made from words such an Agent wrote is held too: the canvas's reading of the node's result, or for an
+  // earlier Session's what the node's fingerprints say of it.
+  const hold = useAgentPage(node.id);
+  const words = agent !== undefined || !output ? undefined
+    : output === node.lastOutput ? hold && !hold.handedIn ? hold.names : undefined : fingerprintNames(node, output.text);
   const locked = readOnly || !onUpdateNode;
   // What the result is read by: the declared form, or a session's page when it declared none (resultPage.ts). The
   // form's editor and a publication keep to the declared form.
@@ -247,11 +254,12 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
       {receipt.length && !result ? <div className={`awwo-deliverables-receipt${output.partial || historical || output.source === 'case' ? ' is-caveat' : ''}`}>
         <span className="awwo-deliverables-source" title={dated ? new Date(output.at).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') : undefined}>{receipt.join(' · ')}</span>
       </div> : null}
-      {!result && (historical || output.partial || output.source === 'manual' || output.source === 'case') && <div className="awwo-deliverables-meta">
+      {!result && (historical || output.partial || output.source === 'manual' || output.source === 'case' || words !== undefined) && <div className="awwo-deliverables-meta">
         {historical && <span>{t('deliverable.historical')}</span>}
         {output.partial && <span>{t('deliverable.partial')}</span>}
         {output.source === 'manual' && <span>{t(agent === undefined ? 'deliverable.manual' : 'deliverable.agentHandIn')}</span>}
         {output.source === 'case' && !historical && <span>{t('deliverable.case')}</span>}
+        {words !== undefined && <span>{t('deliverable.agentWords')}</span>}
       </div>}
       {parsed?.errors.length ? <p className="awwo-contract-errors" role="alert" title={parsed.errors.join(' ')}>{t('deliverable.invalid')}</p> : null}
       {media ? <article className="awwo-deliverable" data-testid={`canvas-tile-output-${node.id}`}><MediaResult output={media} /></article>
@@ -319,10 +327,10 @@ export function NodeDeliverables({ node, readOnly, onUpdateNode, onChangeOutputs
               ? <ArtifactPreview key={`${node.id}:${threadKey}:${output.at}:${field.id}:${field.type}`} type={field.type} source={value}
                   previewSource={field.type === 'markdown' ? legacyWrappedPreview(value, field.id) : undefined}
                   title={field.label || field.id} canDownload={Boolean(value.trim()) && !output.partial}
-                  resolveAsset={field.type === 'html' ? resolveAsset : undefined} market={market} handedInBy={agent}
+                  resolveAsset={field.type === 'html' ? resolveAsset : undefined} market={market} handedInBy={agent} agentWords={words}
                   renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
               : artifactUrl ? <StoredArtifactPreview reference={value} title={field.label || field.id}
-                  identity={`${node.id}:${threadKey}:${output.at}:${field.id}`} market={market} handedInBy={agent}
+                  identity={`${node.id}:${threadKey}:${output.at}:${field.id}`} market={market} handedInBy={agent} agentWords={words}
                   renderMarkdown={source => <DeliverableMarkdown>{source}</DeliverableMarkdown>} />
               : fileState(field, String(value), output.source === 'manual') === 'missing' ? <MissingFile value={String(value)} onRerun={onRerun} readOnly={readOnly} />
               : filePath ? <LocalFileReference key={filePath} path={filePath} />

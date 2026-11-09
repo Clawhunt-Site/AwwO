@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Download, File, Maximize2, X } from 'lucide-react';
 import { currentSaaSCanvas, storedArtifactUrl } from '../saas/canvasBridge';
 import { sessionFetch } from '../saas/api';
-import { agentDisplayName } from './agentPages';
+import { agentDisplayName, agentNamesList, agentNamesShown } from './agentPages';
 import { useCanvasI18n } from './i18n';
 import { downloadTextDeliverable, htmlDocumentSource, htmlPreviewDocument, MAX_ARTIFACT_PREVIEW_BYTES } from './htmlDeliverable';
 import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, previewScriptNeeds, type PreviewScriptNeeds } from './previewLibraries';
@@ -52,6 +52,9 @@ const messages = {
       'render-clock': '第 {line} 行：影片的 renderAt 读了时钟或随机数，同一时刻可能画出不同的帧',
     } as Record<MotionRule, string>,
     agentStillUnnamed: '这个页面是受邀进入画布的 Agent 交来的，先显示静态预览，不运行它的脚本。点「运行页面」才运行：运行后的页面可能把它显示的内容和你在里面输入的内容发到其他网站。',
+    agentWordsStill: '这个页面用了受邀进入画布的 Agent「{name}」写的内容，先显示静态预览，不运行它的脚本。点「运行页面」才运行：运行后的页面可能把它显示的内容和你在里面输入的内容发到其他网站。',
+    agentWordsStillMany: '这个页面用了受邀进入画布的 Agent（{names}）写的内容，先显示静态预览，不运行它的脚本。点「运行页面」才运行：运行后的页面可能把它显示的内容和你在里面输入的内容发到其他网站。',
+    agentWordsStillUnnamed: '这个页面用了受邀进入画布的 Agent 写的内容，先显示静态预览，不运行它的脚本。点「运行页面」才运行：运行后的页面可能把它显示的内容和你在里面输入的内容发到其他网站。',
   },
   en: {
     preview: 'Preview', source: 'Source', html: 'HTML preview', markdown: 'Markdown source', plain: 'File source',
@@ -86,6 +89,9 @@ const messages = {
       'render-clock': 'the film’s renderAt reads the clock or chance on line {line}, so one moment can draw different frames',
     } as Record<MotionRule, string>,
     agentStillUnnamed: 'An Agent invited to this canvas handed this page in, so it shows as a still preview, its scripts not run. Choose Run page to run it: once running, the page could send what it shows, and what you type into it, to other sites.',
+    agentWordsStill: 'This page is made from words “{name}”, an Agent invited to this canvas, wrote, so it shows as a still preview, its scripts not run. Choose Run page to run it: once running, the page could send what it shows, and what you type into it, to other sites.',
+    agentWordsStillMany: 'This page is made from words Agents invited to this canvas wrote ({names}), so it shows as a still preview, its scripts not run. Choose Run page to run it: once running, the page could send what it shows, and what you type into it, to other sites.',
+    agentWordsStillUnnamed: 'This page is made from words an Agent invited to this canvas wrote, so it shows as a still preview, its scripts not run. Choose Run page to run it: once running, the page could send what it shows, and what you type into it, to other sites.',
   },
 };
 
@@ -114,6 +120,9 @@ export interface ArtifactPreviewProps extends DownloadProps {
   /** An Agent invited to the canvas handed the page in (agentPages.ts), by this name ('' where it has none): it is held
    *  as a market Agent's page is, and the still preview says who wrote it. */
   handedInBy?: string;
+  /** The page is made from words Agents invited to the canvas wrote (agentPages.ts), by these names ('' for one with
+   *  none): it is held the same way, and the still preview says whose words they are. */
+  agentWords?: ReadonlyArray<string>;
   /** The reader already chose to run this held page (the expanded copy of one that runs). */
   runChosen?: boolean;
 }
@@ -192,7 +201,7 @@ function fingerprint(text: string): string {
 }
 
 /** A rendition of published bytes. Switching presentation never republishes an output. */
-export function ArtifactPreview({ source, previewSource, type, title, renderMarkdown, downloadUrl, canDownload = true, onStoredDownload, allowExpand = true, resolveAsset, market = false, handedInBy, runChosen = false }: ArtifactPreviewProps) {
+export function ArtifactPreview({ source, previewSource, type, title, renderMarkdown, downloadUrl, canDownload = true, onStoredDownload, allowExpand = true, resolveAsset, market = false, handedInBy, agentWords, runChosen = false }: ArtifactPreviewProps) {
   const { locale, t } = useCanvasI18n();
   const text = messages[locale];
   const [mode, setMode] = useState<'preview' | 'source'>('preview');
@@ -204,14 +213,18 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   const tooLarge = new TextEncoder().encode(documentSource).byteLength > MAX_ARTIFACT_PREVIEW_BYTES;
   // A delivered page runs as soon as it is shown, like the homepage cases: in its own sandbox, with no AwwO account or
   // storage access and no network. While its expanded copy is open the inline one stays static, so it never runs twice.
-  // A market Agent's page, or one an invited Agent handed in (agentPages.ts), runs only once the reader chooses to, for
-  // this delivery: a new one is still again.
-  const guarded = market || handedInBy !== undefined;
+  // A market Agent's page, or one an invited Agent handed in or wrote words of (agentPages.ts), runs only once the reader
+  // chooses to, for this delivery: a new one is still again.
+  const guarded = market || handedInBy !== undefined || agentWords !== undefined;
   const [chosenFor, setChosenFor] = useState<string | null>(runChosen ? documentSource : null);
   const held = guarded && chosenFor !== documentSource;
   const agent = handedInBy === undefined ? '' : agentDisplayName(handedInBy);
-  // The name goes in as it is: a replacement string would read `$&` or `$'` in it as patterns.
-  const stillNote = handedInBy === undefined ? text.marketStill : agent ? text.agentStill.replace('{name}', () => agent) : text.agentStillUnnamed;
+  const words = agentWords === undefined ? [] : agentNamesShown(agentWords);
+  // A name goes in as it is: a replacement string would read `$&` or `$'` in it as patterns.
+  const stillNote = handedInBy !== undefined ? agent ? text.agentStill.replace('{name}', () => agent) : text.agentStillUnnamed
+    : agentWords !== undefined ? words.length === 1 ? text.agentWordsStill.replace('{name}', () => words[0])
+      : words.length ? text.agentWordsStillMany.replace('{names}', () => agentNamesList(words, locale)) : text.agentWordsStillUnnamed
+    : text.marketStill;
   const running = type === 'html' && mode === 'preview' && !tooLarge && !expanded && !held;
   // A page showing files the canvas made runs in the studio's live page, which puts them in place; it brings the
   // libraries AwwO supplies, its error reports and its navigation guard with it.
@@ -365,7 +378,7 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
         : type === 'html' ? <>
           {live
             ? <div ref={liveRef} className="awwo-artifact-frame awwo-artifact-live">
-              <LivePage html={documentSource} title={title} path="index.html" resolve={resolveAsset} reloadKey={epoch} market={market} handedInBy={handedInBy} runChosen={!held} />
+              <LivePage html={documentSource} title={title} path="index.html" resolve={resolveAsset} reloadKey={epoch} market={market} handedInBy={handedInBy} agentWords={agentWords} runChosen={!held} />
             </div>
             : running && libraries === 'loading'
             ? <p className="awwo-artifact-status" role="status">{text.libraryLoading.replace('{name}', libraryNames)}</p>
@@ -384,7 +397,7 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
     {downloadError && <p className="awwo-artifact-status" role="alert">{t('deliverable.downloadFailed')}</p>}
     {expanded && <ExpandedPreview title={title} closeLabel={text.close} onClose={() => setExpanded(false)}>
       <ArtifactPreview source={source} previewSource={previewSource} type={type} title={title} renderMarkdown={renderMarkdown} downloadUrl={downloadUrl}
-        canDownload={canDownload} onStoredDownload={onStoredDownload} allowExpand={false} resolveAsset={resolveAsset} market={market} handedInBy={handedInBy} runChosen={guarded && !held} />
+        canDownload={canDownload} onStoredDownload={onStoredDownload} allowExpand={false} resolveAsset={resolveAsset} market={market} handedInBy={handedInBy} agentWords={agentWords} runChosen={guarded && !held} />
     </ExpandedPreview>}
   </div>;
 }
@@ -492,9 +505,11 @@ export interface StoredArtifactPreviewProps {
   /** An invited Agent handed in the result that names the file (agentPages.ts), by this name: a page in it is held the
    *  same way. */
   handedInBy?: string;
+  /** The result that names the file is made from invited Agents' words (agentPages.ts): a page in it is held the same way. */
+  agentWords?: ReadonlyArray<string>;
 }
 
-export function StoredArtifactPreview({ reference, title, identity, renderMarkdown, market = false, handedInBy }: StoredArtifactPreviewProps) {
+export function StoredArtifactPreview({ reference, title, identity, renderMarkdown, market = false, handedInBy, agentWords }: StoredArtifactPreviewProps) {
   const { locale, t } = useCanvasI18n();
   const text = messages[locale];
   const scope = currentSaaSCanvas();
@@ -539,7 +554,7 @@ export function StoredArtifactPreview({ reference, title, identity, renderMarkdo
     <BinaryArtifactPreview key={`${identity}:${url}`} file={current.content.file} type={current.content.type} />
   </div>;
   if (current?.content && 'source' in current.content) return <ArtifactPreview key={`${identity}:${url}`} source={current.content.source} type={current.content.type}
-    title={current.content.type === 'text' ? current.content.name : title} renderMarkdown={renderMarkdown} downloadUrl={url} onStoredDownload={onStoredDownload} market={market} handedInBy={handedInBy} />;
+    title={current.content.type === 'text' ? current.content.name : title} renderMarkdown={renderMarkdown} downloadUrl={url} onStoredDownload={onStoredDownload} market={market} handedInBy={handedInBy} agentWords={agentWords} />;
   return <div className="awwo-artifact-preview">
     <div className="awwo-artifact-toolbar"><File size={15} aria-hidden="true" />
       <a className="awwo-artifact-download" href={url} download rel="noreferrer" onClick={onStoredDownload}><Download size={13} aria-hidden="true" />{t('deliverable.downloadFile')}</a>

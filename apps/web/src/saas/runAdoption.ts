@@ -181,7 +181,10 @@ function withStepsAfter(documents: readonly CanvasDocument[], from: ReadonlySet<
 }
 
 /** What a landing writes: a node's result, its issue (and its conversations', which carry them), nothing else. */
-const LANDING_KEYS: ReadonlySet<string> = new Set(['lastOutput', 'issueId', 'threads']);
+// A landing also fingerprints each result it lands held for an invited Agent's words, as every landing does
+// (runRecoveryDocument.ts applyRecoveredDocument, agentPages.ts recordAgentPages); the server takes them as a person's
+// write may add them (canvas_agent_words.go keepAgentWritten).
+const LANDING_KEYS: ReadonlySet<string> = new Set(['lastOutput', 'issueId', 'threads', 'agentWritten']);
 
 /** A run's results as they land on a canvas. */
 export interface RunLanding {

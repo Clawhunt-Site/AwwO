@@ -578,6 +578,12 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 		return
 	}
+	// A run follows its Agent's instructions; one an invited Agent wrote that the node no longer shows would make a page
+	// held for the wrong words (canvas_agent_words.go).
+	if agentPersonaDrift(document, nodeID, instructions) {
+		fail(w, 409, "node_setup_required", "Initialize the node to apply its changed persona")
+		return
+	}
 	// A node running a market Agent sends the version's instructions and skills, read now (market_use.go).
 	var market *marketRun
 	if kind == "node" {

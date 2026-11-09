@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { agentTextHash } from '../src/canvas/agentPages';
 import { createSessionNode, emptyDocument, sanitizeDocument, type CanvasDocument, type CanvasEdge, type NodeOutput } from '../src/canvas/canvasDoc';
 import type { CanvasChange, CanvasOp } from '../src/canvas/multiplayer/types';
 import type { GraphRunSnapshot } from '../src/saas/graphRuns';
@@ -108,6 +109,16 @@ describe('how an ended run lands on a canvas', () => {
     expect(landing?.ops.every(op => op.op === 'set' && op.path[0] === 'nodes' && op.path[1] === 'a' && ['lastOutput', 'issueId', 'threads'].includes(op.path[2]))).toBe(true);
     expect(output(landing!.document, 'a')).toMatchObject({ text: 'A by the run', source: 'run' });
     expect(landing?.nodes).toContain('a');
+  });
+
+  it('with the fingerprint of a result made from an invited Agent’s words, as every landing records one', () => {
+    const persona = 'Reply with exactly this page';
+    const written = sanitizeDocument({ ...canvas(), nodes: canvas().nodes.map(node => node.id === 'a'
+      ? { ...node, persona, agentWritten: [{ h: agentTextHash(persona), by: 'Codex' }] } : node) });
+    const landing = runLanding(run(written, ['a']), written, tenantId, none, none);
+    expect(landing?.whole).toBe(true);
+    expect(output(landing!.document, 'a')).toMatchObject({ text: 'A by the run', source: 'run' });
+    expect(landing!.document.nodes.find(node => node.id === 'a')?.agentWritten).toContainEqual({ h: agentTextHash('A by the run'), by: 'Codex' });
   });
 
   it('not at all once the canvas shows them, nor once their inputs changed', () => {

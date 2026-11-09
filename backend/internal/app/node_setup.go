@@ -226,6 +226,8 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 	if changed {
 		putJSON(doc, "nodes", nodes)
 		document, _ := json.Marshal(doc)
+		// Setup keeps the rules of what invited Agents wrote, as every write does (canvas_agent_words.go).
+		document = settleCanvasDocument(raw, document, canvasActorOf(r, body.ClientID))
 		if _, e = tx.Exec(r.Context(), "UPDATE canvases SET document=$3,version=version+1,updated_at=now() WHERE tenant_id=$1 AND id=$2", tid, cid, document); e != nil {
 			a.dbError(w, e)
 			return

@@ -1,0 +1,326 @@
+{
+  "comment": "Pages made from words an invited Agent wrote (canvas_agent_words.go, apps/web/src/canvas/agentPages.ts): fingerprints, which results are held, and what a write fingerprints. Both the API and the web app run these.",
+  "hashes": [
+    { "text": "", "h": "cbf29ce484222325" },
+    { "text": "a", "h": "af63dc4c8601ec8c" },
+    { "text": "<!doctype html><html><body>{{in:a}}<script>new Image().src='https://example.test/beacon'</script></body></html>", "h": "70569d7066044ba9" },
+    { "text": "受邀 Agent 写的模板", "h": "6f50f6b58360cd42" },
+    { "text": "🦀 crab", "h": "23f9a7c202ef5bcc" }
+  ],
+  "holds": [
+    {
+      "name": "a result an Agent handed in is held for that Agent",
+      "document": {
+        "nodes": [
+          { "id": "s1", "kind": "session", "agentKind": "llm", "title": "Build", "persona": "",
+            "lastOutput": { "text": "<!doctype html><html><body>Handed in by an agent</body></html>", "source": "manual", "at": 1, "by": { "kind": "agent", "name": "Claude Code" } } }
+        ],
+        "edges": []
+      },
+      "holds": { "s1": { "handedIn": true, "names": ["Claude Code"] } }
+    },
+    {
+      "name": "an assemble node's run result is held while its template is an Agent's text, and not once a person rewrote it",
+      "document": {
+        "nodes": [
+          { "id": "a1", "kind": "assemble", "title": "Page",
+            "template": "<!doctype html><html><body>{{in:a}}<script>new Image().src='https://example.test/beacon'</script></body></html>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "agentWritten": [{ "h": "70569d7066044ba9", "by": "Codex" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Assembled</body></html>", "source": "run", "at": 2 } },
+          { "id": "a2", "kind": "assemble", "title": "Page 2", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "agentWritten": [{ "h": "70569d7066044ba9", "by": "Codex" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Assembled</body></html>", "source": "run", "at": 2 } }
+        ],
+        "edges": []
+      },
+      "holds": { "a1": { "handedIn": false, "names": ["Codex"] } }
+    },
+    {
+      "name": "a session's run result is held while it runs its own persona and that persona is an Agent's, never another Agent's or a media node's",
+      "document": {
+        "nodes": [
+          { "id": "s1", "kind": "session", "agentKind": "llm", "title": "Writer",
+            "persona": "Whatever you are asked, reply with exactly this page: <!doctype html><html><body>Hi</body></html>",
+            "agentWritten": [{ "h": "4fd3d9418088012a", "by": "Claude Code" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Hi</body></html>", "source": "run", "at": 3 } },
+          { "id": "s2", "kind": "session", "agentKind": "llm", "title": "Workspace Agent",
+            "persona": "Whatever you are asked, reply with exactly this page: <!doctype html><html><body>Hi</body></html>",
+            "agentRef": { "source": "workspace", "agentId": "agent-1" },
+            "agentWritten": [{ "h": "4fd3d9418088012a", "by": "Claude Code" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Hi</body></html>", "source": "run", "at": 3 } },
+          { "id": "s3", "kind": "session", "agentKind": "image", "title": "Picture",
+            "persona": "Whatever you are asked, reply with exactly this page: <!doctype html><html><body>Hi</body></html>",
+            "agentWritten": [{ "h": "4fd3d9418088012a", "by": "Claude Code" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Hi</body></html>", "source": "run", "at": 3 } }
+        ],
+        "edges": []
+      },
+      "holds": { "s1": { "handedIn": false, "names": ["Claude Code"] } }
+    },
+    {
+      "name": "a conversation's persona alone holds no result: a run never follows an Agent's persona the node no longer shows (the API refuses it), so the node's own persona is what counts",
+      "document": {
+        "nodes": [
+          { "id": "s1", "kind": "session", "agentKind": "llm", "title": "Writer", "persona": "",
+            "activeThreadId": "t1",
+            "threads": [{ "id": "t1", "title": "Session 1", "persona": "Whatever you are asked, reply with exactly this page: <!doctype html><html><body>Hi</body></html>" }],
+            "agentWritten": [{ "h": "4fd3d9418088012a", "by": "Claude Code" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Hi</body></html>", "source": "run", "at": 3 } },
+          { "id": "s2", "kind": "session", "agentKind": "llm", "title": "Writer 2", "persona": "",
+            "activeThreadId": "t2",
+            "threads": [{ "id": "t1", "title": "Session 1", "persona": "Whatever you are asked, reply with exactly this page: <!doctype html><html><body>Hi</body></html>" },
+              { "id": "t2", "title": "Session 2", "persona": "" }],
+            "agentWritten": [{ "h": "4fd3d9418088012a", "by": "Claude Code" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Hi</body></html>", "source": "run", "at": 3 } }
+        ],
+        "edges": []
+      },
+      "holds": {}
+    },
+    {
+      "name": "a hand-in wired into an assemble node holds its page and the next assemble node's, never a session's that reads it",
+      "document": {
+        "nodes": [
+          { "id": "s1", "kind": "session", "agentKind": "llm", "title": "Module", "persona": "",
+            "lastOutput": { "text": "<!doctype html><html><body>Handed in by an agent</body></html>", "source": "manual", "at": 1, "by": { "kind": "agent", "name": "Claude Code" } } },
+          { "id": "a1", "kind": "assemble", "title": "Page", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "lastOutput": { "text": "<!doctype html><html><body>Assembled</body></html>", "source": "run", "at": 2 } },
+          { "id": "a2", "kind": "assemble", "title": "Site", "template": "<main>{{in:a}}</main>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "lastOutput": { "text": "<main>Assembled</main>", "source": "run", "at": 2 } },
+          { "id": "s2", "kind": "session", "agentKind": "llm", "title": "Reader", "persona": "Summarise the page",
+            "lastOutput": { "text": "<!doctype html><html><body>Summary</body></html>", "source": "run", "at": 4 } }
+        ],
+        "edges": [
+          { "id": "e1", "fromNode": "s1", "fromPort": "result", "toNode": "a1", "toPort": "in:a", "dataType": "text" },
+          { "id": "e2", "fromNode": "a1", "fromPort": "out:page", "toNode": "a2", "toPort": "in:a", "dataType": "text" },
+          { "id": "e3", "fromNode": "a1", "fromPort": "out:page", "toNode": "s2", "toPort": "context", "dataType": "text" }
+        ]
+      },
+      "holds": {
+        "s1": { "handedIn": true, "names": ["Claude Code"] },
+        "a1": { "handedIn": false, "names": ["Claude Code"] },
+        "a2": { "handedIn": false, "names": ["Claude Code"] }
+      }
+    },
+    {
+      "name": "a form's label or value an Agent wrote, and a media node's title, reach the assemble node they are wired into",
+      "document": {
+        "nodes": [
+          { "id": "f1", "kind": "form", "title": "Brief",
+            "fields": [
+              { "id": "q", "label": "<img src=x onerror=\"new Image().src='https://example.test/'\">", "value": "" },
+              { "id": "r", "label": "Tone", "value": "A value an agent typed" }
+            ],
+            "agentWritten": [{ "h": "263e0ba80c8e3f88", "by": "Codex" }, { "h": "2dbe75fb1aafb369", "by": "Claude Code" }] },
+          { "id": "m1", "kind": "session", "agentKind": "image", "title": "<b>Picture</b>", "persona": "",
+            "agentWritten": [{ "h": "8ef648d07efc7202", "by": "Gemini" }],
+            "lastOutput": { "text": "{\"type\":\"awwo.media\",\"kind\":\"image\",\"items\":[]}", "source": "run", "at": 5 } },
+          { "id": "a1", "kind": "assemble", "title": "Page", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "lastOutput": { "text": "<!doctype html><html><body>Assembled</body></html>", "source": "run", "at": 6 } },
+          { "id": "a2", "kind": "assemble", "title": "Gallery", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "lastOutput": { "text": "<!doctype html><html><body>Gallery</body></html>", "source": "run", "at": 6 } }
+        ],
+        "edges": [
+          { "id": "e1", "fromNode": "f1", "fromPort": "data", "toNode": "a1", "toPort": "in:a", "dataType": "text" },
+          { "id": "e2", "fromNode": "m1", "fromPort": "result", "toNode": "a2", "toPort": "in:a", "dataType": "image" }
+        ]
+      },
+      "holds": {
+        "a1": { "handedIn": false, "names": ["Claude Code", "Codex"] },
+        "a2": { "handedIn": false, "names": ["Gemini"] }
+      }
+    },
+    {
+      "name": "a partial result hands its words on (a review loop's unapproved round); a person's own publication and a copied case's recording are not held for their wires",
+      "document": {
+        "nodes": [
+          { "id": "s1", "kind": "session", "agentKind": "llm", "title": "Writer",
+            "persona": "Whatever you are asked, reply with exactly this page: <!doctype html><html><body>Hi</body></html>",
+            "agentWritten": [{ "h": "4fd3d9418088012a", "by": "Claude Code" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Half</body></html>", "source": "run", "at": 3, "partial": true } },
+          { "id": "a1", "kind": "assemble", "title": "Page", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "lastOutput": { "text": "<!doctype html><html><body>Assembled</body></html>", "source": "run", "at": 4 } },
+          { "id": "s2", "kind": "session", "agentKind": "llm", "title": "Module", "persona": "",
+            "lastOutput": { "text": "<!doctype html><html><body>Handed in by an agent</body></html>", "source": "manual", "at": 1, "by": { "kind": "agent", "name": "Codex" } } },
+          { "id": "a2", "kind": "assemble", "title": "Mine", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "lastOutput": { "text": "<!doctype html><html><body>Published by hand</body></html>", "source": "manual", "at": 7 } },
+          { "id": "a3", "kind": "assemble", "title": "Case",
+            "template": "<!doctype html><html><body>{{in:a}}<script>new Image().src='https://example.test/beacon'</script></body></html>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "agentWritten": [{ "h": "70569d7066044ba9", "by": "Codex" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Recorded</body></html>", "source": "case", "at": 8 } }
+        ],
+        "edges": [
+          { "id": "e1", "fromNode": "s1", "fromPort": "result", "toNode": "a1", "toPort": "in:a", "dataType": "text" },
+          { "id": "e2", "fromNode": "s2", "fromPort": "result", "toNode": "a2", "toPort": "in:a", "dataType": "text" },
+          { "id": "e3", "fromNode": "s2", "fromPort": "result", "toNode": "a3", "toPort": "in:a", "dataType": "text" }
+        ]
+      },
+      "holds": {
+        "s1": { "handedIn": false, "names": ["Claude Code"] },
+        "a1": { "handedIn": false, "names": ["Claude Code"] },
+        "s2": { "handedIn": true, "names": ["Codex"] }
+      }
+    },
+    {
+      "name": "a fingerprinted result stays held with nothing feeding it, and a hand-in that lost its by is held as words",
+      "document": {
+        "nodes": [
+          { "id": "a1", "kind": "assemble", "title": "Page", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "agentWritten": [{ "h": "0fb71d74d0c55bdf", "by": "Claude Code" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Assembled</body></html>", "source": "run", "at": 2 } },
+          { "id": "s1", "kind": "session", "agentKind": "llm", "title": "Module", "persona": "",
+            "agentWritten": [{ "h": "8701700b7c1b23c9", "by": "Claude Code" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Handed in by an agent</body></html>", "source": "manual", "at": 1 } }
+        ],
+        "edges": []
+      },
+      "holds": {
+        "a1": { "handedIn": false, "names": ["Claude Code"] },
+        "s1": { "handedIn": false, "names": ["Claude Code"] }
+      }
+    },
+    {
+      "name": "a ring of assemble nodes settles the same whatever order it is read in",
+      "document": {
+        "nodes": [
+          { "id": "a2", "kind": "assemble", "title": "Two", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "lastOutput": { "text": "<p>two</p>", "source": "run", "at": 2 } },
+          { "id": "a3", "kind": "assemble", "title": "Three", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "lastOutput": { "text": "<p>three</p>", "source": "run", "at": 2 } },
+          { "id": "a1", "kind": "assemble", "title": "One",
+            "template": "<!doctype html><html><body>{{in:a}}<script>new Image().src='https://example.test/beacon'</script></body></html>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "agentWritten": [{ "h": "70569d7066044ba9", "by": "Codex" }],
+            "lastOutput": { "text": "<p>one</p>", "source": "run", "at": 2 } }
+        ],
+        "edges": [
+          { "id": "e1", "fromNode": "a3", "fromPort": "out:page", "toNode": "a2", "toPort": "in:a", "dataType": "text" },
+          { "id": "e2", "fromNode": "a2", "fromPort": "out:page", "toNode": "a1", "toPort": "in:a", "dataType": "text" },
+          { "id": "e3", "fromNode": "a1", "fromPort": "out:page", "toNode": "a3", "toPort": "in:a", "dataType": "text" }
+        ]
+      },
+      "holds": {
+        "a1": { "handedIn": false, "names": ["Codex"] },
+        "a2": { "handedIn": false, "names": ["Codex"] },
+        "a3": { "handedIn": false, "names": ["Codex"] }
+      }
+    },
+    {
+      "name": "a hold carries the first eight names in code point order (a fullwidth letter before an emoji, as UTF-8 sorts them), whatever names were sent",
+      "document": {
+        "nodes": [
+          { "id": "f1", "kind": "form", "title": "Brief", "fields": [{ "id": "q", "label": "Name", "value": "" }],
+            "agentWritten": [
+              { "h": "ef49aec68fd1dc66", "by": "🦀 crab" },
+              { "h": "ef49aec68fd1dc66", "by": "Ａgent" },
+              { "h": "ef49aec68fd1dc66", "by": "Agent 7" },
+              { "h": "ef49aec68fd1dc66", "by": "Agent 6" },
+              { "h": "ef49aec68fd1dc66", "by": "Agent 5" },
+              { "h": "ef49aec68fd1dc66", "by": "Agent 4" },
+              { "h": "ef49aec68fd1dc66", "by": "Agent 3" },
+              { "h": "ef49aec68fd1dc66", "by": "Agent 2" },
+              { "h": "ef49aec68fd1dc66", "by": "Agent 1" }
+            ] },
+          { "id": "a1", "kind": "assemble", "title": "Page", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }],
+              "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "lastOutput": { "text": "<!doctype html><html><body>Name</body></html>", "source": "run", "at": 6 } }
+        ],
+        "edges": [
+          { "id": "e1", "fromNode": "f1", "fromPort": "data", "toNode": "a1", "toPort": "in:a", "dataType": "text" }
+        ]
+      },
+      "holds": { "a1": { "handedIn": false, "names": ["Agent 1", "Agent 2", "Agent 3", "Agent 4", "Agent 5", "Agent 6", "Agent 7", "Ａgent"] } }
+    }
+  ],
+  "record": [
+    {
+      "name": "a run's result landing on an assemble node a hand-in feeds is fingerprinted, and so is the hand-in",
+      "before": {
+        "nodes": [
+          { "id": "s1", "kind": "session", "agentKind": "llm", "title": "Module", "persona": "",
+            "lastOutput": { "text": "<!doctype html><html><body>Handed in by an agent</body></html>", "source": "manual", "at": 1, "by": { "kind": "agent", "name": "Claude Code" } } },
+          { "id": "a1", "kind": "assemble", "title": "Page", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] } }
+        ],
+        "edges": [{ "id": "e1", "fromNode": "s1", "fromPort": "result", "toNode": "a1", "toPort": "in:a", "dataType": "text" }]
+      },
+      "after": {
+        "nodes": [
+          { "id": "s1", "kind": "session", "agentKind": "llm", "title": "Module", "persona": "",
+            "lastOutput": { "text": "<!doctype html><html><body>Handed in by an agent</body></html>", "source": "manual", "at": 1, "by": { "kind": "agent", "name": "Claude Code" } } },
+          { "id": "a1", "kind": "assemble", "title": "Page", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "lastOutput": { "text": "<!doctype html><html><body>Assembled</body></html>", "source": "run", "at": 2 } }
+        ],
+        "edges": [{ "id": "e1", "fromNode": "s1", "fromPort": "result", "toNode": "a1", "toPort": "in:a", "dataType": "text" }]
+      },
+      "agentWritten": {
+        "s1": [{ "h": "8701700b7c1b23c9", "by": "Claude Code" }],
+        "a1": [{ "h": "0fb71d74d0c55bdf", "by": "Claude Code" }]
+      }
+    },
+    {
+      "name": "a result held before keeps its hold once the wire and the hand-in that fed it are gone, and the hand-in cleared is fingerprinted as it goes",
+      "before": {
+        "nodes": [
+          { "id": "s1", "kind": "session", "agentKind": "llm", "title": "Module", "persona": "",
+            "lastOutput": { "text": "<!doctype html><html><body>Handed in by an agent</body></html>", "source": "manual", "at": 1, "by": { "kind": "agent", "name": "Codex" } } },
+          { "id": "a1", "kind": "assemble", "title": "Page", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "lastOutput": { "text": "<!doctype html><html><body>Assembled</body></html>", "source": "run", "at": 2 } }
+        ],
+        "edges": [{ "id": "e1", "fromNode": "s1", "fromPort": "result", "toNode": "a1", "toPort": "in:a", "dataType": "text" }]
+      },
+      "after": {
+        "nodes": [
+          { "id": "s1", "kind": "session", "agentKind": "llm", "title": "Module", "persona": "" },
+          { "id": "a1", "kind": "assemble", "title": "Page", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "lastOutput": { "text": "<!doctype html><html><body>Assembled</body></html>", "source": "run", "at": 2 } }
+        ],
+        "edges": []
+      },
+      "agentWritten": {
+        "s1": [{ "h": "8701700b7c1b23c9", "by": "Codex" }],
+        "a1": [{ "h": "0fb71d74d0c55bdf", "by": "Codex" }]
+      }
+    },
+    {
+      "name": "a new result made after its source went is not fingerprinted, and what a node kept stays",
+      "before": {
+        "nodes": [
+          { "id": "a1", "kind": "assemble", "title": "Page", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "agentWritten": [{ "h": "0fb71d74d0c55bdf", "by": "Codex" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Assembled</body></html>", "source": "run", "at": 2 } }
+        ],
+        "edges": []
+      },
+      "after": {
+        "nodes": [
+          { "id": "a1", "kind": "assemble", "title": "Page", "template": "<p>{{in:a}}</p>",
+            "contract": { "version": 1, "inputs": [{ "id": "a", "label": "A", "type": "text", "required": false, "value": "" }], "outputs": [{ "id": "page", "label": "Page", "type": "html", "required": false, "value": "" }] },
+            "agentWritten": [{ "h": "0fb71d74d0c55bdf", "by": "Codex" }],
+            "lastOutput": { "text": "<!doctype html><html><body>Assembled again</body></html>", "source": "run", "at": 9 } }
+        ],
+        "edges": []
+      },
+      "agentWritten": {
+        "a1": [{ "h": "0fb71d74d0c55bdf", "by": "Codex" }]
+      }
+    }
+  ]
+}

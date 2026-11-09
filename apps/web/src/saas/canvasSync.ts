@@ -3,6 +3,7 @@
 // sent"). Pure: the page (SaaSApp CloudCanvas) holds the state, the canvas surface applies the rebase it is handed to
 // its document and to every undo and redo step.
 
+import { keepAgentWritten, keepCurrentAgentWritten } from '../canvas/agentPages';
 import { sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
 import { applyOps, CanvasOpError, diffDocuments, othersOps, rebaseAfterAck, rebaseWorking, sameValue } from '../canvas/multiplayer/changes';
 import { getNodeThreads } from '../canvas/nodeThreads';
@@ -171,11 +172,15 @@ export function rebaseFor({ before, after, changes = [], sent = [], own = () => 
     for (const { from, to, moved } of steps) {
       next = rebaseWorking(next, from as unknown as Record<string, unknown>, to as unknown as Record<string, unknown>, moved) as Record<string, unknown>;
     }
-    if (next === (doc as unknown)) return doc;
+    // Every fingerprint the server keeps of what invited Agents wrote comes onto the page's documents, its own change's
+    // included, which is never carried (agentPages.ts): only the server writes them, so none is the page's to keep out.
+    // And the page keeps each of its own of a text the document holds now: an answer may bring a node's fingerprints as
+    // the server pruned them before an undo brought their value back.
+    if (next === (doc as unknown)) return keepCurrentAgentWritten(doc, keepAgentWritten(afterRead, doc));
     // Read again as the canvas reads every document (a wire whose port went with its node's change goes too); the
     // page's own camera and clock stay its own.
     const read = sanitizeDocument(next);
-    return { ...read, view: doc.view, updatedAt: doc.updatedAt };
+    return keepCurrentAgentWritten(doc, keepAgentWritten(afterRead, { ...read, view: doc.view, updatedAt: doc.updatedAt }));
   };
   const othersPaths = steps.flatMap(({ moved }) => moved.flatMap(op => op.op === 'order' ? [] : [op.path]));
   if (!steps.length && !sent.length) return { working: doc => doc, history: doc => doc, othersPaths };

@@ -404,6 +404,8 @@ cookie. A `scope: read` token only watches.
 - Write a node's `lastOutput`: the server keeps it as `source: "manual"`, at the time it came, with `by` naming the
   agent (`{kind: "agent", name}`, the token's name), so it is never shown as AwwO's engine's result. The canvas keeps
   `by` too, and its panel says "Handed in by <name>" over the result (see "An agent's page" below).
+- What an agent writes of a node's texts (a persona, a template, a form field's label or value, a title, a result) is
+  fingerprinted on that node under the agent's name (`agentWritten`, see "Pages made from an agent's words" below).
 - Add and remove wires, checked against the nodes' ports and types (graph_contracts.go `nodePort`, `edgeTypesFit`).
 - Each value is checked (`agentFieldValue`): a title is text of at most 200 bytes (UTF-8, so about 66 Chinese
   characters), a persona 32,000 bytes, a template or a timeline 1 MiB, a file name 200 bytes without `/` or `\`; `x` and
@@ -420,7 +422,7 @@ every page reads fixed and every canvas run refuses.)
 
 An agent's write takes the nodes it wrote for 60 s, or renews its own claim, never shortening it or blanking its note.
 - Not: bindings, conversations, Agent references, skills, teams, task frames, contracts, models, runtimes, efforts,
-  media settings, evolution marks, `execution`. A new session node has no runtime or model chosen; a person picks them.
+  media settings, evolution marks, the fingerprints of what agents wrote (`agentWritten`), `execution`. A new session node has no runtime or model chosen; a person picks them.
   It has no output fields either, so its result is text, its own `result` port's: when that result is one complete
   HTML document (a run's, or one an agent hands in), the canvas shows it as the node's page all the same, and the page
   check sends a run's page back to the node once when it fails (`docs/agent-graph.md`, Delivery formats). A contract
@@ -449,16 +451,77 @@ the owner's choice of 2026-11-08):
 - The panel, the 成果 view, the studio, a preview display and a form's card on the board say who handed it in (with the
   agent's name where they have room), never "published by hand"; the 成果 view's run receipt claims no run for it, as for
   a copied case's recording.
-- Not held, an open limit: a run's result made from words an agent wrote, once a person runs it. A session's run reads
-  a hand-in as its input, as it reads a person's; an assemble node copies its inputs and its `template` into its page as
-  they are, so a hand-in an agent wires into one, or a `template`, a form's `fields` or a `persona` it writes, comes out
-  as an ordinary run's result and runs as one. The document records no writer of a template, a form's fields or a
-  persona, so holding only a wired hand-in would leave the same page one template away; closing this takes the server
-  marking such nodes.
-- Also open: a member's own write is applied as sent, so a member could put an agent's `by` on their own result: that
-  page is then held and named after the agent wherever it is shown. And a hand-in can lose its `by` for everyone through
-  a write from a page that never kept it: an unsent draft a page from before this release saved, restored by this one,
-  or an undo or redo in a tab still open on an older page.
+- A member's write keeps an agent's `by` only on a result an agent handed in on that node: the very result kept
+  before, or a text the node keeps a fingerprint of under the very name the write sends (an undo of a hand-in a later
+  write replaced). Any other `by` goes, and no other name is put in its place, so a page's own writes never pass a
+  member's result for an agent's. A node new in the write (an undo of its deletion, a copy) keeps what it carries, and so
+  does a canvas made from a document. (A member writing to the API by hand can add a fingerprint under any name and then
+  name that agent on a result, a hand-in included; that only ever holds a page, never unholds one.)
+- A hand-in that loses its `by` through a write from a page that never kept it (an unsent draft a page from before
+  this release saved, an undo in a tab still open on an older page) is still held, as a page made from the agent's
+  words: its node keeps the fingerprint of the text the agent handed in.
+
+#### Pages made from an agent's words
+
+A run's result can be made from words an agent wrote: an assemble node copies its `template` and its inputs into its
+page as they are (`graph_assemble.go`), a form hands on its fields' labels and values as they are (`formOutput`), an
+image, video, 3D or edit node's file listing names its title (`graph_media.go`), and a session follows its `persona`.
+Such a page is held as a hand-in is, in the same views and in a run's record (the owner's choice of 2026-11-08;
+`backend/internal/app/canvas_agent_words.go`, `apps/web/src/canvas/agentPages.ts`; both run
+`backend/internal/app/testdata/agent_words_vectors.json`):
+
+- **What the server keeps.** `agentWritten` on a node: the fingerprints of the texts agents wrote there (FNV-1a 64 of
+  the UTF-8 text, as 16 hex digits), each with the agent's name. An agent's change adds one for each persona, template,
+  form field label or value, title or result it sets to a new text, and for every text of a node it adds. It is a field
+  of the document, so no migration. An agent's rules leave it out, and a person's write never takes one away; it may add
+  some, which only ever hold more: any of a text the node holds (an undo bringing a form's hundreds of fields back brings
+  their fingerprints with it), and at most 64 of others in one write. A page does so for a result it lands held, so that
+  result stays held though what fed it went before it reached the server (a save split into batches may carry the
+  fingerprint before the result). A node keeps every fingerprint of a text it holds now (a session's other
+  conversations' personas and results included), each under at most 8 names (the first it was kept under, so names a
+  write adds later never push out the one it had), and the 16 latest of the rest.
+- **When a text is an agent's.** While it matches one of its node's fingerprints. A person's edit changes the text, so
+  what is made from it after the edit runs as usual; an undo or a copy that brings the agent's text back is held again.
+  Nothing is cleared or kept by hand, so a page that never knew the field changes nothing.
+- **What is held.** A result an agent handed in; a run's result of a session running its own persona (no workspace or
+  market Agent chosen, not a media node) while that persona is an agent's; and a run's result of an assemble node while
+  its template is an agent's, or while a wire into it comes from a form with a label or value an agent wrote, from an
+  image, video, 3D or edit node whose title an agent wrote, or from a node whose result is held (a partial one too: a
+  review loop's unapproved round is read by the steps after it), through a chain of assemble nodes too. A session's
+  Agent is set up from its persona, and its runs follow what it was set up with: on a node an agent wrote on, a run whose
+  Agent's instructions are not the persona the node shows (a person rewrote it since the setup) is refused,
+  `node_setup_required` ("Initialize the node to apply its changed persona"), until the node is set up again, as a page
+  does before every run; so no result is held by the persona it shows while it ran another. The still page names the
+  agents ("用了受邀进入画布的 Agent「Codex」写的内容"), at most eight, the first in code point order (the page is held
+  whatever their number, and so the work of finding the holds is eight names along each wire, whatever a document holds),
+  and the panel says "Made from words an invited Agent wrote".
+- **Its files.** A file a held result stored (an assemble node's file output, an archive and the pages inside it)
+  reaches only a page that is held itself: a page that is not held and names it, by a script's `src`, a picture, a
+  stylesheet or a path one of its scripts loads, gets nothing for it (`liveDocument.ts`), so the file's bytes never run
+  unheld. A hand-in's files and a market Agent's are kept to held pages the same way.
+- **It outlasts what fed it.** At every write the server fingerprints each result held this way, and each held before
+  the write that the write leaves in place. So a page stays held when the wire, the hand-in or the node that fed it goes
+  later (an agent deleting its hand-in after a person ran the page), and the same text made again is held again. A held
+  result a write replaces or clears is fingerprinted as it goes, so an undo that brings it back (a hand-in from before
+  this release, undone in a tab still open on an older page, included) shows it held. A page
+  records the same fingerprints as its own edits commit and as a run's results land on it, and takes the server's from
+  every change it hears, its own included, so a page it lands is held before the server answers. An undo pressed while a
+  save is out keeps the page's fingerprints of the text it brought back, though the server's answer to that save had let
+  them go with the text. A run's results land only when the inputs are those it was admitted with
+  (`runInputFingerprint`), so a source taken away while it runs lands nothing. A run's record holds each result the run
+  made by what made it (the persona, the template and the wires it ran with), never by the result its node had before;
+  a step it reused shows as it was.
+- **Not held.** A session that only reads an agent's words as its input, and what is assembled from its result: AwwO's
+  own work in a run a person started, as with a person's inputs (the choice made for hand-ins). Other nodes' titles, a
+  timeline and a file name reach no page. Words agents wrote before this release have no fingerprint; a hand-in's comes
+  from its `by` at its canvas's first write after it, or as it is replaced. A person who copies an agent's text into
+  another node makes it their own.
+- **Open limits.** A workspace Agent set up from a node whose persona an agent wrote keeps that persona as its
+  instructions, and a node in any canvas that chooses that Agent runs it unheld (the Agent's row records no writer). A
+  tab still open on a page from before this release that undoes the deletion of a node brings it back without its
+  fingerprints.
+- **What it costs.** In a canvas agents help build, a page those nodes make asks for 运行页面 once per new delivery, per
+  view, per viewer; a canvas of people only is unchanged.
 
 ### Ports
 

@@ -363,6 +363,12 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 					fail(w, 409, "node_setup_required", "Initialize the node to apply its changed runtime")
 					return
 				}
+				// A run follows its Agent's instructions; one an invited Agent wrote that the node no longer shows would make
+				// a page held for the wrong words (canvas_agent_words.go).
+				if agentPersonaDrift(own, n.ID, instructions) {
+					fail(w, 409, "node_setup_required", "Initialize the node to apply its changed persona")
+					return
+				}
 				// A node running a market Agent sends the version's instructions and skills (market_use.go); its price is
 				// held when its turn comes (admitGraphChild), and a paid one is refused now without the owner's plan.
 				if market, e = a.admitMarketRun(r.Context(), tx, tid, n.IssueID, n.ID, currentUser(r).ID, own, marketAgentID, marketVersion); e != nil {
