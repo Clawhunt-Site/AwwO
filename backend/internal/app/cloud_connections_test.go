@@ -8,6 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -231,14 +234,101 @@ func TestCloudBudgetLeavesRoomForWhatAWorkerAdds(t *testing.T) {
 	}
 }
 
+// A hosted model goes by the name its site publishes where that is a name a picker can show, else by its id; a name
+// that is not one, or not a string, leaves its model offered and the rest of the list as it is.
+func TestCloudModelsGoByTheNamesTheHostedSitePublishes(t *testing.T) {
+	long := strings.Repeat("名", 54) // 54 characters, 162 bytes
+	cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"object":"list","data":[
+			{"id":"bedrock.claude-opus-5-5","name":"  Claude Opus 5.5 ","context_window":200000,"max_output_tokens":32000},
+			{"id":"bedrock.glm-5","context_window":128000,"max_output_tokens":16000},
+			{"id":"bedrock.kimi-k3","name":null,"context_window":128000,"max_output_tokens":16000},
+			{"id":"bedrock.nova-pro","name":5,"context_window":128000,"max_output_tokens":16000},
+			{"id":"bedrock.qwen3-32b","name":{"zh":"通义千问"},"context_window":128000,"max_output_tokens":16000},
+			{"id":"bedrock.deepseek-r1","name":"DeepSeek\u202eR1","context_window":128000,"max_output_tokens":16000},
+			{"id":"bedrock.llama-4-scout","name":"`+long+`","context_window":128000,"max_output_tokens":16000},
+			{"id":"bedrock.mistral-large-3","name":"   ","context_window":128000,"max_output_tokens":16000},
+			{"id":"bedrock.gemma-3-27b","name":"Gemma 3 27B","context_window":1000,"max_output_tokens":10}]}`)
+	}))
+	defer cloud.Close()
+	c := testConfig()
+	c.Edition, c.UserCredentials, c.CredentialKey, c.LocalCloudOrigin = editionLocal, true, bytes.Repeat([]byte{7}, 32), cloud.URL
+	ids, models, e := New(nil, c).discoverCloudModels(context.Background(), cloudKey)
+	offered := "bedrock.claude-opus-5-5 bedrock.glm-5 bedrock.kimi-k3 bedrock.nova-pro bedrock.qwen3-32b bedrock.deepseek-r1 bedrock.llama-4-scout bedrock.mistral-large-3"
+	if e != nil || strings.Join(ids, " ") != offered {
+		t.Fatal("the models whose limits hold, whatever their names", ids, e)
+	}
+	for _, id := range ids {
+		if want := map[string]string{"bedrock.claude-opus-5-5": "Claude Opus 5.5"}[id]; models[id].Name != want {
+			t.Errorf("%s: name %q, want %q", id, models[id].Name, want)
+		}
+	}
+}
+
+func TestCloudModelNameIsOneAPickerCanShow(t *testing.T) {
+	for name, want := range map[string]string{
+		"Claude Opus 5.5": "Claude Opus 5.5", "  GLM-5\u00a0": "GLM-5", "通义千问 Qwen3 32B": "通义千问 Qwen3 32B",
+		"": "", " \t ": "",
+		// At most 80 characters and 160 bytes.
+		strings.Repeat("a", 80): strings.Repeat("a", 80), strings.Repeat("a", 81): "",
+		strings.Repeat("名", 53) + "x": strings.Repeat("名", 53) + "x", strings.Repeat("名", 53) + "xy": "", strings.Repeat("名", 80): "",
+		// A line break or tab, a control, a character that shows as nothing or reorders text, or one that was not text.
+		"Claude\nOpus": "", "Claude\tOpus": "", "Claude\u0085Opus": "", "Claude\u007fOpus": "", "Claude\u202eOpus": "",
+		"Claude\u2066Opus": "", "Claude\u200bOpus": "", "Claude\ufeffOpus": "", "Claude\u00adOpus": "", "Claude\u2028Opus": "",
+		"Claude\ue000Opus": "", "Claude\U000e0041Opus": "", "Claude\u034fOpus": "", "Claude\ufe0fOpus": "", "Claude\ufffdOpus": "",
+		"Claude\xffOpus": "",
+	} {
+		if got := cloudModelName(name); got != want {
+			t.Errorf("%+q: %+q, want %+q", name, got, want)
+		}
+	}
+}
+
+// A node the model rail adds takes its model's name as its title, with a persona's name after it when one is chosen
+// (apps/web canvasModelDrop.ts createModelNode): the longest name cloudModelName keeps, with any persona the web offers,
+// in either language, is a title the node's setup takes (setupConfig holds a title to 200 bytes).
+func TestTheLongestCloudModelNameTitlesANodeThatCanBeSetUp(t *testing.T) {
+	longest := strings.Repeat("名", 53) + "x"
+	if cloudModelName(longest) != longest || len(longest) != cloudModelNameBytes {
+		t.Fatal("not the longest name kept", len(longest))
+	}
+	const selector = "byok_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0123456789abcdef"
+	catalog := runtimeCatalog{runtimePI: {Ready: true, Models: []piModel{{ID: selector, Name: longest, Provider: cloudProviderID,
+		Runtime: runtimePI, MaxContextTextBytes: 28416, MessageOverheadBytes: 32}}}}
+	persona := regexp.MustCompile(`(?m)^\s*id: '[a-z]+', title: '([^']+)'`)
+	for _, file := range []string{"agentTemplates.ts", "agentTemplates.en.ts"} {
+		source, e := os.ReadFile(filepath.Join("..", "..", "..", "apps", "web", "src", "canvas", file))
+		if e != nil {
+			t.Fatal(e)
+		}
+		titles := persona.FindAllStringSubmatch(string(source), -1)
+		if n := strings.Count(string(source), "template({"); n == 0 || len(titles) != n {
+			t.Fatal(file, "every template's title not found", len(titles), n)
+		}
+		// The name alone, then with each persona.
+		for _, title := range append([][]string{nil}, titles...) {
+			node := map[string]any{"id": "cv-node", "kind": "session", "title": longest, "runtime": runtimePI, "model": selector}
+			if title != nil {
+				node["title"] = longest + " · " + title[1]
+			}
+			raw, _ := json.Marshal(node)
+			if _, e := setupConfig(raw, catalog, false); e != nil {
+				t.Errorf("%s: %v", node["title"], e)
+			}
+		}
+	}
+}
+
 // fakeCloud is the hosted AwwO's relay as an AwwO 云端 connection reads it: its /models for one key, and what it reads.
+// It names its Opus model (opusName, Claude Opus 5.5 at first) and not its GLM one, as a site whose worker gives none.
 type fakeCloud struct {
 	*httptest.Server
-	reads   atomic.Int32
-	status  atomic.Int32
-	empty   atomic.Bool
-	glmOnly atomic.Bool  // it lists the GLM model alone
-	delay   atomic.Int64 // how long it holds each answer
+	reads    atomic.Int32
+	status   atomic.Int32
+	empty    atomic.Bool
+	glmOnly  atomic.Bool  // it lists the GLM model alone
+	opusName atomic.Value // the name it publishes for its Opus model
+	delay    atomic.Int64 // how long it holds each answer
 	// delayNext holds the next answers each longer by its next duration, one each.
 	delayNext chan time.Duration
 	// asking is how many reads it is answering now; most, the most it ever answered at once.
@@ -250,6 +340,7 @@ const cloudKey = "awwo_rk_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq"
 func newFakeCloud(t *testing.T) *fakeCloud {
 	f := &fakeCloud{delayNext: make(chan time.Duration, 4)}
 	f.status.Store(200)
+	f.opusName.Store("Claude Opus 5.5")
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/relay/v1/models" || r.Method != "GET" {
 			t.Errorf("unexpected cloud call %s %s", r.Method, r.URL.Path)
@@ -260,6 +351,7 @@ func newFakeCloud(t *testing.T) *fakeCloud {
 		}
 		// Its answer is as it stood when the request came, however late it is sent.
 		status, empty, glmOnly := int(f.status.Load()), f.empty.Load(), f.glmOnly.Load()
+		opusName, _ := json.Marshal(f.opusName.Load())
 		wait := time.Duration(f.delay.Load())
 		select {
 		case d := <-f.delayNext:
@@ -287,7 +379,7 @@ func newFakeCloud(t *testing.T) *fakeCloud {
 			return
 		}
 		io.WriteString(w, `{"object":"list","data":[
-			{"id":"bedrock.claude-opus-5-5","context_window":200000,"max_output_tokens":32000,"prose_bytes_per_token":3.4,"reasoning_efforts":[]},
+			{"id":"bedrock.claude-opus-5-5","name":`+string(opusName)+`,"context_window":200000,"max_output_tokens":32000,"prose_bytes_per_token":3.4,"reasoning_efforts":[]},
 			{"id":"bedrock.glm-5","context_window":128000,"max_output_tokens":16000,"prose_bytes_per_token":1},
 			{"id":"tiny","context_window":1000,"max_output_tokens":10}]}`)
 	}))
@@ -388,6 +480,16 @@ func TestPostgresCloudConnectionRunsOnTheHostedModelsAndTheirLimits(t *testing.T
 		opus.MaxOutputTokens != 32000 || glm.MaxContextTextBytes != glmBudget || glm.ProseBytesPerToken != 1 {
 		t.Fatal("a hosted model's limits", opus, glm)
 	}
+	// Each goes by the name the hosted site publishes for it, the GLM model, which it names not, by its id; their selectors,
+	// labels and the models they run as are the hosted site's ids, as before. A run is told the name too.
+	if opus.Name != "Claude Opus 5.5" || glm.Name != "bedrock.glm-5" || opus.ID != connectionModelID(id, "bedrock.claude-opus-5-5") ||
+		opus.ProviderModel != "bedrock.claude-opus-5-5" || opus.Label != "bedrock.claude-opus-5-5 · AwwO 云端 · AwwO Cloud · awwo / "+id[len(id)-6:] ||
+		glm.Label != "bedrock.glm-5 · AwwO 云端 · AwwO Cloud · awwo / "+id[len(id)-6:] {
+		t.Fatal("a hosted model's name", opus, glm)
+	}
+	if note := h.a.modelIdentity(catalog, opus.ID); !strings.Contains(note, "you run on Claude Opus 5.5 (AwwO model id "+opus.ID+")") {
+		t.Fatal("the model a run is told it runs on", note)
+	}
 	// The default model (the first) runs within its own limits, as any other does.
 	if budget, _, ok := catalog.modelLimits(""); !ok || budget != opusBudget || catalog.modelRate("") != 3.4 {
 		t.Fatal("the default model's limits", budget, ok, catalog.modelRate(""))
@@ -423,8 +525,9 @@ func TestPostgresCloudConnectionRunsOnTheHostedModelsAndTheirLimits(t *testing.T
 		t.Fatal("models offered before their limits are known")
 	}
 	settleCloudReads(t, h.a)
-	if catalog, e = h.a.personalRuntime(ctx, runtimePI, false); e != nil || len(catalog.Models) != 2 || cloud.reads.Load() != 2 {
-		t.Fatal("read in the background", catalog, e, cloud.reads.Load())
+	if catalog, e = h.a.personalRuntime(ctx, runtimePI, false); e != nil || len(catalog.Models) != 2 || cloud.reads.Load() != 2 ||
+		catalog.Models[0].Name != "Claude Opus 5.5" {
+		t.Fatal("read in the background, names and all", catalog, e, cloud.reads.Load())
 	}
 	clearCloudModels(h.a)
 	if _, e = h.a.personalAdmission(context.Background(), runtimePI, raw); e != nil || cloud.reads.Load() != 3 {
@@ -458,6 +561,9 @@ func TestPostgresCloudConnectionRunsOnTheHostedModelsAndTheirLimits(t *testing.T
 	if catalog, e = h.a.personalRuntime(ctx, runtimePI, false); e != nil || len(catalog.Models) != 2 || cloud.reads.Load() != reads+1 {
 		t.Fatal("the last limits kept while out of reach, read again only a minute later", e, cloud.reads.Load())
 	}
+	if catalog.Models[0].Name != "Claude Opus 5.5" {
+		t.Fatal("the last names kept with them", catalog.Models[0])
+	}
 	// A key the hosted site no longer takes offers no model, once it has said so.
 	aged()
 	cloud.status.Store(401)
@@ -476,10 +582,12 @@ func TestPostgresCloudConnectionRunsOnTheHostedModelsAndTheirLimits(t *testing.T
 	if _, e = h.a.personalRuntime(ctx, runtimePI, false); e == nil {
 		t.Fatal("the models of a key just refused")
 	}
+	// A name the hosted site publishes since is the one shown once it is read again.
 	cloud.status.Store(200)
+	cloud.opusName.Store("Claude Opus 5.5 renamed")
 	h.request(t, owner, "POST", "/auth/connections/"+id+"/refresh", nil, 200)
-	if catalog, e = h.a.personalRuntime(ctx, runtimePI, false); e != nil || len(catalog.Models) != 2 {
-		t.Fatal("refreshed", e)
+	if catalog, e = h.a.personalRuntime(ctx, runtimePI, false); e != nil || len(catalog.Models) != 2 || catalog.Models[0].Name != "Claude Opus 5.5 renamed" {
+		t.Fatal("refreshed", catalog, e)
 	}
 	h.request(t, owner, "DELETE", "/auth/connections/"+id, nil, 204)
 	if _, kept := h.a.cloudEntry(id); kept {
@@ -500,8 +608,9 @@ func TestPostgresCloudConnectionsAreReadWhenTheLocalEditionStarts(t *testing.T) 
 		t.Fatal("read at start", entry, cloud.reads.Load())
 	}
 	ctx := context.WithValue(context.Background(), userKey{}, User{ID: uid})
-	if catalog, e := h.a.personalRuntime(ctx, runtimePI, false); e != nil || len(catalog.Models) != 2 || cloud.reads.Load() != 2 {
-		t.Fatal("the first catalog after a start", e)
+	if catalog, e := h.a.personalRuntime(ctx, runtimePI, false); e != nil || len(catalog.Models) != 2 || cloud.reads.Load() != 2 ||
+		catalog.Models[0].Name != "Claude Opus 5.5" {
+		t.Fatal("the first catalog after a start, names and all", e)
 	}
 	// One read at a time for each connection, and none once the API is closing.
 	clearCloudModels(h.a)

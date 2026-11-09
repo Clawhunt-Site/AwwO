@@ -612,6 +612,12 @@ func (a *App) personalRuntime(ctx context.Context, runtime string, workerStructu
 					continue
 				}
 				m.MaxContextTextBytes, m.ProseBytesPerToken, m.MaxOutputTokens = cloudBudget(limits), limits.ProseBytesPerToken, limits.MaxOutputTokens
+				// It goes by the name the hosted site publishes for it (Claude Opus 5.5), as there, not by the hosted site's
+				// own id for it (bedrock.claude-opus-5-5), which names the service it is reached through; by its id where the
+				// hosted site gives no name it can show (cloudModelName). Its selector and label stay as they are.
+				if limits.Name != "" {
+					m.Name = limits.Name
+				}
 			}
 			h.Models = append(h.Models, m)
 		}

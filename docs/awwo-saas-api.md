@@ -400,7 +400,7 @@ AwwO 本地版可以让线上站点替它调用线上提供的模型，每次调
 | GET /auth/relay-keys | 无 | 登录会话。`{items,limit}`：本账号的有效密钥与最近撤销的 20 个（id、name、prefix、tenant、createdAt、expiresAt、lastUsedAt、revokedAt），不含密钥本身 |
 | POST /auth/relay-keys | name?（≤ 80 字，默认「AwwO 本地版」）, tenantId | 登录会话。201 `{key,item}`：密钥（`awwo_rk_` 加 43 个字符）只在这次返回，只保存其 SHA-256，90 天后失效；须是该工作区的成员且工作区正常（否则 404 `tenant_not_found`），并且是它的所有者或管理员（工作区所有者的套餐为密钥的调用付费；member 与 reader 403 `forbidden`，迁移 059 起）；用的时候也要求密钥的人仍是所有者或管理员，否则 403 `relay_key_forbidden`；每个账号最多 5 个有效密钥（409 `relay_key_limit`）；会话在此期间结束（例如密码刚被修改）时 401 |
 | DELETE /auth/relay-keys/{id} | 无 | 204 撤销；不是本账号的或已撤销的 404 |
-| GET /relay/v1/models | `Authorization: Bearer <密钥>` | `{object:"list",data}`：工作区可用的模型（按其 entitlement），每个带 `context_window`、`max_output_tokens`、`prose_bytes_per_token`、`max_request_bytes`（504 KiB）和空的 `reasoning_efforts` |
+| GET /relay/v1/models | `Authorization: Bearer <密钥>` | `{object:"list",data}`：工作区可用的模型（按其 entitlement），每个带 `name`（执行器目录里的模型名，如 Claude Opus 5.5，目录没有时为其 id；本地版的模型选择以它显示）、`context_window`、`max_output_tokens`、`prose_bytes_per_token`、`max_request_bytes`（504 KiB）和空的 `reasoning_efforts` |
 | POST /relay/v1/chat/completions | Chat Completions，`stream:true` | SSE：开头一行 `: awwo relay`，模型工作时每 15 秒一行 `: keep-alive`，然后答复块、用量块与 `[DONE]`；失败时一个 `error` 帧，只说明类别 |
 
 **密钥** 由程序使用：带任何 Origin 的请求一律拒绝（403 `relay_browser_refused`），网页拿到密钥也用不了。密钥只对创建它的工作区有效，每次认证与准入都核对它仍有效、成员仍是 member 以上、工作区正常；成员被移出工作区或降为只读、密码被修改或重设时，相应的密钥一并撤销，之后恢复角色也不会复活。

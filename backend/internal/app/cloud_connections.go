@@ -7,15 +7,17 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // AwwO 云端: a personal connection of the local edition whose models the hosted AwwO runs (its relay, relay.go), with a
 // key its person made there (设置 → 本机版连接). Its calls count against that hosted account, as the owner chose
-// (「计入线上账号」). Its models and their limits are the hosted site's own (its /models): read when the connection is
-// saved or refreshed, and again when they are needed after a while, since a hosted model's window is not the 32,768
-// tokens the other personal connections are held to.
+// (「计入线上账号」). Its models, their names and their limits are the hosted site's own (its /models): read when the
+// connection is saved or refreshed, and again when they are needed after a while, since a hosted model's window is not
+// the 32,768 tokens the other personal connections are held to.
 
 const cloudProviderID = "awwo"
 
@@ -38,12 +40,32 @@ func (a *App) connectionProvider(id string) (connectionProvider, bool) {
 
 // cloudModel is one hosted model's limits, as the hosted /models lists them: its window, its output, its prose rate, and
 // the largest request the relay reads (relayModels; the relay's own limit, relayBodyLimit, where an older site says
-// none).
+// none); and its name, as cloudModelName keeps it.
 type cloudModel struct {
 	ContextWindow      int     `json:"context_window"`
 	MaxOutputTokens    int     `json:"max_output_tokens"`
 	ProseBytesPerToken float64 `json:"prose_bytes_per_token"`
 	MaxRequestBytes    int     `json:"max_request_bytes"`
+	Name               string  `json:"-"`
+}
+
+// cloudModelNameBytes is the longest a hosted model's name may be, in bytes: as long as its id may be
+// (providerModelPattern). A node the model rail adds takes the name as its title, with a persona's name after it
+// (apps/web canvasModelDrop.ts), and a node's title is held to 200 bytes when it is set up (setupConfig, cleanName).
+const cloudModelNameBytes = 160
+
+// cloudModelName is the name the hosted site publishes for a model (relayModels: its worker's catalog name, such as
+// Claude Opus 5.5), as a picker may show it: trimmed, at most 80 characters, as modelIdentity takes a name, and
+// cloudModelNameBytes bytes, with no line break, tab or replacement character and nothing that shows as nothing or
+// reorders text (invisible). "" for none, or for one that is not such a name: the model then goes by its id, as before.
+func cloudModelName(name string) string {
+	name = strings.TrimSpace(name)
+	if len(name) > cloudModelNameBytes || utf8.RuneCountInString(name) > 80 || strings.ContainsFunc(name, func(r rune) bool {
+		return r == '\n' || r == '\t' || r == utf8.RuneError || invisible(r)
+	}) {
+		return ""
+	}
+	return name
 }
 
 // cloudBudget is how much of a hosted model's window a run here may fill: what the hosted worker takes (the window less
@@ -73,7 +95,7 @@ var (
 )
 
 // discoverCloudModels reads the hosted models a connection key may run (GET /models with it): their ids, in the hosted
-// site's order, and their limits. A model whose limits do not hold is left out.
+// site's order, and their limits and names. A model whose limits do not hold is left out.
 func (a *App) discoverCloudModels(ctx context.Context, key string) ([]string, map[string]cloudModel, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -95,6 +117,8 @@ func (a *App) discoverCloudModels(ctx context.Context, key string) ([]string, ma
 	var list struct {
 		Data []struct {
 			ID string `json:"id"`
+			// Read apart from the limits: a name that is not a string is none, and leaves its model and the list as they are.
+			Name json.RawMessage `json:"name"`
 			cloudModel
 		} `json:"data"`
 	}
@@ -108,6 +132,10 @@ func (a *App) discoverCloudModels(ctx context.Context, key string) ([]string, ma
 		m.ProseBytesPerToken = math.Floor(min(max(m.ProseBytesPerToken, 1), 4)*20+1e-9) / 20
 		if m.MaxRequestBytes <= 0 {
 			m.MaxRequestBytes = relayBodyLimit
+		}
+		var name string
+		if json.Unmarshal(m.Name, &name) == nil {
+			m.cloudModel.Name = cloudModelName(name)
 		}
 		if !personalTextModel(m.ID) || models[m.ID] != (cloudModel{}) || m.ContextWindow < 4096 || m.ContextWindow > 2_000_000 ||
 			m.MaxOutputTokens < 1 || m.MaxOutputTokens+256 >= m.ContextWindow || m.MaxRequestBytes > 64<<20 || cloudBudget(m.cloudModel) < 1024 {
