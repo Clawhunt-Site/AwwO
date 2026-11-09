@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { cardFailure, EditError, soundFailure } from './edit-run.mjs';
-import { parseCapture, partBytes, RenderError, wavFile, writeAll } from './render.mjs';
+import { addPageSound, parseCapture, partBytes, RenderError, SOUND_PAGE_FAULTS, soundNotes, wavFile, writeAll } from './render.mjs';
 
 const refused = (fn, detail, words) => assert.throws(fn, (error) => error instanceof RenderError && error.detail === detail && error.message.includes(words), `${detail}: ${words}`);
 
@@ -32,6 +32,8 @@ test('a capture answer is taken only as the numbers it can be', () => {
   ]) refused(() => parseCapture(answer, 1), 'sound_failed', 'could not be read');
   refused(() => parseCapture('ok:48000,45000,48000,0,0,0.5', 1), 'sound_too_short', 'made 0.938 s of sound, not 1 s');
   assert.equal(parseCapture('ok:48000,47600,48000,0,0,0.5', 1).available, 47600, 'up to 50 ms short is padding');
+  // A render asks for its picture's length, 13 frames at 24 fps here: said to the millisecond.
+  refused(() => parseCapture('ok:48000,1000,26000,0,0,0.5', 13 / 24), 'sound_too_short', 'made 0.021 s of sound, not 0.542 s');
 });
 
 test('a part is taken only when it is exactly the bytes asked for', () => {
@@ -105,4 +107,71 @@ test('a write the disk stores only part of is written again until whole, and one
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("a render names its sound page's notes sound_, and leaves out the ones its picture says of the same page", () => {
+  assert.deepEqual(soundNotes(['ready_timeout', 'fonts_timeout', 'sound_clipped:3', 'sound_not_finite:1', 'sound_silent', 'page_errors:2', 'network_blocked:4']),
+    ['sound_clipped:3', 'sound_not_finite:1', 'sound_silent', 'sound_page_errors:2', 'sound_network_blocked:4']);
+  assert.deepEqual(soundNotes([]), []);
+});
+
+test("the page's own sound faults are one list, which an edit refuses its timeline for and a render leaves its sound out for", () => {
+  assert.deepEqual([...SOUND_PAGE_FAULTS].sort(), ['page_load_failed', 'page_waits_on_timers', 'sound_failed', 'sound_missing', 'sound_too_short', 'timeout']);
+  const entry = { id: 'score', track: 'music', trackIndex: 0 };
+  for (const detail of SOUND_PAGE_FAULTS) assert.equal(soundFailure(entry, new RenderError(detail, 'why', detail === 'page_waits_on_timers' ? 400 : 422)).status, 400, detail);
+  for (const detail of ['render_timeout', 'render_failed', 'aborted']) assert.equal(soundFailure(entry, new RenderError(detail, 'why')).detail, 'sound_render_failed', detail);
+});
+
+// The sound stage's own decisions (render.mjs addPageSound), its sound made by a stand-in: no browser, and every case
+// here ends before the sound would reach ffmpeg.
+function soundStage() {
+  const controller = new AbortController();
+  const stage = new AbortController();
+  const state = {
+    signal: controller.signal, soundWarnings: [], soundReason: '', log: () => {},
+    halted: () => controller.signal.aborted, stopped: () => new RenderError('aborted', 'The render was stopped'),
+  };
+  // 1.04 s at 12 fps is 12 frames: a picture of exactly 1 s.
+  const request = { renderId: 'stage-test-1', html: '<!doctype html><html></html>', seconds: 1.04, frames: 12, fps: 12 };
+  const files = { sound: 's.wav', level: 'l.wav', mp4: 'm.mp4', film: 'f.mp4' };
+  const config = { timeoutMs: 8000, ffmpeg: 'ffmpeg-is-not-reached', ffprobe: 'ffprobe-is-not-reached' };
+  return { controller, stage, state, run: (make) => addPageSound(request, config, state, files, stage, { log: () => {}, soundTimeoutMs: 1000, make }) };
+}
+const SILENCE = { frames: 12000, pageFrames: 12000, sampleRate: 12000, peak: 0, warnings: ['sound_silent'] };
+
+test('a stop that comes while the page\'s sound is made stops the render, even when that sound turns out silent', async () => {
+  const { controller, state, run } = soundStage();
+  await assert.rejects(run(async () => { controller.abort(); return SILENCE; }), (error) => error.detail === 'aborted');
+  assert.deepEqual([state.soundWarnings, state.soundReason], [[], '']);
+});
+
+test('the render\'s limit, reached while the page\'s sound is made, leaves the sound out and says so', async () => {
+  const { stage, state, run } = soundStage();
+  assert.equal(await run(async () => { stage.abort(); return SILENCE; }), null);
+  assert.deepEqual([state.soundWarnings, state.soundReason],
+    [['sound_failed'], "The render reached its limit of 8 s while the page's sound was being made: render fewer frames to leave time for it"]);
+});
+
+test('a silent sound adds none, a page\'s fault leaves its sound out in its own words, and the worker\'s own failure fails the render', async () => {
+  let stage = soundStage();
+  assert.equal(await stage.run(async () => SILENCE), null);
+  assert.deepEqual([stage.state.soundWarnings, stage.state.soundReason], [['sound_silent'], '']);
+  stage = soundStage();
+  assert.equal(await stage.run(async () => { throw new RenderError('sound_failed', 'window.renderAudio failed: no score yet'); }), null);
+  assert.deepEqual([stage.state.soundWarnings, stage.state.soundReason], [['sound_failed'], 'window.renderAudio failed: no score yet']);
+  // A sound that outran its budget is said as a sentence of its own, not as the clause that ends an edit's.
+  stage = soundStage();
+  assert.equal(await stage.run(async () => { throw new RenderError('timeout', 'it took longer than 1 s to make (time stands still while it is made)'); }), null);
+  assert.equal(stage.state.soundReason,
+    "The page's sound took longer than 1 s to make: time stands still while it is made, so a renderAudio that waits for a timer or an animation frame never finishes");
+  stage = soundStage();
+  await assert.rejects(stage.run(async () => { throw new RenderError('browser_unavailable', 'The browser could not be started', 503); }), (error) => error.status === 503);
+  stage = soundStage();
+  await assert.rejects(stage.run(async () => { throw new RenderError('render_failed', 'The sound capture failed in the page'); }), (error) => error.detail === 'render_failed');
+  assert.deepEqual(stage.state.soundWarnings, []);
+  // Its sound is asked for the picture's own length (frames / fps), whatever the request's seconds said.
+  stage = soundStage();
+  let asked;
+  await stage.run(async (sound) => { asked = sound.seconds; return SILENCE; });
+  assert.equal(asked, 1);
 });

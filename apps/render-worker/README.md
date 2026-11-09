@@ -2,8 +2,9 @@
 
 An internal service that turns a self-contained HTML animation page into an MP4 (plus, on request, a GIF, a
 contact sheet and still frames). It opens the page in a fresh headless Chromium, freezes it at every frame time,
-screenshots each frame and pipes the PNGs to ffmpeg. Only the AwwO API calls it (`backend/internal/app/renders.go`,
-enabled by `AWWO_RENDER_URL` + `AWWO_RENDER_TOKEN`); the videos become artifacts of the canvas.
+screenshots each frame and pipes the PNGs to ffmpeg; a page that defines `window.renderAudio` gets its own sound in
+the MP4. Only the AwwO API calls it (`backend/internal/app/renders.go`, enabled by `AWWO_RENDER_URL` +
+`AWWO_RENDER_TOKEN`); the videos become artifacts of the canvas.
 
 ## Render contract for pages
 
@@ -21,6 +22,22 @@ frames 0 … N-1 and repeats seamlessly.
   `Math.random` (seeded, so the same every render) are replaced; time stands still between frames, so a frame shows
   exactly its `t` however long the screenshot takes. Timers fire at their own due times; at most 10,000 timer
   firings per frame (warning `timer_limit`). Web workers and cross-origin frames keep real time.
+- **`window.renderAudio`** (optional, and defined by every film made with AwwO's film kit): the video carries the
+  page's own sound. Once the frames, the GIF and the contact sheet are made, the page is opened once more in a fresh
+  browser of its own, exactly as an edit's page sound is (see "Sounds a page makes" below: the same walls, virtual
+  clock and held-clock watch), and `renderAudio({seconds, sampleRate})` is called once for the picture's own length
+  (`N / fps` seconds, asked at 48 kHz), with 120 s to make it. The sound is levelled to the edit node's -16 LUFS and
+  -1 dBTP in the same two `loudnorm` passes, faded out over its last 60 ms when the page made more than the render keeps
+  (more than 50 ms past it, as a film longer than the render does), and muxed as AAC (192 kbps, 48 kHz, stereo,
+  `-aac_pns 0`) beside the picture's own frames, which are copied: the picture is the one the same page without
+  `renderAudio` gives, packet for packet. The MP4 is read back (one AAC stream, the picture's length) and its sound
+  measured again (the reply's `sound`). A page whose sound cannot be made through its own doing (`renderAudio` throws,
+  gives something else or too little, waits on its own clock or takes longer than its 120 s; the page does not load,
+  crashes or navigates), or whose sound is not made by the time the render reaches its limit (`AWWO_RENDER_TIMEOUT_MS`
+  ends only the sound once the picture is made), keeps its silent video, with the warning `sound_failed` and the
+  reply's `soundReason` saying why; a sound that is silence (every sample 0, or under -70 LUFS) adds none
+  (`sound_silent`). What the worker itself cannot do (start the browser, store the sound: 503; ffmpeg failing on its
+  own files) fails the render as before. A page without `renderAudio` renders silent, as it always has.
 - **`window.__ready`**: a page that defines it is waited for (up to 10 s) until it is `true`, after `load` and
   `document.fonts.ready` (warnings `ready_timeout`, `fonts_timeout`). Its timers and animation frames do not run in
   that wait, so a page that sets `__ready` from one waits all 10 s and is rendered before it is ready.
@@ -131,15 +148,24 @@ Reply 200:
 ```json
 {"renderId", "mode": "contract|virtual-time", "frames", "fps", "width", "height", "seconds", "distinctFrames",
  "elapsedMs", "probe": {"frames", "width", "height", "duration"}, "warnings": [], "pageErrors": [],
+ "sound": null | {"codec": "aac", "sampleRate": 48000, "channels": 2, "seconds",
+   "loudness": {"integratedLUFS", "truePeakDb", "rangeLU"}, "pageSampleRate", "peak", "faded"},
+ "soundReason": "…",
  "outputs": [{"kind": "mp4|gif|contact|still", "frame": 0, "contentType", "size", "sha256", "data"}]}
 ```
 
 `data` is base64 of the file, `sha256` the hex digest of its bytes, `frame` only on stills (PNG). `pageErrors`
-keeps the first three messages (≤ 200 characters each). Warnings: `static_page` (every frame identical),
-`page_errors:<n>`, `network_blocked:<n>`, `gif_fps_reduced` (a GIF over 350 frames drops to `floor(350 / seconds)`
-fps), `gif_too_large` (> 15 MiB, left out), `contact_too_large` (> 10 MiB), `gif_failed` / `contact_failed` (left
-out; the MP4 stands), `still_too_large` (stills that would take the reply over 112 MiB of files),
-`ready_timeout`, `fonts_timeout`, `timer_limit`, `probe_frames:<n>` (ffprobe counted other than N).
+keeps the first three messages (≤ 200 characters each). `probe` reads the picture before any sound is added. `sound`
+is null for a silent video; for one that carries its page's sound it gives the sound's stream, its loudness as
+measured from the video, the rate the page made it at, the page's own peak (before levelling) and whether its end was
+faded. `soundReason`, only with `sound_failed`, is why the page's sound was left out: the renderer's words, or what the
+page threw. Warnings: `static_page` (every frame identical), `page_errors:<n>`, `network_blocked:<n>`,
+`gif_fps_reduced` (a GIF over 350 frames drops to `floor(350 / seconds)` fps), `gif_too_large` (> 15 MiB, left
+out), `contact_too_large` (> 10 MiB), `gif_failed` / `contact_failed` (left out; the MP4 stands), `still_too_large`
+(stills that would take the reply over 112 MiB of files), `ready_timeout`, `fonts_timeout`, `timer_limit`,
+`probe_frames:<n>` (ffprobe counted other than N); of the page's sound: `sound_failed` (left out, the video is
+silent), `sound_silent` (it was silence: none added), `sound_clipped:<frames>` and `sound_not_finite:<frames>` (as an
+edit's page sound), `sound_page_errors:<n>` and `sound_network_blocked:<n>` (the page's while its sound was made).
 
 Failures:
 
@@ -170,7 +196,8 @@ media directory. A job holds the worker like a render does, so a render waits wh
 | `DELETE /internal/edits/{id}` | stops and removes the job (204); a job left without a request for `AWWO_EDIT_IDLE_MS` is removed too |
 
 How it renders (`edit-run.mjs`, argument lists in `edit-ffmpeg.mjs`): cards through the page renderer at the film's
-size (a card whose `renderAt` waits on its own clock is refused as the timeline's fault, 400 `INVALID_EDIT` on
+size, as pictures alone (a card's own `renderAudio` is never made: the film's sound is the timeline's, a page sound
+item included; a card whose `renderAt` waits on its own clock is refused as the timeline's fault, 400 `INVALID_EDIT` on
 `tracks.video[<i>].card` with the renderer's reason; a card that fails otherwise is 422 `card_failed`); every picture
 piece (an item's own frames, and each transition as its own piece through `xfade`) encoded once
 from its source at the film's settings (a clip's picture stream as the probe measured it; a picture, PNG, JPEG, WebP or
@@ -271,7 +298,10 @@ microtask, a `renderAt` and a `renderAudio` that wait on their own clock, refuse
 at once, set `__ready` from a timer, or wait longer with timers of their own pending, made as before: a busy main
 thread, a worker on its own timer, an `AbortSignal.timeout`, a delayed `scheduler.postTask`, animations of an element
 that is not drawn, of one not in the document and of none, an `OfflineAudioContext`, real-time audio, an audio element;
-an abort) and check that the launch
+an abort; a page with a `renderAudio`, whose MP4 carries its sound at -16 LUFS beside the very picture the same page
+without one gives, read back with ffprobe and ffmpeg's own meter, and the sound left out of a video, said why, when it
+throws, is short, waits on its own clock, is silence or meets the render's limit, faded when the render cuts it, and
+stopped with the render) and check that the launch
 flags alone refuse local hosts and IPs. With `AWWO_RENDER_CHROME_SANDBOX=1` (the default) on Linux they run as
 production does, Chromium's own sandbox on. `network.test.mjs` keeps `cdn-allowlist.json` equal to the web preview's
 `LIVE_CDNS`; change both together. `awwo-check-page`, the sandbox's page check (`deploy/saas/workspace`), loads a page

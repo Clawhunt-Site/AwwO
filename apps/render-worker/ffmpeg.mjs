@@ -49,6 +49,22 @@ export function parseProbe(stdout) {
   return probe;
 }
 
+/** Every sound stream of a video (a render that carries its page's sound has exactly one). */
+export function soundProbeArgs(input) {
+  return ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_name,sample_rate,channels,duration', '-of', 'json', input];
+}
+
+/** ffprobe's JSON → [{codec, sampleRate, channels, duration}], one per sound stream; anything else is an encoder failure. */
+export function parseSoundProbe(stdout) {
+  const parsed = JSON.parse(String(stdout));
+  if (!Array.isArray(parsed?.streams)) throw new Error('ffprobe returned no stream list');
+  return parsed.streams.map((stream) => {
+    const sound = { codec: String(stream?.codec_name ?? ''), sampleRate: Number(stream?.sample_rate), channels: Number(stream?.channels), duration: Number(stream?.duration) };
+    if (![sound.sampleRate, sound.channels, sound.duration].every(Number.isFinite)) throw new Error('ffprobe returned a sound stream it could not measure');
+    return sound;
+  });
+}
+
 /** The only variables a child process (ffmpeg, ffprobe, the browser) is given. */
 export const CHILD_ENV_NAMES = Object.freeze(['PATH', 'SystemRoot', 'SYSTEMROOT', 'TEMP', 'TMP', 'HOME', 'LANG']);
 

@@ -2,13 +2,14 @@
 // ffmpeg and ffprobe come from AWWO_RENDER_FFMPEG / AWWO_RENDER_FFPROBE or PATH.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
 import { loadConfig, validateRenderRequest } from './config.mjs';
+import { runProcess } from './ffmpeg.mjs';
 import { chromeArgs, renderPage, renderPageSound } from './render.mjs';
 
 const CHROME = process.env.AWWO_RENDER_TEST_CHROME;
@@ -440,5 +441,135 @@ test('a page that cannot give its sound is refused with the reason, and one that
   ]) {
     await assert.rejects(sound(html, 1), (error) => error.status === 422 && error.detail === detail && error.message.includes(words), `${detail}: ${html.slice(0, 120)}`);
   }
+  assert.deepEqual(readdirSync(TMP), []);
+});
+
+// A render's own sound: a page that defines window.renderAudio gets its sound in its MP4 (render.mjs addPageSound).
+// What a video holds is read here with ffprobe and ffmpeg's own meter, not with the worker's measurement.
+const PROBES = CHROME ? mkdtempSync(path.join(os.tmpdir(), 'awwo-render-probe-')) : os.tmpdir();
+test.after(() => { if (CHROME) rmSync(PROBES, { recursive: true, force: true }); });
+
+/**
+ * A rendered MP4 as ffmpeg reads it (written outside TMP, which every render must leave empty): its streams, the MD5 of
+ * its picture's packets, and for its sound stream (if any) ffmpeg's EBU R128 meter and the samples, decoded to mono.
+ */
+async function readVideo(mp4) {
+  const config = configWith();
+  const file = path.join(PROBES, `v_${Math.random().toString(36).slice(2, 10)}.mp4`);
+  writeFileSync(file, mp4);
+  try {
+    const { streams } = JSON.parse(String((await runProcess(config.ffprobe, ['-v', 'error', '-show_entries',
+      'stream=codec_type,codec_name,sample_rate,channels,duration,nb_frames', '-of', 'json', file])).stdout));
+    const sound = streams.filter((stream) => stream.codec_type === 'audio');
+    const picture = String((await runProcess(config.ffmpeg, ['-v', 'error', '-i', file, '-map', '0:v:0', '-c', 'copy', '-f', 'md5', '-'])).stdout).trim();
+    if (sound.length === 0) return { streams, sound, picture, loudness: null, samples: null };
+    const meter = (await runProcess(config.ffmpeg, ['-hide_banner', '-nostats', '-i', file, '-map', '0:a:0', '-af', 'ebur128=peak=true', '-f', 'null', '-'])).stderr;
+    const reading = (pattern) => { const match = pattern.exec(meter.slice(meter.lastIndexOf('Summary:'))); return match ? Number(match[1]) : Number.NaN; };
+    const loudness = { i: reading(/I:\s+(-?[\d.]+) LUFS/), lra: reading(/LRA:\s+(-?[\d.]+) LU/), peak: reading(/Peak:\s+(-?[\d.]+) dBFS/) };
+    const raw = (await runProcess(config.ffmpeg, ['-v', 'error', '-i', file, '-map', '0:a:0', '-ac', '1', '-ar', '48000', '-f', 's16le', '-'], { maxStdout: 64 << 20 })).stdout;
+    return { streams, sound, picture, loudness, samples: new Int16Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.length - (raw.length % 2))) };
+  } finally {
+    rmSync(file, { force: true });
+  }
+}
+/** The RMS of samples [from, to). */
+function rms(samples, from, to) {
+  let sum = 0;
+  for (let index = from; index < to; index += 1) sum += samples[index] * samples[index];
+  return Math.sqrt(sum / (to - from));
+}
+/** A contract page drawing a moving square, with `audio` as the body of its window.renderAudio({seconds, sampleRate}), or none. */
+const filmPage = (audio = null) => `<!doctype html><html><body style="margin:0"><canvas id="c" width="160" height="90"></canvas><script>
+const ctx = document.getElementById('c').getContext('2d');
+window.renderAt = (t) => { ctx.fillStyle = '#123'; ctx.fillRect(0, 0, 160, 90); ctx.fillStyle = '#fc4'; ctx.fillRect(t * 120, 25, 40, 40); };
+${audio === null ? '' : `window.renderAudio = async ({ seconds, sampleRate }) => { ${audio} };`}
+</script></body></html>`;
+/** A 440 Hz tone of the given amplitude, `length` seconds long, on the left channel (which the worker puts on both). */
+const tone = (amplitude, length = 'seconds') => `const n = Math.round(${length} * sampleRate); const left = new Float32Array(n);
+for (let i = 0; i < n; i += 1) left[i] = ${amplitude} * Math.sin(2 * Math.PI * 440 * i / sampleRate);
+return { sampleRate, channels: [left] };`;
+
+test('a page that defines renderAudio gets its own sound in the MP4, levelled to the edit\'s target, beside the very picture a silent render makes', { skip, timeout: 120_000 }, async () => {
+  const sounding = await renderPage(request(filmPage(tone(0.05)), { outputs: ['mp4', 'gif', 'contact'] }), configWith(), { log: () => {} });
+  const video = await readVideo(checkOutputs(sounding));
+  assert.deepEqual(sounding.outputs.map((output) => output.kind), ['mp4', 'gif', 'contact']);
+  assert.deepEqual([sounding.mode, sounding.frames, sounding.warnings, sounding.pageErrors, sounding.soundReason], ['contract', 12, [], [], undefined]);
+  const { loudness, ...facts } = sounding.sound;
+  assert.deepEqual(facts, { codec: 'aac', sampleRate: 48000, channels: 2, seconds: 1, pageSampleRate: 48000, peak: 0.05, faded: false });
+  assert.ok(Math.abs(loudness.integratedLUFS + 16) <= 0.5 && loudness.truePeakDb <= -1, JSON.stringify(loudness));
+  // Read back: one AAC stream, 48 kHz stereo, the picture's length, at the edit node's -16 LUFS (the tone was -26.7).
+  assert.deepEqual(video.sound.map((stream) => [stream.codec_name, Number(stream.sample_rate), stream.channels]), [['aac', 48000, 2]]);
+  assert.ok(Math.abs(Number(video.sound[0].duration) - 1) <= 0.03, `sound ${video.sound[0].duration} s`);
+  assert.ok(Math.abs(video.loudness.i + 16) <= 0.5 && video.loudness.peak < -1, JSON.stringify(video.loudness));
+  assert.equal(video.streams.find((stream) => stream.codec_type === 'video').nb_frames, '12');
+  // The same page without a renderAudio renders silent, as before, and to the same picture, packet for packet; so does
+  // this page for a caller that asks for no sound (an edit's card).
+  const silent = await renderPage(request(filmPage()), configWith(), { log: () => {} });
+  const quiet = await readVideo(checkOutputs(silent));
+  assert.deepEqual([silent.sound, silent.soundReason, silent.warnings, quiet.sound.length], [null, undefined, [], 0]);
+  assert.equal(video.picture, quiet.picture);
+  const unasked = await renderPage(request(filmPage(tone(0.05))), configWith(), { log: () => {}, sound: false });
+  const plain = await readVideo(checkOutputs(unasked));
+  assert.deepEqual([unasked.sound, unasked.warnings, plain.sound.length, plain.picture], [null, [], 0, quiet.picture]);
+});
+
+test('a page whose sound cannot be made keeps its picture, silent, and the reply says why; a silent sound adds none', { skip, timeout: 180_000 }, async () => {
+  for (const [audio, words] of [
+    ["throw new Error('the score is not written yet');", 'window.renderAudio failed: the score is not written yet'],
+    ['return { sampleRate, channels: [new Float32Array(sampleRate / 4)] };', 'The page made 0.250 s of sound, not 1 s'],
+    // One that waits on its own clock is refused within seconds, as for an edit, not at its 120 s.
+    ['await new Promise((resolve) => setTimeout(resolve, 10)); return { sampleRate, channels: [new Float32Array(sampleRate)] };',
+      'window.renderAudio had not settled after 5 s, in which the page did no work the renderer could see while 1 setTimeout timer was waiting on its clock.'],
+  ]) {
+    const result = await renderPage(request(filmPage(audio)), configWith(), { log: () => {} });
+    const video = await readVideo(checkOutputs(result));
+    assert.deepEqual([result.frames, result.sound, result.warnings, video.sound.length], [12, null, ['sound_failed'], 0], words);
+    assert.ok(result.soundReason.startsWith(words), result.soundReason);
+  }
+  // Silence: every sample 0, or so small that 16 bits keep none of them (ffmpeg measures both as -inf LUFS).
+  for (const audio of ['return { sampleRate, channels: [new Float32Array(sampleRate)] };', tone(1e-6)]) {
+    const hush = await renderPage(request(filmPage(audio)), configWith(), { log: () => {} });
+    const video = await readVideo(checkOutputs(hush));
+    assert.deepEqual([hush.sound, hush.soundReason, hush.warnings, video.sound.length], [null, undefined, ['sound_silent'], 0], audio.slice(0, 40));
+  }
+});
+
+test('a sound the render cuts short fades out over its last 60 ms; one that ends with the render is kept to its end', { skip, timeout: 120_000 }, async () => {
+  const ends = async (audio) => {
+    const result = await renderPage(request(filmPage(audio)), configWith(), { log: () => {} });
+    const { samples } = await readVideo(checkOutputs(result));
+    const middle = rms(samples, 21_600, 26_400);
+    return { faded: result.sound.faded, last: rms(samples, samples.length - 480, samples.length) / middle, before: rms(samples, samples.length - 7_200, samples.length - 4_800) / middle };
+  };
+  const cut = await ends(tone(0.25, 'seconds * 2'));
+  assert.equal(cut.faded, true);
+  assert.ok(cut.last < 0.3 && cut.before > 0.8, `cut: last 10 ms at ${cut.last.toFixed(3)}, 100-150 ms before the end at ${cut.before.toFixed(3)} of the middle's level`);
+  const whole = await ends(tone(0.25));
+  assert.equal(whole.faded, false);
+  assert.ok(whole.last > 0.7, `whole: last 10 ms at ${whole.last.toFixed(3)} of the middle's level`);
+});
+
+test('the render\'s limit, reached while the page\'s sound is made, leaves the video it made, silent, and says why', { skip, timeout: 120_000 }, async () => {
+  // Event time stamps keep real time under the virtual clock: this renderAudio works for 25 s, past the render's 12 s.
+  const slow = filmPage(`const start = new Event('t').timeStamp; while (new Event('t').timeStamp - start < 25000) {}
+return { sampleRate, channels: [new Float32Array(sampleRate).fill(0.1)] };`);
+  const started = Date.now();
+  const result = await renderPage(request(slow), configWith({ AWWO_RENDER_TIMEOUT_MS: '12000' }), { log: () => {} });
+  const took = Date.now() - started;
+  const video = await readVideo(checkOutputs(result));
+  assert.deepEqual([result.frames, result.sound, result.warnings, video.sound.length], [12, null, ['sound_failed'], 0]);
+  assert.equal(result.soundReason, 'The render reached its limit of 12 s while the page\'s sound was being made: render fewer frames to leave time for it');
+  assert.ok(took >= 12_000 && took < 24_000, `took ${took} ms`);
+});
+
+test('a render stopped while its sound is made is stopped, and leaves nothing behind', { skip, timeout: 120_000 }, async () => {
+  const slow = filmPage(`const start = new Event('t').timeStamp; while (new Event('t').timeStamp - start < 25000) {}
+return { sampleRate, channels: [new Float32Array(sampleRate).fill(0.1)] };`);
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 9000);
+  const started = Date.now();
+  await assert.rejects(renderPage(request(slow, { seconds: 0.5 }), configWith(), { signal: controller.signal, log: () => {} }),
+    (error) => error.status === 422 && error.detail === 'aborted');
+  assert.ok(Date.now() - started < 20_000, `stopped after ${Date.now() - started} ms`);
   assert.deepEqual(readdirSync(TMP), []);
 });

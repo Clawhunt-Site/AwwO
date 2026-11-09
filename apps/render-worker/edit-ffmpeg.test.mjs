@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  MP4, WAV, batchArgs, combineArgs, concatArgs, concatList, duckFilter, encodeOptions, inputOptions, inputProbeArgs, loudnessArgs, muxArgs, normalizeArgs,
+  LOUDNESS_TARGET, MP4, WAV, batchArgs, combineArgs, concatArgs, concatList, duckFilter, encodeOptions, inputOptions, inputProbeArgs, loudnessArgs, muxArgs, normalizeArgs,
   parseInputProbe, parseLoudness, pictureFilter, secs, silenceFilter, sniffFormat, soundChain, sourceMatrix, spanArgs, srt, stillsArgs, transitionArgs,
   windowExpression,
 } from './edit-ffmpeg.mjs';
+import { normalizeOutput } from './edit-timeline.mjs';
 
 const output = { width: 1920, height: 822, fit: 'cover', fps: 24, crf: 18 };
 const bytes = (...parts) => Buffer.concat(parts.map((part) => (typeof part === 'string' ? Buffer.from(part, 'latin1') : Buffer.from(part))));
@@ -172,4 +173,21 @@ test("a song's cover art is no picture, and the second loudness pass takes only 
   assert.equal(parseInputProbe(song).video, null);
   const loud = normalizeArgs({ input: 'p.wav', measured: { i: 3.2, tp: 120, lra: -1, thresh: 2, offset: -150 }, targetLUFS: -16, truePeakDb: -1, seconds: 2, file: 'm.wav' });
   assert.match(loud[loud.indexOf('-af') + 1], /measured_I=0:measured_TP=99:measured_LRA=0:measured_thresh=0:offset=-99:/);
+});
+
+test('a fade-out, asked for, ends the levelled sound after its loudness pass; an edit asks for none', () => {
+  const measured = { i: -24, tp: -5, lra: 3, thresh: -34, offset: 0.1 };
+  const filter = (args) => args[args.indexOf('-af') + 1];
+  const plain = filter(normalizeArgs({ input: 's.wav', measured, ...LOUDNESS_TARGET, seconds: 20, file: 'l.wav' }));
+  assert.equal(filter(normalizeArgs({ input: 's.wav', measured, ...LOUDNESS_TARGET, seconds: 20, file: 'l.wav', fadeOutSeconds: 0 })), plain);
+  const faded = filter(normalizeArgs({ input: 's.wav', measured, ...LOUDNESS_TARGET, seconds: 6, file: 'l.wav', fadeOutSeconds: 0.06 }));
+  assert.match(faded, /^loudnorm=I=-16:TP=-1:LRA=11:measured_I=-24:.*:linear=true:print_format=none,aresample=48000,afade=t=out:st=5\.94:d=0\.06,apad=whole_dur=6,atrim=end=6$/);
+  // A fade longer than the sound fades all of it.
+  assert.match(filter(normalizeArgs({ input: 's.wav', measured, ...LOUDNESS_TARGET, seconds: 0.05, file: 'l.wav', fadeOutSeconds: 0.06 })), /,afade=t=out:st=0:d=0\.05,apad=whole_dur=0\.05,/);
+});
+
+test('a render levels its page sound to the loudness an edit levels its film to by default', () => {
+  const output = normalizeOutput({ width: 1280, height: 720 });
+  assert.deepEqual({ targetLUFS: output.loudnessLUFS, truePeakDb: output.truePeakDb }, LOUDNESS_TARGET);
+  assert.deepEqual(LOUDNESS_TARGET, { targetLUFS: -16, truePeakDb: -1 });
 });

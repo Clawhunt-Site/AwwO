@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  childEnv, contactArgs, contactStep, encodeArgs, findExecutable, gifArgs, gifRate, parseProbe, probeArgs, runProcess, writeChunk,
+  childEnv, contactArgs, contactStep, encodeArgs, findExecutable, gifArgs, gifRate, parseProbe, parseSoundProbe, probeArgs, runProcess,
+  soundProbeArgs, writeChunk,
 } from './ffmpeg.mjs';
 
 test('encode arguments', () => {
@@ -40,6 +41,16 @@ test('probe arguments and parsing', () => {
   assert.deepEqual(parseProbe(Buffer.from(stdout)), { frames: 12, width: 160, height: 90, duration: 1 });
   assert.throws(() => parseProbe('{"streams":[]}'));
   assert.throws(() => parseProbe('not json'));
+});
+
+test("a video's sound streams are each read as codec, rate, channels and length, or the read fails", () => {
+  assert.deepEqual(soundProbeArgs('film.mp4'), ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_name,sample_rate,channels,duration', '-of', 'json', 'film.mp4']);
+  const two = JSON.stringify({ streams: [{ codec_name: 'aac', sample_rate: '48000', channels: 2, duration: '20.000000' }, { codec_name: 'mp3', sample_rate: '44100', channels: 1, duration: '3.5' }] });
+  assert.deepEqual(parseSoundProbe(Buffer.from(two)), [{ codec: 'aac', sampleRate: 48000, channels: 2, duration: 20 }, { codec: 'mp3', sampleRate: 44100, channels: 1, duration: 3.5 }]);
+  assert.deepEqual(parseSoundProbe('{"streams":[]}'), [], 'a silent video has none');
+  assert.throws(() => parseSoundProbe('{"streams":[{"codec_name":"aac","sample_rate":"48000","channels":2}]}'), /could not measure/, 'no length');
+  assert.throws(() => parseSoundProbe('{}'));
+  assert.throws(() => parseSoundProbe('not json'));
 });
 
 test('childEnv keeps only the allowlisted variables', () => {

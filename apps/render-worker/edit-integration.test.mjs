@@ -383,6 +383,26 @@ test('the same film whose kernel boots without a timer makes its cards and its s
   assert.equal((await call('DELETE', '/internal/edits/edit_it_0013')).status, 204);
 });
 
+test('a card whose page defines renderAudio is rendered as the picture alone: its sound is never made', { skip, timeout: 300_000 }, async (t) => {
+  const call = await editServer(t);
+  // Were the card's sound made, this renderAudio would hold the edit for 40 s of real time (event time stamps keep it).
+  const card = `<!doctype html><html><body style="margin:0;background:#123"><script>
+window.renderAt = (t) => { document.body.style.background = t < 0.5 ? '#123' : '#321'; };
+window.renderAudio = async ({ seconds, sampleRate }) => { const start = new Event('t').timeStamp; while (new Event('t').timeStamp - start < 40000) {}
+  return { sampleRate, channels: [new Float32Array(Math.round(seconds * sampleRate)).fill(0.2)] }; };
+</script></body></html>`;
+  const timeline = { schema: 'awwo.timeline/1', name: 'card-only', output: { width: 160, height: 90, fps: 12, crf: 26, stillsEverySeconds: 0 },
+    tracks: { video: [{ id: 'p1', card, seconds: 1 }] } };
+  const started = Date.now();
+  assert.equal((await call('POST', '/internal/edits', JSON.stringify({ editId: 'edit_it_0014', timeline, files: [] }), 'application/json')).status, 201);
+  const rendered = await call('POST', '/internal/edits/edit_it_0014/render');
+  const reply = await rendered.json();
+  assert.equal(rendered.status, 200, JSON.stringify(reply));
+  assert.ok(Date.now() - started < 30_000, `the edit took ${Date.now() - started} ms`);
+  assert.deepEqual([reply.report.frames, reply.report.loudness, reply.report.warnings.filter((warning) => /^(sound|card)/.test(warning))], [12, null, []]);
+  assert.equal((await call('DELETE', '/internal/edits/edit_it_0014')).status, 204);
+});
+
 test('an edit whose only sound is silence finishes, its mix left as it is', { skip, timeout: 300_000 }, async (t) => {
   const call = await editServer(t);
   // ffmpeg measures silence as -inf LUFS and an offset to the target of +inf, which once failed the edit.

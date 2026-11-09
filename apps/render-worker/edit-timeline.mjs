@@ -2,6 +2,7 @@
 // checks a job before any byte of its files arrives; placeTimeline, given each file's probe, places every item on
 // whole frames and splits the picture into the pieces edit-run.mjs encodes. Tests pin every rule without ffmpeg.
 import { pageShape } from './config.mjs';
+import { LOUDNESS_TARGET } from './edit-ffmpeg.mjs';
 
 const GIB = 1024 ** 3;
 export const EDIT_LIMITS = Object.freeze({
@@ -91,8 +92,8 @@ export function normalizeOutput(raw) {
     fit,
     fps: integer(raw.fps, `${field}.fps`, 12, 60, 24),
     crf: integer(raw.crf, `${field}.crf`, 14, 30, 18),
-    loudnessLUFS: number(raw.loudnessLUFS, `${field}.loudnessLUFS`, -30, -10, -16),
-    truePeakDb: number(raw.truePeakDb, `${field}.truePeakDb`, -9, 0, -1),
+    loudnessLUFS: number(raw.loudnessLUFS, `${field}.loudnessLUFS`, -30, -10, LOUDNESS_TARGET.targetLUFS),
+    truePeakDb: number(raw.truePeakDb, `${field}.truePeakDb`, -9, 0, LOUDNESS_TARGET.truePeakDb),
     stillsEverySeconds: stills,
   };
 }

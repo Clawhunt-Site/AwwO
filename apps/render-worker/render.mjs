@@ -1,4 +1,5 @@
-// One render: a fresh headless Chromium freezes the page at every frame time and ffmpeg encodes the frames.
+// One render: a fresh headless Chromium freezes the page at every frame time and ffmpeg encodes the frames; a page that
+// defines window.renderAudio has its sound made once, in a browser of its own, levelled and muxed beside them.
 // The browser may reach only the CDN allowlist (network.mjs), runs on the virtual clock (virtual-time.mjs) and
 // is closed, with the render's own temporary directory removed, however the render ends. A page whose renderAt or
 // renderAudio waits on its own clock, which moves only when a frame is drawn, is refused as soon as that is all it
@@ -9,7 +10,10 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright-core';
 import { frameTimes } from './config.mjs';
-import { childEnv, contactArgs, encodeArgs, gifArgs, gifRate, parseProbe, probeArgs, runProcess, writeChunk } from './ffmpeg.mjs';
+import { LOUDNESS_TARGET, MP4, SAMPLE_RATE, loudnessArgs, muxArgs, normalizeArgs, parseLoudness } from './edit-ffmpeg.mjs';
+import {
+  childEnv, contactArgs, encodeArgs, gifArgs, gifRate, parseProbe, parseSoundProbe, probeArgs, runProcess, soundProbeArgs, writeChunk,
+} from './ffmpeg.mjs';
 import { suppliedFont } from './fonts.mjs';
 import { heldClockMessage, openWatch, watchHeldClock } from './held-clock.mjs';
 import { suppliedKit } from './kits.mjs';
@@ -270,6 +274,19 @@ const SOUND_PART_BYTES = 3 * MIB;
 const SOUND_SHORT_SECONDS = 0.05;
 /** The longest a page's sound may take to make and read out, once the page has opened: synthesis takes seconds. */
 const SOUND_TIMEOUT_MS = 120_000;
+/**
+ * The ways a page's sound fails through the page's own doing (renderPageSound's details): an edit refuses its timeline
+ * for them (edit-run.mjs soundFailure), and a render leaves the sound out of its video and says why. A sound that outran
+ * its own budget is the page's ("timeout"), and so is one that waited on its own clock (page_waits_on_timers); a page
+ * the worker could not open in time is not ("render_timeout").
+ */
+export const SOUND_PAGE_FAULTS = new Set(['sound_missing', 'sound_failed', 'sound_too_short', 'page_load_failed', 'timeout', 'page_waits_on_timers']);
+/** A render's page sound that the render cuts short fades out over its last 60 ms, as the film kit ends its own sound. */
+const SOUND_FADE_SECONDS = 0.06;
+/** Below this integrated loudness a sound is silence: loudnorm's own gate, the one under which an edit leaves a mix as it is. */
+const SILENT_LUFS = -70;
+/** How far the video's sound stream may run from its picture's length: an AAC frame is 1,024 samples, 21 ms at 48 kHz. */
+const SOUND_LENGTH_SLACK_SECONDS = 0.05;
 
 /**
  * The capture side of a sound render, installed before any page script and built only from the browser's own
@@ -465,7 +482,8 @@ export function parseCapture(text, seconds) {
     throw new RenderError('sound_failed', 'The sound could not be read from the page');
   }
   if (available < wanted - Math.round(SOUND_SHORT_SECONDS * rate)) {
-    throw new RenderError('sound_too_short', `The page made ${(available / rate).toFixed(3)} s of sound, not ${seconds} s`);
+    // A render asks for its picture's length (frames / fps), which may run to many decimals: say it to the millisecond.
+    throw new RenderError('sound_too_short', `The page made ${(available / rate).toFixed(3)} s of sound, not ${Number(seconds.toFixed(3))} s`);
   }
   return { rate, available, wanted, invalid, clipped, peak };
 }
@@ -487,7 +505,8 @@ export function partBytes(text, start, total) {
  * something else, or what it kept could not be read), sound_too_short, timeout (the sound took longer than its budget),
  * page_load_failed (it did not load, crashed or navigated, also while its sound was read), render_timeout (opening it
  * took longer than a render may), aborted, render_failed; 400 page_waits_on_timers (its renderAudio waited on its own
- * clock); 503 when the browser is missing.
+ * clock); 503 when the browser is missing. Its reply gives `frames`, the frames kept, and `pageFrames`, how many the
+ * page made (more than kept when the page's sound goes on past `seconds`).
  */
 export async function renderPageSound(request, config, { signal, log = defaultLog, soundTimeoutMs = SOUND_TIMEOUT_MS } = {}) {
   const started = Date.now();
@@ -587,7 +606,7 @@ export async function renderPageSound(request, config, { signal, log = defaultLo
     if (state.pageErrorCount > 0) warnings.push(`page_errors:${state.pageErrorCount}`);
     if (state.blocked > 0) warnings.push(`network_blocked:${state.blocked}`);
     return {
-      renderId: request.renderId, sampleRate: made.rate, seconds: request.seconds, frames: made.wanted, peak: made.peak,
+      renderId: request.renderId, sampleRate: made.rate, seconds: request.seconds, frames: made.wanted, pageFrames: made.available, peak: made.peak,
       file: request.file, bytes: 44 + bytes, warnings, pageErrors, elapsedMs: Date.now() - started,
     };
   } catch (error) {
@@ -603,22 +622,141 @@ export async function renderPageSound(request, config, { signal, log = defaultLo
 }
 
 /**
- * Renders a validated request (config.mjs validateRenderRequest) into the reply the API stores. Rejects with a
- * RenderError: detail timeout (config.timeoutMs for the whole render), aborted (signal), page_load_failed,
- * output_too_large, ffmpeg_failed or render_failed; status 400 page_waits_on_timers (its renderAt waited on its own
- * clock); status 503 when the browser, ffmpeg or temporary space is missing.
+ * The notes of a render's sound page as the render gives them, all named sound_: about the sound itself
+ * (sound_clipped:<frames>, sound_not_finite:<frames>, sound_silent) and about what the page did while it was made
+ * (sound_page_errors:<count>, sound_network_blocked:<count>). Its ready_timeout and fonts_timeout are left out: the
+ * render's picture, made from the same page, says those already.
  */
-export async function renderPage(request, config, { signal, log = defaultLog } = {}) {
+export function soundNotes(warnings) {
+  return warnings.filter((warning) => warning !== 'ready_timeout' && warning !== 'fonts_timeout')
+    .map((warning) => (warning.startsWith('sound_') ? warning : `sound_${warning}`));
+}
+
+// Whether the page defines window.renderAudio once its frames are drawn; a property that throws when read counts, so
+// that its sound's own capture says what is wrong with it. A page that can no longer be asked (it crashed or closed
+// after its last frame) keeps its silent video, as every render's did before.
+const definesSound = (page) => page.evaluate(() => { try { return typeof window.renderAudio === 'function'; } catch (error) { return true; } }).catch(() => false);
+
+/**
+ * The page's own sound in the video, for a page that defines window.renderAudio. It is made once by renderPageSound for
+ * the picture's exact length (frames / fps), in a fresh browser of its own, on the same virtual clock and behind the
+ * same walls and held-clock watch as an edit's page sound; brought to LOUDNESS_TARGET in the two loudnorm passes that
+ * level an edit's film, its last 60 ms faded out when the page made more than the render keeps; muxed as AAC beside the
+ * picture's frames, which are copied; and read back: one AAC stream of the picture's length, measured again from the
+ * video. Gives {file, sound}, or null when the video stays silent: the page's sound was silence (warning sound_silent),
+ * or it could not be made through the page's own doing, in the render's time or within a video's size (warning
+ * sound_failed, and state.soundReason says why). A stop of the render, and what the worker itself could not do (no
+ * browser or disk: 503; ffmpeg failing on its own files), fail the render as they always have. `make` is
+ * renderPageSound (a test gives its own).
+ */
+export async function addPageSound(request, config, state, files, stage, { log, soundTimeoutMs, make = renderPageSound }) {
+  const seconds = request.frames / request.fps;
+  const signal = AbortSignal.any([state.signal, stage.signal]);
+  const note = (warning) => { if (!state.soundWarnings.includes(warning)) state.soundWarnings.push(warning); };
+  // A stop of the whole render ends it; the render's time limit, reached while its sound is made, ends only the sound.
+  // Either may come while a step finishes, which then succeeds: every way out but an error asks first (`over`).
+  const over = () => state.halted() || stage.signal.aborted;
+  const ended = (error) => {
+    if (state.halted()) throw state.stopped();
+    if (stage.signal.aborted) {
+      note('sound_failed');
+      state.soundReason = `The render reached its limit of ${Math.round(config.timeoutMs / 1000)} s while the page's sound was being made: render fewer frames to leave time for it`;
+      return null;
+    }
+    throw error;
+  };
+  const leftOut = (reason) => {
+    if (over()) return ended(null);
+    note('sound_failed');
+    state.soundReason = reason;
+    return null;
+  };
+  const silent = () => {
+    if (over()) return ended(null);
+    note('sound_silent');
+    return null;
+  };
+  let made;
+  try {
+    made = await make({ renderId: request.renderId, html: request.html, seconds, file: files.sound }, config, { signal, log, soundTimeoutMs });
+  } catch (error) {
+    if (over()) return ended(error);
+    // A sound that outran its budget is said in full here: renderPageSound's words for it finish an edit's sentence.
+    if (error?.detail === 'timeout') {
+      return leftOut(`The page's sound took longer than ${Math.round(soundTimeoutMs / 1000)} s to make: time stands still while it is made, so a renderAudio that waits for a timer or an animation frame never finishes`);
+    }
+    if (SOUND_PAGE_FAULTS.has(error?.detail)) return leftOut(error.message);
+    throw error;
+  }
+  if (over()) return ended(null);
+  for (const warning of soundNotes(made.warnings)) note(warning);
+  if (made.peak === 0) return silent();
+  try {
+    const run = (command, args) => runProcess(command, args, { signal });
+    // A sound of samples so small that 16 bits keep none of them measures as silence too (-Infinity).
+    const first = parseLoudness((await run(config.ffmpeg, loudnessArgs({ input: files.sound, ...LOUDNESS_TARGET }))).stderr);
+    if (!Number.isFinite(first.i) || first.i < SILENT_LUFS) return silent();
+    // Up to 50 ms past what is kept is the page's rounding, as up to 50 ms short is; more is a sound the render cuts.
+    const faded = made.pageFrames - made.frames > Math.round(SOUND_SHORT_SECONDS * made.sampleRate);
+    await run(config.ffmpeg, normalizeArgs({ input: files.sound, measured: first, ...LOUDNESS_TARGET, seconds, file: files.level, fadeOutSeconds: faded ? SOUND_FADE_SECONDS : 0 }));
+    await run(config.ffmpeg, muxArgs({ video: files.mp4, audio: files.level, file: files.film }));
+    if ((await stat(files.film)).size > OUTPUT_LIMITS.mp4) return leftOut("The video with the page's sound would be larger than 80 MiB");
+    const streams = parseSoundProbe((await run(config.ffprobe, soundProbeArgs(files.film))).stdout);
+    const [stream] = streams;
+    if (streams.length !== 1 || stream.codec !== 'aac' || stream.sampleRate !== SAMPLE_RATE || stream.channels !== 2
+      || Math.abs(stream.duration - seconds) > SOUND_LENGTH_SLACK_SECONDS) {
+      state.log(`sound read back as ${JSON.stringify(streams).slice(0, 300)}, for ${seconds} s`);
+      throw new RenderError('ffmpeg_failed', "The video's sound could not be read back");
+    }
+    const heard = parseLoudness((await run(config.ffmpeg, loudnessArgs({ input: files.film, format: MP4, stream: 'a:0', ...LOUDNESS_TARGET }))).stderr);
+    if (![heard.i, heard.tp, heard.lra].every(Number.isFinite)) throw new RenderError('ffmpeg_failed', "The video's sound could not be measured");
+    if (over()) return ended(null);
+    const round = (value, places) => Number(value.toFixed(places));
+    return {
+      file: files.film,
+      sound: {
+        codec: 'aac', sampleRate: stream.sampleRate, channels: stream.channels, seconds: round(seconds, 6),
+        loudness: { integratedLUFS: round(heard.i, 2), truePeakDb: round(heard.tp, 2), rangeLU: round(heard.lra, 2) },
+        pageSampleRate: made.sampleRate, peak: round(made.peak, 4), faded,
+      },
+    };
+  } catch (error) {
+    if (over()) return ended(error);
+    throw error;
+  }
+}
+
+/**
+ * Renders a validated request (config.mjs validateRenderRequest) into the reply the API stores. The picture, its probe,
+ * the GIF and the contact sheet are made exactly as for any page; then a page that defines window.renderAudio gets its
+ * own sound in the MP4 (addPageSound): the reply's `sound` describes what the video carries (null when it is silent)
+ * and `soundReason` says why a page's sound was left out. Once the picture is made, the render's limit ends only the
+ * sound. With `sound: false` the video stays silent whatever the page defines (an edit's card: its film takes its
+ * sound from the timeline's own items). Rejects with a RenderError: detail timeout (config.timeoutMs for the whole
+ * render), aborted (signal), page_load_failed, output_too_large, ffmpeg_failed or render_failed; status 400
+ * page_waits_on_timers (its renderAt waited on its own clock); status 503 when the browser, ffmpeg or temporary space is
+ * missing.
+ */
+export async function renderPage(request, config, { signal, log = defaultLog, sound: withSound = true, soundTimeoutMs = SOUND_TIMEOUT_MS } = {}) {
   const started = Date.now();
   const controller = new AbortController();
   let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, config.timeoutMs);
+  // Set while the page's sound is made: the render's limit then stops only the sound, and the video made so far stands.
+  let soundStage = null;
+  const timer = setTimeout(() => {
+    if (soundStage) {
+      soundStage.abort();
+      return;
+    }
+    timedOut = true;
+    controller.abort();
+  }, config.timeoutMs);
   const forward = () => controller.abort();
   if (signal?.aborted) controller.abort(); else signal?.addEventListener('abort', forward, { once: true });
   const pageErrors = [];
   const state = {
     signal: controller.signal, browser: null, encoder: null, watched: null, blocked: 0, crashed: false, navigated: false, timerLimit: false,
-    pageErrorCount: 0, warnings: [], stills: new Map(),
+    pageErrorCount: 0, warnings: [], stills: new Map(), soundWarnings: [], soundReason: '',
     halted: () => controller.signal.aborted,
     stopped: () => (timedOut ? new RenderError('timeout', 'The render took too long') : new RenderError('aborted', 'The render was stopped')),
     notePageError: (message) => {
@@ -635,13 +773,35 @@ export async function renderPage(request, config, { signal, log = defaultLog } =
       log(`render ${request.renderId}: temporary directory: ${error.message}`);
       throw new RenderError('tmp_unavailable', 'No temporary space for the render', 503);
     });
-    const files = { mp4: path.join(dir, 'motion.mp4'), gif: path.join(dir, 'motion.gif'), contact: path.join(dir, 'contact-sheet.png') };
+    const files = {
+      mp4: path.join(dir, 'motion.mp4'), gif: path.join(dir, 'motion.gif'), contact: path.join(dir, 'contact-sheet.png'),
+      sound: path.join(dir, 'sound.wav'), level: path.join(dir, 'sound-levelled.wav'), film: path.join(dir, 'film.mp4'),
+    };
     const { page, contract } = await openPage(request, config, state);
     const distinctFrames = await encodeFrames(page, contract, request, config, state, files.mp4);
+    const sound = withSound && await definesSound(page);
     await page.close().catch(() => {});
     const probe = await probeVideo(config, state, files.mp4);
     if ((await stat(files.mp4)).size > OUTPUT_LIMITS.mp4) throw new RenderError('output_too_large', 'The video is larger than 80 MiB');
-    const mp4 = await readFile(files.mp4);
+    // The GIF and the contact sheet are of the picture alone, made before its sound.
+    const extras = [];
+    if (request.outputs.includes('gif')) {
+      const rate = gifRate(request);
+      if (rate.reduced) state.warnings.push('gif_fps_reduced');
+      extras.push(['gif', 'image/gif', await optionalOutput('gif', config.ffmpeg, gifArgs({ input: files.mp4, fps: rate.fps, loop: request.loop, output: files.gif }),
+        files.gif, OUTPUT_LIMITS.gif, config, state)]);
+    }
+    if (request.outputs.includes('contact')) {
+      extras.push(['contact', 'image/png', await optionalOutput('contact', config.ffmpeg, contactArgs({ input: files.mp4, frames: request.frames, output: files.contact }),
+        files.contact, OUTPUT_LIMITS.contact, config, state)]);
+    }
+    let film = null;
+    if (sound) {
+      soundStage = new AbortController();
+      await state.browser?.close().catch(() => {}); // one browser at a time: the picture's is done
+      film = await addPageSound(request, config, state, files, soundStage, { log, soundTimeoutMs });
+    }
+    const mp4 = await readFile(film ? film.file : files.mp4);
     const outputs = [output('mp4', 'video/mp4', mp4)];
     let total = mp4.length;
     const add = (kind, contentType, data, extra) => {
@@ -653,16 +813,7 @@ export async function renderPage(request, config, { signal, log = defaultLog } =
       total += data.length;
       outputs.push(output(kind, contentType, data, extra));
     };
-    if (request.outputs.includes('gif')) {
-      const rate = gifRate(request);
-      if (rate.reduced) state.warnings.push('gif_fps_reduced');
-      add('gif', 'image/gif', await optionalOutput('gif', config.ffmpeg, gifArgs({ input: files.mp4, fps: rate.fps, loop: request.loop, output: files.gif }),
-        files.gif, OUTPUT_LIMITS.gif, config, state));
-    }
-    if (request.outputs.includes('contact')) {
-      add('contact', 'image/png', await optionalOutput('contact', config.ffmpeg, contactArgs({ input: files.mp4, frames: request.frames, output: files.contact }),
-        files.contact, OUTPUT_LIMITS.contact, config, state));
-    }
+    for (const [kind, contentType, data] of extras) add(kind, contentType, data);
     for (const [frame, png] of state.stills) add('still', 'image/png', png, { frame });
     const warnings = [...state.warnings];
     if (distinctFrames === 1) warnings.push('static_page');
@@ -670,10 +821,11 @@ export async function renderPage(request, config, { signal, log = defaultLog } =
     if (state.blocked > 0) warnings.push(`network_blocked:${state.blocked}`);
     if (state.timerLimit) warnings.push('timer_limit');
     if (probe.frames !== request.frames) warnings.push(`probe_frames:${probe.frames}`);
+    warnings.push(...state.soundWarnings);
     return {
       renderId: request.renderId, mode: contract ? 'contract' : 'virtual-time', frames: request.frames, fps: request.fps,
       width: request.width, height: request.height, seconds: request.seconds, distinctFrames, elapsedMs: Date.now() - started,
-      probe, warnings, pageErrors, outputs,
+      probe, warnings, pageErrors, sound: film ? film.sound : null, ...(state.soundReason ? { soundReason: state.soundReason } : {}), outputs,
     };
   } catch (error) {
     throw classify(error, state);

@@ -15,7 +15,7 @@ import {
 } from './edit-ffmpeg.mjs';
 import { EDIT_LIMITS, placeTimeline } from './edit-timeline.mjs';
 import { runProcess } from './ffmpeg.mjs';
-import { renderPage, renderPageSound } from './render.mjs';
+import { SOUND_PAGE_FAULTS, renderPage, renderPageSound } from './render.mjs';
 
 const TRACK_ORDER = Object.freeze(['dialogue', 'clip', 'music', 'sfx']);
 const CHILD_PRIORITY = 10;
@@ -104,15 +104,11 @@ async function probeFiles(job, config, run) {
  */
 const soundName = (entry) => `${entry.id} (tracks.${entry.track}[${entry.trackIndex}])`;
 
-// The page's own faults: the renderer's fixed words, or what the page threw (render.mjs parseCapture). A sound that
-// outran its own budget is the page's ("timeout"), and so is one that waited on its own clock (page_waits_on_timers); a
-// page the worker could not open in time is not ("render_timeout").
-const PAGE_FAULTS = new Set(['sound_missing', 'sound_failed', 'sound_too_short', 'page_load_failed', 'timeout', 'page_waits_on_timers']);
-
 /** A page's sound that could not be made: the timeline's fault, with the page's reason and the item, or the worker's. */
 export function soundFailure(entry, error) {
   if (error?.status === 503) return new EditError(error.detail || 'browser_unavailable', `The sound of ${entry.id} could not be made`, 503);
-  if (!PAGE_FAULTS.has(error?.detail)) return new EditError('sound_render_failed', `The sound of ${entry.id} could not be made`);
+  // The page's own faults (render.mjs SOUND_PAGE_FAULTS) say why in the renderer's fixed words, or in what the page threw.
+  if (!SOUND_PAGE_FAULTS.has(error?.detail)) return new EditError('sound_render_failed', `The sound of ${entry.id} could not be made`);
   return Object.assign(new Error(`The sound of ${entry.id} could not be made: ${error.message}`), { status: 400, code: 'INVALID_EDIT', field: `tracks.${entry.track}.page` });
 }
 
@@ -165,7 +161,9 @@ async function renderCards(plan, job, config, state) {
     };
     let reply;
     try {
-      reply = await renderPage(request, config, { signal: state.signal, log: state.log });
+      // The card is the film's picture alone: a film card's own window.renderAudio is never made here (the timeline
+      // gives the film its sound, a page's included, as an item of its own).
+      reply = await renderPage(request, config, { signal: state.signal, log: state.log, sound: false });
     } catch (error) {
       if (state.halted()) throw state.stopped();
       throw cardFailure(item, error);

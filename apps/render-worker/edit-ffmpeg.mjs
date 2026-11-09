@@ -7,6 +7,11 @@
 
 export const SAMPLE_RATE = 48000;
 export const BATCH_INPUTS = 48;
+/**
+ * The loudness and true peak a film is brought to unless its timeline asks for others (edit-timeline.mjs
+ * normalizeOutput), and the ones a render brings a page's own sound to (render.mjs).
+ */
+export const LOUDNESS_TARGET = Object.freeze({ targetLUFS: -16, truePeakDb: -1 });
 const STILL_WIDTH = 960;
 const FADE_SECONDS = 0.01;
 const THREADS = '2';
@@ -297,13 +302,16 @@ const within = (value, min, max) => Math.min(max, Math.max(min, value));
 
 /**
  * The second pass: the mix brought to the target loudness and true peak with the first pass's measurement, each value
- * held inside the range loudnorm takes (a mix measured louder than 0 LUFS would otherwise stop the pass).
+ * held inside the range loudnorm takes (a mix measured louder than 0 LUFS would otherwise stop the pass). With
+ * fadeOutSeconds, its last that many seconds (at most all of it) fade out after the levelling: a render's page sound
+ * that the render cuts short ends that way instead of stopping mid-sound. An edit never asks for one.
  */
-export function normalizeArgs({ input, measured, targetLUFS, truePeakDb, seconds, file }) {
+export function normalizeArgs({ input, measured, targetLUFS, truePeakDb, seconds, file, fadeOutSeconds = 0 }) {
   const loudnorm = `loudnorm=I=${secs(targetLUFS)}:TP=${secs(truePeakDb)}:LRA=11:measured_I=${secs(within(measured.i, -99, 0))}:measured_TP=${secs(within(measured.tp, -99, 99))}`
     + `:measured_LRA=${secs(within(measured.lra, 0, 99))}:measured_thresh=${secs(within(measured.thresh, -99, 0))}:offset=${secs(within(measured.offset, -99, 99))}:linear=true:print_format=none`;
+  const fade = fadeOutSeconds > 0 ? `,afade=t=out:st=${secs(Math.max(0, seconds - fadeOutSeconds))}:d=${secs(Math.min(fadeOutSeconds, seconds))}` : '';
   return ['-y', '-v', 'error', ...inputOptions(WAV), '-i', input, '-map', '0:a:0',
-    '-af', `${loudnorm},aresample=${SAMPLE_RATE},apad=whole_dur=${secs(seconds)},atrim=end=${secs(seconds)}`, '-c:a', 'pcm_f32le', file];
+    '-af', `${loudnorm},aresample=${SAMPLE_RATE}${fade},apad=whole_dur=${secs(seconds)},atrim=end=${secs(seconds)}`, '-c:a', 'pcm_f32le', file];
 }
 
 // The AAC encoder's perceptual noise substitution stays off: on by default, it puts short bursts of noise into music and
