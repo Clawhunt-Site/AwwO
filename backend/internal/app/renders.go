@@ -304,12 +304,13 @@ type renderLoudness struct {
 
 // fits says whether the record describes the sound a render of `seconds` makes: AAC, 48 kHz, stereo, the picture's own
 // length, a page rate the worker takes (8–48 kHz), some sound (its peak is the page's own, which may pass full scale:
-// the worker clips it), and the loudness measured from the video, readings a sound can have.
+// the worker clips it), and the loudness measured from the video, readings a sound can have (below 0 LUFS: a record
+// whose loudness is missing reads as zeros).
 func (s *renderSound) fits(seconds float64) bool {
 	l := s.Loudness
 	return s.Codec == "aac" && s.SampleRate == 48000 && s.Channels == 2 && math.Abs(s.Seconds-seconds) <= 0.001 &&
 		s.PageSampleRate >= 8000 && s.PageSampleRate <= 48000 && s.Peak > 0 && l != nil &&
-		l.IntegratedLUFS >= -70 && l.IntegratedLUFS <= 0 && l.TruePeakDB >= -99 && l.TruePeakDB <= 6 && l.RangeLU >= 0 && l.RangeLU <= 99
+		l.IntegratedLUFS >= -70 && l.IntegratedLUFS < 0 && l.TruePeakDB >= -99 && l.TruePeakDB <= 6 && l.RangeLU >= 0 && l.RangeLU <= 99
 }
 
 type renderStored struct {
@@ -609,7 +610,7 @@ type renderFile struct {
 // checkRenderOutputs reads every returned file before any of them is kept: each must match its digest and its own
 // bytes (an MP4 must sniff as MP4, a GIF as GIF, a contact sheet as PNG), and there must be a video. The video holds a
 // sound track exactly when the worker says it carries its page's sound: then one, which `sound` describes for a render
-// of `seconds` (renderSound.fits); else none.
+// of `seconds` (renderSound.fits); else none. A video whose tracks cannot be read one way only is not taken.
 func checkRenderOutputs(outputs []renderOutput, sound *renderSound, seconds float64) ([]renderFile, error) {
 	files := []renderFile{}
 	seen := map[string]bool{}
@@ -636,13 +637,13 @@ func checkRenderOutputs(outputs []renderOutput, sound *renderSound, seconds floa
 	if !seen["mp4"] {
 		return nil, renderError{0, "render_invalid_output", "the render returned no video"}
 	}
-	tracks := 0
+	tracks, readable := 0, true
 	for _, f := range files {
 		if f.kind == "mp4" {
-			tracks = mp4SoundTracks(f.data)
+			tracks, readable = mp4SoundTracks(f.data)
 		}
 	}
-	if (sound == nil && tracks != 0) || (sound != nil && (tracks != 1 || !sound.fits(seconds))) {
+	if !readable || (sound == nil && tracks != 0) || (sound != nil && (tracks != 1 || !sound.fits(seconds))) {
 		return nil, renderError{0, "render_invalid_output", "render sound does not match the video"}
 	}
 	return files, nil
@@ -651,23 +652,28 @@ func checkRenderOutputs(outputs []renderOutput, sound *renderSound, seconds floa
 // mp4Walk calls visit with the type and contents of each ISO base media box at the top level of data, in order, until
 // visit returns false, keeping none of them. A box starts with a 32-bit size and its type; a size of 0 runs to the end,
 // and 1 is followed by a 64-bit size. A box that does not fit where it stands ends the walk, so bytes that are no MP4
-// hold no box.
-func mp4Walk(data []byte, visit func(kind, body []byte) bool) {
+// hold no box. It answers whether data was boxes and nothing else: false when bytes were left that make no box, true
+// when the boxes filled it or visit stopped the walk.
+func mp4Walk(data []byte, visit func(kind, body []byte) bool) (whole bool) {
 	for len(data) >= 8 {
 		size, header := uint64(binary.BigEndian.Uint32(data)), uint64(8)
 		if size == 1 {
 			if len(data) < 16 {
-				return
+				return false
 			}
 			size, header = binary.BigEndian.Uint64(data[8:16]), 16
 		} else if size == 0 {
 			size = uint64(len(data))
 		}
-		if size < header || size > uint64(len(data)) || !visit(data[4:8], data[header:size]) {
-			return
+		if size < header || size > uint64(len(data)) {
+			return false
+		}
+		if !visit(data[4:8], data[header:size]) {
+			return true
 		}
 		data = data[size:]
 	}
+	return len(data) == 0
 }
 
 // mp4First is the contents of the first box of type kind at the top level of data.
@@ -681,26 +687,81 @@ func mp4First(data []byte, kind string) (body []byte, found bool) {
 	return body, found
 }
 
+// mp4Count is the contents of the first box of type kind at the top level of data and how many there are, counted no
+// further than two.
+func mp4Count(data []byte, kind string) (first []byte, count int) {
+	mp4Walk(data, func(k, b []byte) bool {
+		if string(k) == kind {
+			if count == 0 {
+				first = b
+			}
+			count++
+		}
+		return count < 2
+	})
+	return first, count
+}
+
+// mp4Handlers counts the handler boxes in data and in the boxes inside it that a reader looks into for one (a
+// track's media, media information, data information and sample table boxes, its edits, references and user data),
+// counted no further than two. What another reader could find a handler in that this walk cannot see counts as two, as
+// a track that cannot be read one way only: a meta box (ffmpeg looks through one 4 bytes at a time), bytes left in
+// any of these boxes that make no box, and a box of them more than eight deep.
+func mp4Handlers(data []byte, depth int) int {
+	count := 0
+	whole := mp4Walk(data, func(kind, body []byte) bool {
+		switch string(kind) {
+		case "hdlr":
+			count++
+		case "meta":
+			count = 2
+		case "mdia", "minf", "dinf", "stbl", "edts", "tref", "udta":
+			if depth >= 8 {
+				count = 2
+			} else {
+				count += mp4Handlers(body, depth+1)
+			}
+		}
+		return count < 2
+	})
+	if !whole {
+		return 2
+	}
+	return min(count, 2)
+}
+
 // mp4SoundTracks counts the sound tracks of an MP4's first movie box, the one players read: each trak whose media
-// handler (after its version and flags, 4 bytes, and pre_defined, 4) is "soun". It stops at two, the first count that
-// is too many.
-func mp4SoundTracks(data []byte) int {
+// box's handler (after its version and flags, 4 bytes, and pre_defined, 4) is of type "soun". It stops at two, the
+// first count that is too many. Only the shape the worker writes is read; anything else makes the video unreadable
+// (readable false): a movie box of anything but boxes, a track that holds more or less than one handler in all of it
+// (ffmpeg takes the last it meets, other readers the first) or whose one handler is not its media box's own, and a
+// handler of a type but "vide" or "soun" (ffmpeg then types the track from its samples, an mp4a entry as sound).
+// It holds the worker's own mistakes to the shape the file should have; it is no demuxer for a file made to fool it:
+// ffmpeg also reads a handler in boxes this walk never opens (an ilst, sinf or wave box, a sample entry's extensions),
+// and following every one of them would refuse a worker's renders as soon as its ffmpeg writes a box of a new kind.
+func mp4SoundTracks(data []byte) (sounds int, readable bool) {
 	movie, ok := mp4First(data, "moov")
 	if !ok {
-		return 0
+		return 0, true
 	}
-	sounds := 0
-	mp4Walk(movie, func(kind, track []byte) bool {
+	readable = true
+	whole := mp4Walk(movie, func(kind, track []byte) bool {
 		if string(kind) != "trak" {
 			return true
 		}
-		media, _ := mp4First(track, "mdia")
-		if handler, ok := mp4First(media, "hdlr"); ok && len(handler) >= 12 && string(handler[8:12]) == "soun" {
+		media, medias := mp4Count(track, "mdia")
+		handler, handlers := mp4Count(media, "hdlr")
+		if medias != 1 || handlers != 1 || mp4Handlers(track, 0) != 1 || len(handler) < 12 ||
+			(string(handler[8:12]) != "vide" && string(handler[8:12]) != "soun") {
+			readable = false
+			return false
+		}
+		if string(handler[8:12]) == "soun" {
 			sounds++
 		}
 		return sounds < 2
 	})
-	return sounds
+	return sounds, readable && whole
 }
 
 // saveRender keeps the checked files as the canvas's media and completes the render in one transaction: the

@@ -539,6 +539,10 @@ func TestMP4SoundTracksReadTheFirstMovieBoxAlone(t *testing.T) {
 	toEnd := func(box []byte) []byte { return append(make([]byte, 4), box[4:]...) }
 	oversized := mp4Box("moov", mp4Track("soun"))
 	binary.BigEndian.PutUint32(oversized, uint32(len(oversized)+1))
+	// A track whose media box holds a second handler, or which holds a second media box.
+	handler := func(kind string) []byte { return mp4Box("hdlr", make([]byte, 8), []byte(kind), make([]byte, 13)) }
+	twoHandlers := mp4Box("trak", mp4Box("mdia", handler("vide"), handler("soun")))
+	twoMedia := mp4Box("trak", mp4Box("mdia", handler("vide")), mp4Box("mdia", handler("soun")))
 	for _, c := range []struct {
 		name string
 		data []byte
@@ -554,15 +558,44 @@ func TestMP4SoundTracksReadTheFirstMovieBoxAlone(t *testing.T) {
 		// Players read the first movie box: a sound in a second one is none.
 		{"a sound in a second movie box", slices.Concat(ftyp, mp4Box("moov", mp4Track("vide")), mp4Box("moov", mp4Track("soun"))), 0},
 		{"a movie box larger than the file", slices.Concat(ftyp, oversized), 0},
-		{"a handler box too short to name its type", slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", mp4Box("mdia", mp4Box("hdlr", make([]byte, 11)))))), 0},
-		{"a track with no media box", slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", mp4Box("hdlr", make([]byte, 8), []byte("soun"))))), 0},
 		// Only a track's media handler counts, not the one a metadata box (udta/meta) holds.
 		{"a metadata handler", slices.Concat(ftyp, mp4Box("moov", mp4Track("vide"), mp4Box("udta", mp4Box("meta", mp4Box("hdlr", make([]byte, 8), []byte("soun")))))), 0},
 		{"the test video, which has no movie box", renderTestMP4, 0},
 		{"nothing", nil, 0},
 	} {
-		if got := mp4SoundTracks(c.data); got != c.want {
-			t.Errorf("%s: %d sound tracks, want %d", c.name, got, c.want)
+		if got, readable := mp4SoundTracks(c.data); got != c.want || !readable {
+			t.Errorf("%s: %d sound tracks (readable %v), want %d", c.name, got, readable, c.want)
+		}
+	}
+	// ffmpeg takes the last handler it meets in a track, other readers the first: a track of any handler but its media
+	// box's own is read no way at all.
+	information := func(handlers ...[]byte) []byte {
+		return mp4Box("minf", append([][]byte{mp4Box("vmhd", make([]byte, 12))}, append(handlers, mp4Box("stbl"))...)...)
+	}
+	deep := handler("soun")
+	for range 9 {
+		deep = mp4Box("udta", deep)
+	}
+	for name, data := range map[string][]byte{
+		"two handlers in one media box":        slices.Concat(ftyp, mp4Box("moov", mp4Track("vide"), twoHandlers)),
+		"two media boxes in one track":         slices.Concat(ftyp, mp4Box("moov", twoMedia)),
+		"a sound handler in media information": slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", mp4Box("mdia", handler("vide"), information(handler("soun")))))),
+		"a sound handler in the track's meta":  slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", mp4Box("mdia", handler("vide")), mp4Box("udta", mp4Box("meta", make([]byte, 4), handler("soun")))))),
+		"a handler outside a media box":        slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", handler("soun")))),
+		"a track with no handler":              slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", mp4Box("mdia", mp4Box("mdhd", make([]byte, 24)))))),
+		"boxes nested past eight":              slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", mp4Box("mdia", handler("vide")), deep))),
+		// The kinds of handler the worker writes, and no other: ffmpeg types a track of another from its samples.
+		"a handler of another type":                slices.Concat(ftyp, mp4Box("moov", mp4Track("vide"), mp4Track("text"))),
+		"a handler box too short to name its type": slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", mp4Box("mdia", mp4Box("hdlr", make([]byte, 11)))))),
+		// ffmpeg looks through a meta box 4 bytes at a time: a handler behind bytes that make no box.
+		"a meta box in media information": slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", mp4Box("mdia", handler("vide"),
+			mp4Box("minf", mp4Box("meta", make([]byte, 4), []byte{0xff, 0xff, 0xff, 0xff}, handler("soun")), mp4Box("stbl")))))),
+		"bytes left in a media box":   slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", mp4Box("mdia", handler("vide"), []byte{1, 2, 3})))),
+		"bytes left in a track":       slices.Concat(ftyp, mp4Box("moov", mp4Box("trak", mp4Box("mdia", handler("vide")), []byte{1, 2, 3}))),
+		"bytes left in the movie box": slices.Concat(ftyp, mp4Box("moov", mp4Track("vide"), []byte{1, 2, 3})),
+	} {
+		if _, readable := mp4SoundTracks(data); readable {
+			t.Errorf("%s: read as one way", name)
 		}
 	}
 }
@@ -572,14 +605,15 @@ func TestMP4SoundTracksReadTheFirstMovieBoxAlone(t *testing.T) {
 func TestMP4SoundTracksKeepNoBox(t *testing.T) {
 	ftyp := mp4Box("ftyp", []byte("isom"))
 	movies := slices.Concat(ftyp, bytes.Repeat(mp4Box("moov"), 4<<20))
-	tracks := slices.Concat(ftyp, mp4Box("moov", bytes.Repeat(mp4Box("trak"), 4<<20)), mp4Box("moov", mp4Track("soun")))
+	// Some 190,000 picture tracks in one movie box, each walked to its handler, then a second movie box of a sound.
+	tracks := slices.Concat(ftyp, mp4Box("moov", bytes.Repeat(mp4Track("vide"), (32<<20)/len(mp4Track("vide")))), mp4Box("moov", mp4Track("soun")))
 	for name, data := range map[string][]byte{"movie boxes": movies, "tracks": tracks} {
 		var before, after runtime.MemStats
 		runtime.GC()
 		runtime.ReadMemStats(&before)
-		got := mp4SoundTracks(data)
+		got, readable := mp4SoundTracks(data)
 		runtime.ReadMemStats(&after)
-		if got != 0 || after.TotalAlloc-before.TotalAlloc > 1<<20 {
+		if got != 0 || !readable || after.TotalAlloc-before.TotalAlloc > 1<<20 {
 			t.Fatalf("%s: %d sound tracks, %d bytes allocated", name, got, after.TotalAlloc-before.TotalAlloc)
 		}
 	}
@@ -612,8 +646,8 @@ func TestMP4SoundTracksReadTheFilesFFmpegMakes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := mp4SoundTracks(data); got != c.want {
-			t.Errorf("%s: %d sound tracks, want %d", c.name, got, c.want)
+		if got, readable := mp4SoundTracks(data); got != c.want || !readable {
+			t.Errorf("%s: %d sound tracks (readable %v), want %d", c.name, got, readable, c.want)
 		}
 	}
 }
@@ -632,6 +666,9 @@ func TestCheckRenderOutputsHoldsTheWorkersSoundToItsVideo(t *testing.T) {
 		return &s
 	}
 	twoSounds := slices.Concat(mp4Box("ftyp", []byte("isom")), mp4Box("moov", mp4Track("vide"), mp4Track("soun"), mp4Track("soun")))
+	// A sound track whose media box first names itself a picture: ffmpeg plays its sound, a first-handler reader shows none.
+	disguised := slices.Concat(mp4Box("ftyp", []byte("isom")), mp4Box("moov", mp4Track("vide"),
+		mp4Box("trak", mp4Box("mdia", mp4Box("hdlr", make([]byte, 8), []byte("vide"), make([]byte, 13)), mp4Box("hdlr", make([]byte, 8), []byte("soun"), make([]byte, 13))))))
 	output := func(video []byte) []renderOutput {
 		sum := sha256.Sum256(video)
 		return []renderOutput{{Kind: "mp4", ContentType: "video/mp4", Size: int64(len(video)), SHA256: hex.EncodeToString(sum[:]), Data: base64.StdEncoding.EncodeToString(video)}}
@@ -649,6 +686,9 @@ func TestCheckRenderOutputsHoldsTheWorkersSoundToItsVideo(t *testing.T) {
 		{"a film whose sound the worker does not mention", renderTestFilm, nil, false},
 		{"a silent video said to carry a sound", renderTestPicture, sound(nil), false},
 		{"two sound tracks", twoSounds, sound(nil), false},
+		{"a sound track named twice, said to be silent", disguised, nil, false},
+		{"a sound track named twice, said to carry a sound", disguised, sound(nil), false},
+		{"a sound track named as text, said to be silent", slices.Concat(mp4Box("ftyp", []byte("isom")), mp4Box("moov", mp4Track("vide"), mp4Track("text"))), nil, false},
 		{"another codec", renderTestFilm, sound(func(s *renderSound) { s.Codec = "mp3" }), false},
 		{"another rate", renderTestFilm, sound(func(s *renderSound) { s.SampleRate = 44100 }), false},
 		{"one channel", renderTestFilm, sound(func(s *renderSound) { s.Channels = 1 }), false},
@@ -659,6 +699,7 @@ func TestCheckRenderOutputsHoldsTheWorkersSoundToItsVideo(t *testing.T) {
 		{"a loudness past full scale", renderTestFilm, sound(func(s *renderSound) { s.Loudness.IntegratedLUFS = 3 }), false},
 		{"a range below nothing", renderTestFilm, sound(func(s *renderSound) { s.Loudness.RangeLU = -1 }), false},
 		{"no loudness measured", renderTestFilm, sound(func(s *renderSound) { s.Loudness = nil }), false},
+		{"a loudness of zeros (an empty record)", renderTestFilm, sound(func(s *renderSound) { s.Loudness = &renderLoudness{} }), false},
 	} {
 		if _, err := checkRenderOutputs(output(c.video), c.sound, 2); (err == nil) != c.ok {
 			t.Errorf("%s: %v", c.name, err)
