@@ -200,9 +200,9 @@ interface Reach { hard: boolean; fed: boolean }
  * A result handed in by hand (`source: 'manual'`: published by a person, picked out of a conversation, or handed in by an
  * agent over MCP) was not made by its node's engine, so the node's runtime, model, effort, bound Agent, conversation, team
  * and Agent reference leave it in place (in 多人同屏 only a person can pick a node's model, often after an agent has handed
- * its result in). Opening another conversation publishes none (nodeThreads.ts), and on a node already bound to an Agent
- * another runtime, model, effort or Agent opens one (CanvasSurface saveInspector), so in practice a hand-in stays through
- * them while its node is not bound (an agent's new node is not, until it is set up or run). It stays too through a
+ * its result in). On a node already bound to an Agent another runtime, model, effort or Agent opens another conversation
+ * (CanvasSurface saveInspector), which leaves a hand-in published (inspectorSavedNode); opening one by hand publishes
+ * none (nodeThreads.ts). It stays too through a
  * deliverable form it fits, when the form is all that changed (handInFitsForm): only a person adds one, often after the
  * hand-in, which would have been taken had it come after. What the node is asked otherwise (its title, task, kind,
  * deliverable form or task frame), a wire into it, and a result upstream replaced or taken back take it back as they take

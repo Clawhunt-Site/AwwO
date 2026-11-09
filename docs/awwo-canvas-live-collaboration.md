@@ -692,16 +692,15 @@ CHANGELOG entry "treg for a person's own Agent".
     agent's own change, which takes nothing back. A replaced result reaches everything below it, a wire into a node
     takes the node's result back whatever its source (a wire changes what the node is given), and a form always has its
     fields to give.
-  - A result handed in (`source: "manual"`, an agent's or a person's) on a node while it is not bound to an Agent (an
-    agent's new node is not, until it is set up or run) stays through the node's runtime, model, effort and the Agent it
-    is first bound to, which only say how AwwO would answer. On any node it stays through a deliverable form it fits,
+  - A result handed in (`source: "manual"`, an agent's or a person's) stays through its node's runtime, model, effort
+    and Agent, which only say how AwwO would answer. On a node already bound to an Agent, another runtime, model or
+    effort opens a new conversation, as it always has (its notice says a new Session opened): the hand-in stays
+    published through it, while a run's result stays with the earlier conversation, which only Undo publishes again; a
+    conversation opened by hand starts with no result. On any node a hand-in stays through a deliverable form it fits,
     read as the server reads it, when that form is all that changes (a first form's inputs carried from the node's wires
     are no change; any other input, even an empty one, asks something new): it would have been taken had it come after.
     What the node is asked otherwise (its title, task, kind, a deliverable it does not fit, or task frame), a wire into
     it, or a result it stood on changing still takes it back, as it takes back a run's result, and Undo brings it back.
-    On a node already bound, another runtime, model or effort opens a new conversation, as it always has (its notice
-    says a new Session opened), and so does another conversation opened on any node: it starts with no result; the
-    earlier conversation keeps the one it had, and only Undo publishes it again.
   - A session taking its first deliverable form keeps its wires (`deliverableWires.ts`): each wire into its `context`
     becomes an input of the form of its own, named after its source and not required; each wire out of its `result`
     comes from the form's first output its reader can take. While the session has no result, the nodes it feeds keep

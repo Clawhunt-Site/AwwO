@@ -46,4 +46,20 @@ describe('a person’s model pick on a 多人同屏 canvas', () => {
     await waitFor(() => expect(nodeIn(live.surface().document(), 'levels').model).toBe('qwen-fixture'));
     expect(nodeIn(live.surface().document(), 'levels').lastOutput).toEqual(handIn('Level 1, Lantern Path: …'));
   }, 30000);
+
+  it('keeps an agent’s hand-in on a node already set up when the person picks it another model, in the new conversation that opens', async () => {
+    const doc = canvas();
+    const setUp = { ...doc, nodes: doc.nodes.map(node => node.id === 'levels'
+      ? { ...node, issueId: 'issue-levels', binding: { companyId: 'company-mp', agentId: 'agent-levels', agentName: 'Levels' } } : node) };
+    const live = openLiveCanvas(setUp);
+    await screen.findByTestId('canvas-tile-levels');
+    live.othersChange(handedIn('levels', handIn('Level 1, Lantern Path: …')));
+    await pick('Levels', 'Qwen fixture');
+    await waitFor(() => expect(nodeIn(live.surface().document(), 'levels').model).toBe('qwen-fixture'));
+    const levels = nodeIn(live.surface().document(), 'levels');
+    // Its Agent was set up with the earlier model: a new conversation opens, not bound, as it always has.
+    expect(levels.binding).toBeNull();
+    expect(levels.activeThreadId).toMatch(/^thread-/);
+    expect(levels.lastOutput).toEqual(handIn('Level 1, Lantern Path: …'));
+  }, 30000);
 });
