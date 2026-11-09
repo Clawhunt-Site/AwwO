@@ -165,3 +165,48 @@ describe('the brand, AwwO', () => {
     expect(source).not.toMatch(/\bAWWO\b(?![-_])/);
   });
 });
+
+// The settings list stood right under the header on a page shorter than the list (账号安全), where longer pages let it
+// move down to its sticky top; and its box, shorter than its entries on most screens, cut an entry at its edge.
+describe('设置’s list', () => {
+  const settings = read('saas/settings/settings-center.css');
+  const px = (value: string | undefined) => Number(/^(-?\d+)px$/.exec(value ?? '')?.[1]);
+
+  it('sits where it sticks, below the header, before the page scrolls too', () => {
+    const system = read('saas/design/system.css');
+    const header = (property: string) => px(declared(system, '.saas-dashboard > header', property));
+    // The header rests 12px down the page and sticks 12px from the top, 64px tall.
+    expect([header('margin-top'), header('top'), header('min-height')]).toEqual([12, 12, 64]);
+    // A short page (账号安全) gives a sticky list no room to move down to its top: its margin puts it there at rest.
+    expect(header('margin-top') + header('min-height') + px(declared(settings, '.saas-settings-nav', 'margin-top')))
+      .toBe(px(declared(settings, '.saas-settings-nav', 'top')));
+  });
+
+  it('fades its last lines while more of the list is below, and only in the column', () => {
+    expect(declared(settings, '.saas-settings-nav', 'scroll-timeline')).toBe('--saas-settings-nav block');
+    const fade = (property: string) => declared(settings, '.saas-settings-nav::after', property);
+    expect(fade('position')).toBe('sticky');
+    expect(fade('pointer-events')).toBe('none');
+    // An empty box in a column the list fills: it would shrink to nothing as the list overflows.
+    expect(fade('flex')).toBe('none');
+    // Hidden unless the list scrolls (an inactive timeline leaves it at rest), shown while it can scroll on, gone at
+    // the list's end.
+    expect(fade('opacity')).toBe('0');
+    expect(fade('animation')).toBe('saas-settings-nav-more linear both');
+    expect(fade('animation-timeline')).toBe('--saas-settings-nav');
+    expect(settings).toMatch(/@keyframes saas-settings-nav-more \{\s*from, 90% \{ opacity: 1; \}\s*to \{ opacity: 0; \}\s*\}/);
+    // Across the list's padding to its border at the bottom of its view, and nothing added to its length: it starts
+    // its own height and the list's gap above where it would sit.
+    const padding = (declared(settings, '.saas-settings-nav', 'padding') ?? '').split(/\s+/).map(px);
+    expect(padding).toEqual([16, 12]);
+    expect(px(fade('bottom'))).toBe(-padding[0]);
+    // Its end is the last entry's, not the padding's below it: a list only its padding overflows never fades.
+    expect(fade('animation-range-end')).toBe(`calc(100% - ${padding[0]}px)`);
+    expect(fade('margin')).toBe(`-${px(fade('height')) + px(declared(settings, '.saas-settings-nav', 'gap'))}px -${padding[1]}px 0`);
+    // An entry the keyboard reaches, and the open page's, stop above all of it.
+    expect(px(declared(settings, '.saas-settings-nav', 'scroll-padding-bottom'))).toBeGreaterThanOrEqual(px(fade('height')));
+    // The phone's sideways row has no bottom to fade.
+    const phone = /@media \(max-width: 860px\) \{([\s\S]*)\}\s*$/.exec(settings)?.[1] ?? '';
+    expect(phone).toMatch(/\.saas-settings-nav::after \{\s*content: none;\s*\}/);
+  });
+});

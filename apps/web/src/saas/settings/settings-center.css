@@ -9,6 +9,9 @@
   position: sticky;
   /* Below the sticky page header (12px from the top, 64px tall). */
   top: 92px;
+  /* And there before the page scrolls: a page shorter than the list (账号安全) gives it no room to move down to 92px,
+     which left it right under the header. The phone's row keeps the margin too, below its header that does not stick. */
+  margin-top: 16px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -18,6 +21,35 @@
   background: var(--saas-card);
   max-height: calc(100dvh - 108px);
   overflow-y: auto;
+  scroll-timeline: --saas-settings-nav block;
+  /* An entry the keyboard reaches, or the open page's (SettingsCenter.tsx), stops above the fade below. */
+  scroll-padding-bottom: 48px;
+}
+/* The list is taller than its box on most screens (about 860px of entries; the box ends 16px above the window's bottom)
+   and scrolls inside it. While more is below, its last lines fade into the card, so the entry the edge cuts reads as more
+   to scroll, not as cut off; the fade lifts at the list's end. Scroll-driven: where that is unsupported, or the list
+   fits, nothing fades. */
+.saas-settings-nav::after {
+  content: '';
+  position: sticky;
+  /* Down through the list's bottom padding, to its border. */
+  bottom: -16px;
+  flex: none;
+  height: 48px;
+  /* Takes nothing from the list's length: its own height, and the 18px gap before it. */
+  margin: -66px -12px 0;
+  background: linear-gradient(to bottom, transparent, var(--saas-card) 85%);
+  pointer-events: none;
+  opacity: 0;
+  animation: saas-settings-nav-more linear both;
+  animation-timeline: --saas-settings-nav;
+  /* Measured to the last entry, not to the end of the padding below it: once every entry shows, nothing fades, and a
+     list that only its padding overflows never fades at all (an empty range ends the animation at once). */
+  animation-range-end: calc(100% - 16px);
+}
+@keyframes saas-settings-nav-more {
+  from, 90% { opacity: 1; }
+  to { opacity: 0; }
 }
 .saas-settings-nav a,
 .saas-settings-nav button {
@@ -361,6 +393,10 @@
     gap: 12px;
     overflow-x: auto;
     padding: 10px;
+  }
+  /* One row that scrolls sideways: no fade at a bottom it does not have. */
+  .saas-settings-nav::after {
+    content: none;
   }
   .saas-settings-group {
     flex-shrink: 0;
