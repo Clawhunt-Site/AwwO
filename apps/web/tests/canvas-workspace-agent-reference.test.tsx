@@ -61,7 +61,8 @@ it('keeps shared configuration read-only and initializes without writing shared 
   expect(screen.getByRole('radio', { name: '编程 Agent' })).toBeDisabled();
   expect(screen.getByLabelText('名称')).not.toBeDisabled();
   expect(screen.getByLabelText('Runtime')).toHaveTextContent('Pi');
-  expect(screen.getByLabelText('模型')).toHaveTextContent('existing-model');
+  // Named, never shown as its selector (modelNames.ts): with no catalogue at hand, by a name read from the selector.
+  expect(screen.getByLabelText('模型')).toHaveTextContent(/^Existing Model$/);
   expect(screen.getByLabelText('推理强度')).toHaveTextContent('未设置');
   expect(screen.queryByRole('combobox')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '保存并准备运行' }));

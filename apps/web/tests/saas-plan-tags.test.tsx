@@ -38,8 +38,8 @@ it('shows Pro on premium models in the node model picker and the team member pic
   const read = createCanvasRuntimeReader();
   const catalog = await read('/api/agents/pi/models');
   expect(catalog.models).toEqual(['qwen3.8-27b-p6', 'claude-opus-5', 'bedrock.claude-opus-5-5']);
-  // A model without a label of its own is tagged from its name; an untagged one keeps the picker's own fallback.
-  expect(catalog.model_labels).toEqual({ 'claude-opus-5': 'Claude Opus 5 · Pro', 'bedrock.claude-opus-5-5': 'Claude Opus 5.5 · Pro' });
+  // A model without a label of its own is labelled by its name, and tagged, so that no picker lists it by its selector.
+  expect(catalog.model_labels).toEqual({ 'qwen3.8-27b-p6': 'Qwen 3.8', 'claude-opus-5': 'Claude Opus 5 · Pro', 'bedrock.claude-opus-5-5': 'Claude Opus 5.5 · Pro' });
   const changed = vi.fn();
   const view = render(<RuntimePicker lang="en" runtimes={['pi']} value={{ backend: 'pi', model: 'qwen3.8-27b-p6', effort: '' }} onChange={changed} readJson={read} />);
   await waitFor(() => expect(screen.getByLabelText('Model')).not.toBeDisabled());
@@ -52,7 +52,7 @@ it('shows Pro on premium models in the node model picker and the team member pic
   render(<LocaleProvider locale="en"><NodeTeamEditor node={node} available readJson={read} onChange={changed} /></LocaleProvider>);
   const selects = await screen.findAllByLabelText('Model');
   await waitFor(() => expect(within(selects[0]).getByRole('option', { name: 'Claude Opus 5.5 · Pro' })).toBeEnabled());
-  expect(within(selects[0]).getByRole('option', { name: 'qwen3.8-27b-p6' })).toBeEnabled();
+  expect(within(selects[0]).getByRole('option', { name: 'Qwen 3.8' })).toBeEnabled();
 });
 
 it('tags the model shelf and the official-copy picker, but never the title a dropped model gives its node', async () => {

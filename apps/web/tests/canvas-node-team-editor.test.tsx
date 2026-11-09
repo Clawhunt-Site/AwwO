@@ -126,7 +126,8 @@ describe('node team configuration', () => {
   it('disables all controls and guards synthetic edits while read-only', async () => {
     const initial = session(); initial.team = createNodeTeam(initial); const save = vi.fn();
     const { rerender } = render(<Harness initial={initial} disabled onChange={save} />);
-    await screen.findAllByRole('option', { name: 'model-a' });
+    // A model the catalogue gives no label is listed by a name read from its selector (modelNames.ts), never by the selector.
+    await screen.findAllByRole('option', { name: 'Model A' });
     for (const control of [...screen.getAllByRole('textbox'), ...screen.getAllByRole('combobox'), ...screen.getAllByRole('spinbutton')]) expect(control).toBeDisabled();
     fireEvent.change(member(1).getByLabelText('职责'), { target: { value: 'Should not save' } });
     fireEvent.click(screen.getByRole('button', { name: '添加 Agent' })); expect(save).not.toHaveBeenCalled();
@@ -138,7 +139,7 @@ describe('node team configuration', () => {
     render(<InspectorPanel node={initial} liveCompanies={[]} apiBase="/api" readJson={readJson} onSave={save} onClose={vi.fn()} />);
     const warning = within(screen.getByRole('group', { name: '单独指定模型的团队成员' }));
     expect(warning.getByText(/1 位成员单独指定了模型/)).toBeInTheDocument();
-    expect(warning.getByText('Agent 1 · 研究 · model-b')).toBeInTheDocument();
+    expect(warning.getByText('Agent 1 · 研究 · Model B')).toBeInTheDocument();
     fireEvent.click(warning.getByRole('button', { name: '改为跟随节点模型' }));
     expect(screen.queryByRole('group', { name: '单独指定模型的团队成员' })).toBeNull();
     await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).not.toBeDisabled());
@@ -236,7 +237,7 @@ describe('node team configuration', () => {
   it('localizes team settings and summarizes members/mode on collapsed nodes', async () => {
     const initial = session(); initial.team = { ...createNodeTeam(initial), mode: 'parallel' };
     const { unmount } = render(<CanvasI18nProvider locale="en"><Harness initial={initial} /></CanvasI18nProvider>);
-    expect(screen.getByRole('checkbox', { name: 'Enable multiple Agents' })).toBeInTheDocument(); expect(screen.getByLabelText('Maximum model calls')).toBeInTheDocument(); await screen.findAllByRole('option', { name: 'model-a' });
+    expect(screen.getByRole('checkbox', { name: 'Enable multiple Agents' })).toBeInTheDocument(); expect(screen.getByLabelText('Maximum model calls')).toBeInTheDocument(); await screen.findAllByRole('option', { name: 'Model A' });
     expect(screen.getByText(/Shared session history includes completed user exchanges/)).toHaveTextContent('not every earlier member response');
     unmount(); render(<CanvasI18nProvider locale="en"><SessionTile node={initial} compact scale={1} focused={false} /></CanvasI18nProvider>);
     expect(screen.getByTestId('node-team-badge-node-a')).toHaveTextContent('2 Agent');
@@ -274,8 +275,8 @@ describe('OpenAI Agents team configuration', () => {
     fireEvent.change(screen.getByLabelText('团队默认执行框架'), { target: { value: 'openai-agents' } });
     expect(save.mock.lastCall![0]).toMatchObject({ runtime: 'openai-agents', members: [expect.objectContaining({ runtime: '', model: '', tools: [] }), expect.objectContaining({ runtime: 'pi', model: 'pi-only' })] });
     await waitFor(() => expect(member(1).getByLabelText('模型')).not.toBeDisabled());
-    expect(member(1).getByRole('option', { name: 'agents-only' })).toBeInTheDocument();
-    expect(member(2).queryByRole('option', { name: 'agents-only' })).toBeNull();
+    expect(member(1).getByRole('option', { name: 'Agents Only' })).toBeInTheDocument();
+    expect(member(2).queryByRole('option', { name: 'Agents Only' })).toBeNull();
   });
   it('ignores late catalogs after runtime changes and preserves unknown saved models visibly', async () => {
     let resolveAgents!: (value: unknown) => void;
@@ -286,7 +287,8 @@ describe('OpenAI Agents team configuration', () => {
     fireEvent.change(member(2).getByLabelText('执行框架'), { target: { value: 'pi' } });
     await waitFor(() => expect(member(2).getByLabelText('模型')).not.toBeDisabled());
     resolveAgents({ models: ['late-agents-model'] });
-    await waitFor(() => expect(member(2).getByRole('option', { name: 'pi-only' })).toBeInTheDocument());
+    await waitFor(() => expect(member(2).getByRole('option', { name: 'Pi Only' })).toBeInTheDocument());
+    expect(screen.queryByRole('option', { name: 'Late Agents Model' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'late-agents-model' })).toBeNull();
   });
   it('keeps saved models and tools visible when the catalog changes, blocking save until corrected', async () => {
@@ -302,7 +304,7 @@ describe('OpenAI Agents team configuration', () => {
   it('preserves tools during read-only viewing and guards synthetic changes', async () => {
     const node = { ...session(), runtime: 'openai-agents', model: 'agents-only' }; node.team = createNodeTeam(node); node.team.members[0].tools = ['calculator'];
     const save = vi.fn(); render(<Harness initial={node} read={mixedRead} disabled runtimes={mixedRuntimes} runtimeTools={allowedTools} onChange={save} />);
-    await screen.findAllByRole('option', { name: 'agents-only' });
+    await screen.findAllByRole('option', { name: 'Agents Only' });
     const calculator = member(1).getByRole('checkbox', { name: /计算器/ }); expect(calculator).toBeChecked(); expect(calculator).toBeDisabled();
     fireEvent.click(calculator); fireEvent.change(member(1).getByLabelText('执行框架'), { target: { value: 'pi' } });
     expect(save).not.toHaveBeenCalled();

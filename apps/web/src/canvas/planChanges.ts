@@ -42,9 +42,10 @@ function fieldShape(node: SessionNode): string {
 
 const wire = (edge: CanvasEdge) => JSON.stringify([edge.fromNode, edge.fromPort, edge.toNode, edge.toPort]);
 
-/** The lines saying what changed, at most MAX_LINES of them; none when the documents hold the same nodes and wires. */
+/** The lines saying what changed, at most MAX_LINES of them; none when the documents hold the same nodes and wires.
+ *  `modelName` names a node's model as it now runs it (the node is given too, for its runtime). */
 export function describePlanChanges(before: CanvasDocument, after: CanvasDocument, locale: UiLocale, t: CanvasTranslate,
-  modelName: (model: string) => string): string[] {
+  modelName: (model: string, node: SessionNode) => string): string[] {
   const earlier = new Map(before.nodes.map(node => [node.id, node]));
   const later = new Map(after.nodes.map(node => [node.id, node]));
   const added = after.nodes.filter(node => !earlier.has(node.id));
@@ -83,8 +84,8 @@ export function describePlanChanges(before: CanvasDocument, after: CanvasDocumen
     if (fieldShape(previous) !== fieldShape(next)) fields.push(next);
     if (previous.model !== next.model || previous.effort !== next.effort) {
       modelLines.push(!next.model ? t('planning.changeModelDefault', { node: title(next) })
-        : next.effort ? t('planning.changeModelEffort', { node: title(next), model: modelName(next.model), effort: effortLabel(t, next.effort) })
-          : t('planning.changeModel', { node: title(next), model: modelName(next.model) }));
+        : next.effort ? t('planning.changeModelEffort', { node: title(next), model: modelName(next.model, next), effort: effortLabel(t, next.effort) })
+          : t('planning.changeModel', { node: title(next), model: modelName(next.model, next) }));
     }
   }
   if (persona.length) lines.push(t('planning.changePersona', { names: names(locale, t, persona) }));

@@ -78,9 +78,10 @@ describe('real Agent library', () => {
     const opaque = 'byok_scope_connection_87654321';
     render(<WorkspaceAgentPicker loadPage={async () => ({ items: [{ ...agent('unknown'), model: opaque }] })} onSelect={vi.fn()} disabled={false} catalogue={[]} />);
     const card = await screen.findByRole('button', { name: '选择 unknown' });
-    expect(card).toHaveTextContent('模型未在当前目录 · pi');
+    // Said as every other place says a connection's model the catalogue does not list (modelNames.ts unnamedModelText).
+    expect(card).toHaveTextContent('当前目录未包含该模型 · 87654321 · pi');
     expect(card).not.toHaveTextContent(opaque);
-    expect(card.querySelector('span[title]')?.getAttribute('title')).toBe('pi · 87654321');
+    expect(card.querySelector('span[title]')?.getAttribute('title')).toBe('当前目录未包含该模型 · 87654321');
   });
 });
 

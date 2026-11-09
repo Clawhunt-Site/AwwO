@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Plus, RefreshCw, Search } from 'lucide-react';
 import { useCanvasI18n } from './i18n';
 import { SaaSApiError, saasErrorMessage } from '../saas/api';
+import { nodeModelName } from './modelNames';
 import type { ModelPaletteSelection } from './modelPalette';
 import type { WorkspaceAgent, WorkspaceAgentLoader } from './workspaceAgents';
 
@@ -48,15 +49,13 @@ export function WorkspaceAgentPicker({ loadPage, onSelect, disabled, compact = f
     void load(null);
     return () => request.current?.abort();
   }, [loadPage, revision]);
+  // An Agent's model goes by the name the node's model picker shows it by (modelNames.ts), never by its selector: a
+  // model the catalogue does not name by a name read from its selector, a team connection's it no longer lists as
+  // missing, with the end of its selector to tell two apart.
   const modelDescription = (item: WorkspaceAgent) => {
-    const label = catalogue?.find(model => model.runtime === item.runtime && model.model === item.model)?.label;
-    if (label) return { label, title: label };
     if (!item.model) return { label: text('未配置模型', 'No model configured'), title: '' };
-    if (/^byok_[a-zA-Z0-9_-]+$/.test(item.model)) return {
-      label: text('模型未在当前目录', 'Model not in current catalogue'),
-      title: `${item.runtime} · ${item.model.slice(-8)}`,
-    };
-    return { label: item.model, title: item.model };
+    const label = nodeModelName({ runtime: item.runtime, model: item.model }, { models: catalogue }, locale);
+    return { label, title: label };
   };
   const normalized = query.trim().toLocaleLowerCase();
   const visible = items.filter(item => `${item.name}\n${item.instructions}\n${modelDescription(item).label}\n${item.runtime}`.toLocaleLowerCase().includes(normalized));

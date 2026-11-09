@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { SessionNode } from './canvasDoc';
 import { modelLabel, modelLabels } from '../modelLabels';
 import { useCanvasI18n } from './i18n';
+import { labelModelName, nodeModelName, unnamedModelText, type ModelNameSources } from './modelNames';
 import { NODE_TEAM_LIMITS, NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, inheritingRuntime, nodeTeamRuntimeLabel, createNodeTeam, createNodeTeamMember, nodeTeamTurnEstimate, validateNodeTeam, type NodeTeam, type NodeTeamEffortCatalogs, type NodeTeamMember, type NodeTeamMode, type NodeTeamRuntime, type NodeTeamTool, type NodeTeamModelCatalogs } from './nodeTeam';
 import { createNodeTeamFromTemplate, nodeTeamTemplate, nodeTeamTemplates, type NodeTeamTemplate, type NodeTeamTemplateId } from './nodeTeamTemplates';
 import { computerRuntime } from './nodeRuntime';
@@ -73,9 +74,11 @@ const COPY = {
 export function nodeTeamModeLabel(mode: NodeTeamMode, locale: 'zh' | 'en'): string {
   return COPY[locale].modes[mode];
 }
-export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTools = {}, readJson, disabled = false, onChange, onValidityChange }: {
+export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTools = {}, readJson, modelNames = {}, disabled = false, onChange, onValidityChange }: {
   node: SessionNode; available: boolean; readJson?: ReadJson; disabled?: boolean;
   runtimes?: readonly NodeTeamRuntime[]; runtimeTools?: Partial<Record<NodeTeamRuntime, readonly NodeTeamTool[]>>;
+  /** What a member's model its runtime's catalogue lacks is named by (the node's models, InspectorPanel). */
+  modelNames?: ModelNameSources;
   onChange: (team: NodeTeam | undefined) => void; onValidityChange?: (valid: boolean) => void;
 }) {
   const { locale } = useCanvasI18n();
@@ -160,6 +163,12 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
   const editMember = (index: number, patch: Partial<NodeTeamMember>) => {
     if (team) edit({ members: team.members.map((member, position) => position === index ? normalizeMember({ ...member, ...patch }) : member) });
   };
+  // A member's model its runtime's catalogue lacks, as the node's model picker names it: said to be missing once, where
+  // no name can be read for it at all.
+  const unknownModelText = (runtime: NodeTeamRuntime, model: string) => {
+    const name = nodeModelName({ runtime, model }, modelNames, locale);
+    return name === unnamedModelText(model, false, locale) ? name : `${t.unknownModel}${name}`;
+  };
   const move = (index: number, offset: number) => {
     if (!team || index + offset < 0 || index + offset >= team.members.length) return;
     const members = [...team.members];
@@ -234,8 +243,10 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
             // A level is not portable across models: keep it only when the newly chosen model offers it too.
             onChange={event => editMember(index, { model: event.target.value, effort: member.effort && (runtimeEfforts[event.target.value] ?? []).includes(member.effort) ? member.effort : '' })}>
             <option value="">{runtime === inheritingRuntime(node) ? t.defaultModel : t.runtimeDefaultModel}</option>
-            {member.model && !catalog?.includes(member.model) ? <option value={member.model} disabled>{t.unknownModel}{member.model}</option> : null}
-            {(catalog ?? []).map(model => <option key={model} value={model}>{modelLabel(model, catalogState?.key === catalogKey ? catalogState.labels[runtime] : undefined)}</option>)}
+            {/* Models go by their names, never their selectors (modelNames.ts): a listed one by its label as the catalogue
+                gives it, read as a selector where it is one; one the catalogue lacks as the node's model picker names it. */}
+            {member.model && !catalog?.includes(member.model) ? <option value={member.model} disabled>{unknownModelText(runtime, member.model)}</option> : null}
+            {(catalog ?? []).map(model => <option key={model} value={model}>{labelModelName(modelLabel(model, catalogState?.key === catalogKey ? catalogState.labels[runtime] : undefined), model, locale)}</option>)}
           </select></label>
           {effortLevels.length || member.effort ? <label>{t.effort}<select className="canvas-inspector-input" value={member.effort ?? ''} disabled={disabled || !available || !effortLevels.length}
             onChange={event => editMember(index, { effort: event.target.value })}>

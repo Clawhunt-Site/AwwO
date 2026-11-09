@@ -82,7 +82,7 @@ import { AddNodeMenu, type AddNodeKind } from './AddNodeMenu';
 import { InspectorPanel } from './InspectorPanel';
 import { mediaCatalogueOf, type MediaCatalogueState } from './MediaNodeSettings';
 import { mediaGroupLabel, mediaKindOf, mediaModelLabel, mediaModelsOf, readMediaCatalogue, type MediaKind } from './mediaCatalog';
-import type { ModelNameSources } from './modelNames';
+import { nodeModelName, type ModelNameSources } from './modelNames';
 import { replaceRetiredMediaModels } from './retiredMediaModels';
 import { runScopeWithoutMedia } from './runScope';
 import type { NodeModelChoice } from './NodeModelPicker';
@@ -4044,13 +4044,17 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   };
   // `request` plans a prompt handed over (a carried-over request, a routed message) rather than the box's draft;
   // the box is emptied only where it holds that prompt.
+  // This canvas's palette, none while it is another workspace's or canvas's.
+  const planningCatalogue = (): readonly ModelPaletteSelection[] => {
+    const live = paletteRef.current; const here = currentSaaSCanvas();
+    return live && here && live.tenantId === here.tenant.id && live.canvasId === here.canvasId ? live.models : [];
+  };
   // The chat models a plan may put a node on: this canvas's palette less the models only a user may choose
   // (userChosenModels.ts planModelsOf): the planner sees no other, and a plan's set_model resolves against the same list.
-  const planningModels = () => {
-    const live = paletteRef.current; const here = currentSaaSCanvas();
-    if (!live || !here || live.tenantId !== here.tenant.id || live.canvasId !== here.canvasId) return planModelsOf([]);
-    return planModelsOf(live.models);
-  };
+  const planningModels = () => planModelsOf(planningCatalogue());
+  // What a plan's reply says a node now runs: its model as the node's model picker names it (modelNames.ts), never by
+  // its selector, a model only a user may choose (the planner is not offered it) and one the palette lacks included.
+  const plannedModelName = (_model: string, node: SessionNode) => nodeModelName(node, { models: planningCatalogue() }, locale);
   // The model the Agent nodes a plan adds without set_model will take (withAssistantModel), which the planner sizes them
   // by, once both reads it rests on are in: this canvas's palette and the host's own catalogue ("default" where they run
   // the workspace default). Until then the request names none, and they take the reader's choice when the plan lands,
@@ -4163,8 +4167,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       // Media nodes a plan added: said once, so the user knows a canvas run generates them and Send makes one alone.
       const addedMedia = changed ? applied.doc.nodes.filter(node => applied.addedNodeIds.includes(node.id) && node.kind === 'session' && mediaKindOf(node.agentKind)).length : 0;
       // What the canvas now holds, node by node, under the model's own summary of what it meant to do.
-      const modelName = (id: string) => planModels.find(entry => entry.model === id)?.name || id;
-      const changes = changed ? describePlanChanges(before, applied.doc, locale, t, modelName) : [];
+      const changes = changed ? describePlanChanges(before, applied.doc, locale, t, plannedModelName) : [];
       // A plan made from a shortened view of a large canvas says so: those texts were left as they are.
       const condensedNodes = jev ? 0 : planContextCondensed(plan)?.size ?? 0;
       const lead = [...(!changed && plan.operations.length ? [applied.summary, t('planning.nothingApplied')] : [applied.summary]),
@@ -4260,8 +4263,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       return { applied: false, satisfied: true, reason: t('planning.evolutionNothing') };
     }
     // Everything said is worked out before the canvas changes, so nothing after the change can leave it unsaid.
-    const modelName = (entry: string) => [...modelChoices.choices, ...(modelChoices.userChosen ?? [])].find(choice => choice.model === entry)?.name || entry;
-    const changes = describePlanChanges(before, applied.doc, locale, t, modelName);
+    const changes = describePlanChanges(before, applied.doc, locale, t, plannedModelName);
     const reply = [request.note, ...(changes.length ? [t('planning.changesHeader'), ...changes.map(line => `· ${line}`)] : []),
       ...applied.adjustments.slice(0, PLAN_NOTES_SHOWN).map(item => `· ${item}`)].join('\n');
     patchDoc(() => applied.doc, { label: `ai:${id}` });
@@ -5399,7 +5401,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       readJson={runtimeReadJson} onSave={saveInspector} onInitialize={canInitialize && !runUnavailableReason ? initializeInspector : undefined} readOnly={readOnly || busyNow.has(node.id) || exclusiveNow} readOnlyMessage={readOnly ? t('common.readOnly') : undefined}
       media={canInitialize ? mediaState : undefined} onRetryMedia={() => setMediaRefresh(value => value + 1)}
       editFiles={node.kind === 'edit' ? editWiredFiles(node, nodes, edges) : undefined}
-      modelGroups={canInitialize ? shelfGroups : undefined} sandboxGroups={canInitialize ? sandboxShelf : undefined} blenderGroups={canInitialize ? blenderShelf : undefined} modelsLoading={paletteLoading} modelsError={paletteError}
+      modelGroups={canInitialize ? shelfGroups : undefined} modelNames={canInitialize ? modelNames : undefined} sandboxGroups={canInitialize ? sandboxShelf : undefined} blenderGroups={canInitialize ? blenderShelf : undefined} modelsLoading={paletteLoading} modelsError={paletteError}
       onRetryModels={() => setPaletteRefresh(value => value + 1)}
       market={canInitialize ? market.inspector : undefined}
       onCloseLockChange={onInspectorLockChange} onBound={() => refreshCompanies()}

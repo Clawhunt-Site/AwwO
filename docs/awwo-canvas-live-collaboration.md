@@ -658,9 +658,13 @@ CHANGELOG entry "treg for a person's own Agent".
   the opened node's task card names its model as the picker's chip does. The execution timeline and the run receipt
   name a node's model by them, taking first the catalogue's entry on the node's own runtime, which 多人同屏 is not sent
   (modelNames.ts nodeModelName); where no name can be read, they and the picker say the model is unnamed or missing from
-  the catalogue. A run is named after its node, whose title is the document's own: in the local edition a node its
-  model rail names after an AwwO 云端 model is titled by the name the online AwwO publishes for it (Claude Opus 5.5), as
-  its picker shows it there.
+  the catalogue. A run is named after its node, whose title is the document's own: a node the model rail adds is
+  titled by its model's name as the picker lists it, never by a selector (in the local edition an AwwO 云端 model by
+  the name the online AwwO publishes for it, Claude Opus 5.5), though a node added before 2026-11-08 keeps the title
+  it was given then. The node's Configure panel, its collaboration team's models, a workspace Agent's model, a plan's
+  reply and the account's default model name a model the same way (modelNames.ts); a team member's picker keeps a
+  connection's label, which names the connection, with the model's name in front, and the plan tag on a model the
+  workspace's plan does not include.
 - **On the board**: a ring in each participant's colour around the nodes they have selected, with their name; a claim's
   badge on its node; each person's pointer with their name; a short glow on a node another participant just changed.
   These mark the cards the board draws: a component inside a converged icon (收敛成一个图标, one person's own way of

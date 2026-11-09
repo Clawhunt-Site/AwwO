@@ -226,10 +226,13 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
       const runtime: SaaSRuntimeStatus = await request('/runtime');
       const selected = runtimeDefinitions(runtime).find(item => item.id === decodeURIComponent(modelCatalog[1]));
       if (!selected) return json({ error: canvasText('所选执行框架不在服务目录中。', 'The selected runtime is absent from the service catalog.') }, 404);
-      // Models carry their own effort contract so the picker scopes levels to the chosen model, and a model the
-      // workspace's plan does not include is tagged in its label (the selector stays the model id).
+      // Models carry their own effort contract so the picker scopes levels to the chosen model, and a label: a
+      // connection's own (naming the connection, so two connections' models can be told apart), else the model's
+      // published name, so that the picker does not list it by its selector, which names the service AwwO reaches the
+      // model through; a model the workspace's plan does not include is tagged in it (the selector stays the model id).
       return json({ source: 'saas_runtime', models: runtimeModels(runtime, selected.id).map(model => {
-        const label = model.requiresUpgrade === true ? withPlanTag(model.label || model.name || model.id, model) : model.label;
+        const named = (typeof model.label === 'string' ? model.label.trim() : '') || (typeof model.name === 'string' ? model.name.trim() : '');
+        const label = model.requiresUpgrade === true ? withPlanTag(named || model.id, model) : named;
         return { id: model.id, ...(label ? { label } : {}), ...modelEffortCapability(model) };
       }) });
     }

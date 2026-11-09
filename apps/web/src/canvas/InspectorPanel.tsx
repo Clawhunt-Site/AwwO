@@ -30,7 +30,7 @@ import { PersonaPicker } from './PersonaPicker';
 import { TaskFrameEditor } from './TaskFrameEditor';
 import { NodeSkillsEditor } from './NodeSkillsEditor';
 import { cleanTaskFrame, isTaskFrame, taskFrameError } from './taskFrame';
-import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, followNodeModel, followNodeRuntime, inheritNodeModel, nodeTeamModelOverrides, type NodeTeam, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
+import { validateNodeTeam, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, nodeTeamRuntimeLabel, followNodeModel, followNodeRuntime, inheritNodeModel, nodeTeamModelOverrides, type NodeTeam, type NodeTeamMember, type NodeTeamRuntime, type NodeTeamTool } from './nodeTeam';
 import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
 import { followLiveNode, mergeIntoLive, savedInto, settleConflict, type InspectorView } from './inspectorMerge';
 import { hireAgentIntoCompany, isAllowedBase, normalizeBase } from '../canvasHire';
@@ -42,6 +42,7 @@ import { AssembleSettings } from './AssembleSettings';
 import { EditSettings } from './EditSettings';
 import type { EditWiredFiles } from './editNode';
 import type { ModelPaletteGroup } from './modelPalette';
+import { nodeModelName, type ModelNameSources } from './modelNames';
 import { mediaKindOf, mediaModelsOf } from './mediaCatalog';
 import { automaticChoices } from './userChosenModels';
 import { MarketAgentBox } from './MarketAgentBox';
@@ -91,6 +92,10 @@ export interface InspectorPanelProps {
   /** A hosted workspace's chat models, each once on the runtime AwwO runs it on (automaticGroups): the node's model is
    *  picked from these and its runtime is never shown (nodeRuntime.ts). Absent → the runtime picker of a local host. */
   modelGroups?: ReadonlyArray<ModelPaletteGroup>;
+  /** What a model this panel shows as the node's or a member's, not as a choice, is named by: the workspace's whole
+   *  catalogue, each runtime's entries (two runtimes may give one id to different models, and the groups above keep one
+   *  entry per model), and its media catalogue. Absent: the groups' entries. */
+  modelNames?: ModelNameSources;
   /** The models a node can run in its own sandbox computer (sandboxGroups); with any of them ready, the node's settings
    *  offer the sandbox switch. */
   sandboxGroups?: ReadonlyArray<ModelPaletteGroup>;
@@ -210,6 +215,7 @@ export function InspectorPanel({
   onRetryMedia,
   editFiles,
   modelGroups,
+  modelNames: catalogueNames,
   sandboxGroups,
   blenderGroups,
   modelsLoading = false,
@@ -332,6 +338,14 @@ export function InspectorPanel({
   const assembleDraft = draft.kind === 'assemble' ? draft : null;
   const editNodeDraft = draft.kind === 'edit' ? draft : null;
   const mediaCatalogue = mediaCatalogueOf(media);
+  // What a model this panel shows as a node's or a member's, not as a choice, is named by (modelNames.ts nodeModelName,
+  // as the node's model picker names it, never by its selector): the host's whole catalogue, else the models the node can
+  // be put on here; the media catalogue either way. Without a hosted catalogue (a local host's runtime picker) a name is
+  // read from the selector.
+  const modelNames: ModelNameSources = {
+    models: catalogueNames ? catalogueNames.models ?? [] : [...(modelGroups ?? []), ...(sandboxGroups ?? []), ...(blenderGroups ?? [])].flatMap(group => group.models),
+    media: catalogueNames?.media ?? mediaCatalogue,
+  };
   // A SaaS host saves a media node only once its catalog model and parameters are valid; a host
   // without the media service never saves one.
   const mediaDraft = Boolean(onInitialize && sessionDraft && mediaKindOf(sessionDraft.agentKind));
@@ -340,6 +354,7 @@ export function InspectorPanel({
   // Team members whose own model the node's model does not reach: shown under the model picker, where a reader
   // switching models after a premium-quota failure looks, because those members keep calling their model.
   const teamModelOverrides = sessionDraft && !sessionDraft.agentRef ? nodeTeamModelOverrides(sessionDraft) : [];
+  const memberModelName = (member: NodeTeamMember) => nodeModelName({ runtime: member.runtime || sessionDraft?.team?.runtime, model: member.model }, modelNames, locale);
   const boundCompany = useMemo(
     () => (sessionDraft?.binding ? liveCompanies.find((c) => c.id === sessionDraft.binding?.companyId) : undefined),
     [sessionDraft?.binding, liveCompanies],
@@ -613,7 +628,7 @@ export function InspectorPanel({
             {marketRef && marketLocked ? <div className="canvas-inspector-hint">{locale === 'en' ? 'The Agent’s author locked its model: a node using it runs only this model.' : '这个 Agent 的作者锁定了模型：用它的节点只能用这个模型。'}</div> : null}
             {fixedModel ? <dl className="canvas-inspector-hint">
               {modelGroups ? null : <><dt>Runtime</dt><dd><output aria-label="Runtime">{nodeTeamRuntimeLabel(sessionDraft.runtime || 'pi')}</output></dd></>}
-              <dt>{locale === 'en' ? 'Model' : '模型'}</dt><dd><output aria-label={locale === 'en' ? 'Model' : '模型'}>{sessionDraft.model || (locale === 'en' ? 'Resolved by the server' : '由服务端解析')}</output></dd>
+              <dt>{locale === 'en' ? 'Model' : '模型'}</dt><dd><output aria-label={locale === 'en' ? 'Model' : '模型'}>{nodeModelName(sessionDraft, modelNames, locale) || (locale === 'en' ? 'Resolved by the server' : '由服务端解析')}</output></dd>
               <dt>{locale === 'en' ? 'Reasoning effort' : '推理强度'}</dt><dd><output aria-label={locale === 'en' ? 'Reasoning effort' : '推理强度'}>{sessionDraft.effort || (locale === 'en' ? 'Not set' : '未设置')}</output></dd>
             </dl> : modelGroups ? <div className="canvas-inspector-runtime">
                 {sandboxReady || sandboxNode ? <label className="awwo-sandbox-switch">
@@ -632,14 +647,14 @@ export function InspectorPanel({
                     ? (locale === 'en' ? 'A market Agent runs as a text Agent, without a Blender workstation. Take the Agent off to use one.' : '市场 Agent 只作为文字 Agent 运行，不带 Blender 工作站。要用工作站，先取下这个 Agent。')
                     : t(sessionDraft.team ? 'inspector.sandboxTeam' : 'inspector.blenderHint')}</small></span>
                 </label> : null}
-                <NodeModelSettings node={sessionDraft} groups={sandboxNode && sandboxGroups ? sandboxGroups : blenderNode && blenderGroups ? blenderGroups : modelGroups} loading={modelsLoading} error={modelsError} onRetry={onRetryModels} keepRuntime={Boolean(sessionDraft.team) || sandboxNode || blenderNode}
+                <NodeModelSettings node={sessionDraft} groups={sandboxNode && sandboxGroups ? sandboxGroups : blenderNode && blenderGroups ? blenderGroups : modelGroups} names={modelNames} loading={modelsLoading} error={modelsError} onRetry={onRetryModels} keepRuntime={Boolean(sessionDraft.team) || sandboxNode || blenderNode}
                   disabled={busy}
                   onChange={next => editDraft({ ...withModelChoice(sessionDraft, next),
                     ...(sessionDraft.team && next.model !== sessionDraft.model ? { team: followNode(sessionDraft.team, sessionDraft, next.runtime) } : {}) })} />
                 {teamModelOverrides.length ? (
                   <div className="canvas-inspector-outcome canvas-inspector-outcome--warn" role="group" aria-label={t('inspector.teamModelOverrideLabel')}>
                     <div>{t('inspector.teamModelOverride', { count: teamModelOverrides.length })}</div>
-                    <ul>{teamModelOverrides.map(({ index, member }) => <li key={member.id}>{t('inspector.teamModelOverrideMember', { index: index + 1, name: member.name, model: member.model })}</li>)}</ul>
+                    <ul>{teamModelOverrides.map(({ index, member }) => <li key={member.id}>{t('inspector.teamModelOverrideMember', { index: index + 1, name: member.name, model: memberModelName(member) })}</li>)}</ul>
                     <button type="button" disabled={busy}
                       onClick={() => { if (sessionDraft.team) editDraft({ ...sessionDraft, team: inheritNodeModel(sessionDraft.team, teamModelOverrides.map(item => item.index)) }); }}>
                       {t('inspector.teamModelFollow')}
@@ -668,7 +683,7 @@ export function InspectorPanel({
                 {teamModelOverrides.length ? (
                   <div className="canvas-inspector-outcome canvas-inspector-outcome--warn" role="group" aria-label={t('inspector.teamModelOverrideLabel')}>
                     <div>{t('inspector.teamModelOverride', { count: teamModelOverrides.length })}</div>
-                    <ul>{teamModelOverrides.map(({ index, member }) => <li key={member.id}>{t('inspector.teamModelOverrideMember', { index: index + 1, name: member.name, model: member.model })}</li>)}</ul>
+                    <ul>{teamModelOverrides.map(({ index, member }) => <li key={member.id}>{t('inspector.teamModelOverrideMember', { index: index + 1, name: member.name, model: memberModelName(member) })}</li>)}</ul>
                     <button type="button" disabled={busy}
                       onClick={() => { if (sessionDraft.team) editDraft({ ...sessionDraft, team: inheritNodeModel(sessionDraft.team, teamModelOverrides.map(item => item.index)) }); }}>
                       {t('inspector.teamModelFollow')}
@@ -721,7 +736,7 @@ export function InspectorPanel({
             </div> : null}
 
             {!sessionDraft.agentRef && <NodeTeamEditor node={sessionDraft} available={Boolean(readJson) && teamsAvailable} readJson={readJson}
-              runtimes={teamRuntimes} runtimeTools={teamTools}
+              runtimes={teamRuntimes} runtimeTools={teamTools} modelNames={modelNames}
               disabled={busy || Boolean(sessionDraft.agentRef)} onValidityChange={setTeamCatalogValid}
               onChange={team => editDraft({ ...sessionDraft, team })} />}
             </>}

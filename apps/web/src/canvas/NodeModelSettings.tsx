@@ -4,6 +4,7 @@
 import { useId } from 'react';
 import type { SessionNode } from './canvasDoc';
 import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
+import { listedModelName, nodeModelName, type ModelNameSources } from './modelNames';
 import type { ModelPaletteGroup, ModelPaletteSelection } from './modelPalette';
 
 const EFFORT_KEYS: Record<string, CanvasTextKey> = {
@@ -23,6 +24,9 @@ export interface NodeModelSettingsProps {
   node: Pick<SessionNode, 'runtime' | 'model' | 'effort'>;
   /** The workspace's chat models, each once (automaticGroups). */
   groups: ReadonlyArray<ModelPaletteGroup>;
+  /** What a saved model the groups lack is named by: the whole catalogue, which may list it for another runtime (a
+   *  computer's), and the media catalogue. Absent: the groups' entries. */
+  names?: ModelNameSources;
   loading?: boolean;
   error?: string;
   onRetry?: () => void;
@@ -33,8 +37,8 @@ export interface NodeModelSettingsProps {
   onChange: (next: NodeModelValue) => void;
 }
 
-export function NodeModelSettings({ node, groups, loading = false, error = '', onRetry, disabled = false, keepRuntime = false, onChange }: NodeModelSettingsProps) {
-  const { t } = useCanvasI18n();
+export function NodeModelSettings({ node, groups, names, loading = false, error = '', onRetry, disabled = false, keepRuntime = false, onChange }: NodeModelSettingsProps) {
+  const { t, locale } = useCanvasI18n();
   const modelId = useId();
   const effortId = useId();
   const entries = groups.flatMap(group => group.models);
@@ -48,6 +52,12 @@ export function NodeModelSettings({ node, groups, loading = false, error = '', o
   // model lacks). Only where the levels are known: not while the models load or after they failed to (the list is empty
   // then), nor for a team kept on another runtime, whose levels there are not listed here.
   const stale = node.effort && !loading && !error && !kept && !efforts.includes(node.effort) ? node.effort : '';
+  // A model is listed, and a saved one this list lacks is named, as the node's model picker names them (modelNames.ts):
+  // by its published name, read as a selector where the catalogue names it by one, never by its selector.
+  // The node's own model goes by its own runtime's entry where it keeps that runtime (a team): two runtimes' workers may
+  // give one id to different models, and the list keeps one entry per model.
+  const choiceName = (entry: ModelPaletteSelection) => kept && entry.model === node.model ? nodeModelName(node, names ?? { models: entries }, locale)
+    : listedModelName(entry.displayName || entry.label, entry.model, locale);
   const pick = (model: string) => {
     if (!model) { onChange({ runtime: '', model: '', effort: '' }); return; }
     const entry = entries.find(item => item.model === model && item.available);
@@ -58,10 +68,10 @@ export function NodeModelSettings({ node, groups, loading = false, error = '', o
     <select id={modelId} className="canvas-inspector-input" aria-label={t('inspector.model')} value={node.model}
       disabled={disabled || loading} onChange={event => pick(event.target.value)}>
       <option value="">{t('inspector.modelDefault')}</option>
-      {node.model && !selected ? <option value={node.model} disabled>{t('inspector.modelUnavailableSaved', { model: node.model })}</option> : null}
+      {node.model && !selected ? <option value={node.model} disabled>{t('inspector.modelUnavailableSaved', { model: nodeModelName(node, names ?? { models: entries }, locale) })}</option> : null}
       {groups.filter(group => group.models.length).map(group => <optgroup key={group.id} label={group.label}>
         {group.models.map(entry => <option key={entry.key} value={entry.model} disabled={!entry.available} title={entry.available ? undefined : entry.reason}>
-          {entry.available ? entry.displayName || entry.label : `${entry.displayName || entry.label} · ${t('model.pickerUnavailable')}`}
+          {entry.available ? choiceName(entry) : `${choiceName(entry)} · ${t('model.pickerUnavailable')}`}
         </option>)}
       </optgroup>)}
     </select>

@@ -153,7 +153,8 @@ it('chooses the default model from the selected workspace’s catalogue, and kee
   expect(select).toHaveValue(JSON.stringify(['pi', 'opus']));
   fireEvent.change(screen.getByRole('combobox', { name: '按这个工作区的模型列表选择' }), { target: { value: 'team-b' } });
   await waitFor(() => expect(within(select).queryByRole('option', { name: 'Claude Opus' })).toBeNull());
-  expect(within(select).getByRole('option', { name: 'opus（这个工作区不提供）' })).toBeInTheDocument();
+  // A model the workspace does not offer is named from its selector, never shown as it is.
+  expect(within(select).getByRole('option', { name: 'Opus（这个工作区不提供）' })).toBeInTheDocument();
   expect(new URLSearchParams(location.search).get('tenant')).toBe('team-b');
   fireEvent.change(select, { target: { value: JSON.stringify(['pi', 'qwen']) } });
   await waitFor(() => expect(writes(fetch).at(-1)?.preferences.defaultModel).toEqual({ runtime: 'pi', model: 'qwen' }));

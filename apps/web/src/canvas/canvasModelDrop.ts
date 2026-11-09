@@ -1,4 +1,5 @@
 import { createAgentTemplate, getAgentTemplates, type AgentTemplateId } from './agentTemplates';
+import { listedModelName } from './modelNames';
 import type { ModelPaletteSelection } from './modelPalette';
 import type { SessionNode } from './canvasDoc';
 import type { UiLocale } from '../locale';
@@ -37,7 +38,9 @@ export function createModelNode(model: ModelPaletteSelection, personaId: AgentTe
   const node = createAgentTemplate(ownTemplate ?? 'general', world, locale);
   const persona = personaId ? getAgentTemplates(locale).find(template => template.id === personaId) : undefined;
   if (personaId && !persona) throw new Error('Unknown persona');
-  const title = model.displayName || model.label;
+  // Titled by the model's name as the node's model picker lists it (modelNames.ts listedModelName), never by a selector
+  // the catalogue names it by (AwwO 云端's are AwwO's own), nor by the label's plan tag.
+  const title = listedModelName(model.displayName || model.label, model.model, locale);
   return { ...node, title: persona ? `${title} · ${persona.title}` : title,
     contract: ownTemplate ? node.contract! : { ...node.contract!, outputs: node.contract!.outputs.filter(field => field.id === 'result') },
     runtime: model.runtime, model: model.model, effort: '', persona: persona?.persona ?? node.persona };

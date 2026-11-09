@@ -103,7 +103,8 @@ describe('a node with a market Agent', () => {
     const start = node({ agentRef: { source: 'market', agentId: 'agent-1', version: 1 }, model: 'claude' });
     open(start, market);
     expect(await screen.findByText('这个 Agent 的作者锁定了模型：用它的节点只能用这个模型。')).toBeVisible();
-    expect(screen.getByLabelText('模型')).toHaveTextContent('claude');
+    // By the name the catalogue publishes for it, never by its selector.
+    expect(screen.getByLabelText('模型')).toHaveTextContent(/^Claude Opus$/);
     expect(screen.queryByRole('combobox', { name: '模型' })).toBeNull();
     fireEvent.click(within(await box()).getByRole('button', { name: '换一个' }));
     expect(market.pick).toHaveBeenCalledOnce();

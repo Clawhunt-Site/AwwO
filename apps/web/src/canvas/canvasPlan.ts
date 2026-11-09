@@ -15,6 +15,7 @@ import { filmPersona } from './filmKit/filmKit';
 import { automaticEntry, computerRuntime } from './nodeRuntime';
 import { NODE_TEAM_LIMITS, NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, inheritingRuntime, newTeamRuntime, nodeTeamRuntimeLabel, validateNodeTeam, type NodeTeam, type NodeTeamMode, type NodeTeamRuntime } from './nodeTeam';
 import { NODE_TEAM_MAX_CALLS, NODE_TEAM_TEMPLATE_IDS, buildNodeTeam, isNodeTeamTemplateId, nodeTeamTemplate, nodeTeamTemplateShape, type NodeTeamMemberBrief, type NodeTeamTemplateId } from './nodeTeamTemplates';
+import { choiceModelName, listedModelName, PLAN_TAG, unnamedModelText } from './modelNames';
 
 /** The media kinds a plan may add as nodes (templateId image, video or model3d): generators that make one asset from a
  *  prompt instead of running an Agent. A host offers the planner only the kinds its workspace can generate. */
@@ -1030,6 +1031,13 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         }
         const follow = () => { if (node.team) node.team = { ...node.team, runtime: newTeamRuntime(node) }; };
         const wanted = op.model.trim();
+        // A model is named in these notes as the node's model picker lists it (modelNames.ts listedModelName), never by
+        // its selector: one the workspace offers by its entry, one the plan asked for that it does not offer by what the
+        // plan wrote, read as a selector where it is one, without the plan tag a label it copied ends in (PLAN_TAG, which
+        // names no model); a name's own parts stay (`Kimi·长文本`).
+        const named = (choice: CanvasPlanModelChoice) => listedModelName(choice.name || '', choice.model, locale);
+        const untagged = wanted.replace(PLAN_TAG, '');
+        const asked = choiceModelName(untagged, '') || unnamedModelText(untagged, false, locale);
         // A node on its sandbox computer (or its Blender workstation) stays there: that computer is the node's own choice,
         // which AwwO never makes or undoes for it (nodeRuntime.ts computerRuntime), so a plan changes only its model and
         // effort, as the computer offers them (2026-10-26: the planner now sets page nodes' effort with set_model, which
@@ -1048,7 +1056,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         // lesson's suggestion, applied as this step: CanvasSurface applyEvolution), which moves no request to the model.
         const kept = own && node.model === own.model;
         if (own && !kept) {
-          const name = own.name || own.model;
+          const name = named(own);
           adjust(`没有把「${title}」改用「${name}」：这个模型只能由你自己在节点设置里选，助手不替你选`,
             `Did not switch “${title}” to “${name}”: only you can choose this model, in the node’s settings; the assistant does not choose it for you`);
           break;
@@ -1056,7 +1064,7 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         const offered = (kept && models?.userChosen) || choices;
         const entry = kept ? automaticEntry(own.model, offered) : found;
         if (!entry) {
-          adjust(`没有把「${title}」改用「${wanted}」：此工作区现在没有可用的这个模型`, `Did not switch “${title}” to “${wanted}”: this workspace has no such model ready`);
+          adjust(`没有把「${title}」改用「${asked}」：此工作区现在没有可用的这个模型`, `Did not switch “${title}” to “${asked}”: this workspace has no such model ready`);
           break;
         }
         // Never a model whose runtime runs no team: the team would stay behind on another runtime.
@@ -1067,15 +1075,15 @@ export function applyCanvasPlan(doc: CanvasDocument, value: CanvasPlan, locale: 
         }
         const placed = computer ? offered.find(choice => choice.runtime === computer && choice.model === entry.model && choice.available) : entry;
         if (!placed) {
-          adjust(computer === 'blender' ? `没有改动「${title}」的模型：它在 Blender 工作站上运行，工作站没有「${entry.name || entry.model}」`
-            : `没有改动「${title}」的模型：它在沙箱电脑上运行，沙箱没有「${entry.name || entry.model}」`,
-          computer === 'blender' ? `Left the model of “${title}” as it was: it runs on its Blender workstation, which does not offer “${entry.name || entry.model}”`
-            : `Left the model of “${title}” as it was: it runs on its sandbox computer, which does not offer “${entry.name || entry.model}”`);
+          adjust(computer === 'blender' ? `没有改动「${title}」的模型：它在 Blender 工作站上运行，工作站没有「${named(entry)}」`
+            : `没有改动「${title}」的模型：它在沙箱电脑上运行，沙箱没有「${named(entry)}」`,
+          computer === 'blender' ? `Left the model of “${title}” as it was: it runs on its Blender workstation, which does not offer “${named(entry)}”`
+            : `Left the model of “${title}” as it was: it runs on its sandbox computer, which does not offer “${named(entry)}”`);
           break;
         }
         const effort = op.effort && placed.efforts?.includes(op.effort) ? op.effort : '';
-        if (op.effort && !effort) adjust(`「${title}」改用了「${placed.name || placed.model}」，它没有「${op.effort}」这档思考强度，使用模型默认`,
-          `“${title}” now uses “${placed.name || placed.model}”, which has no “${op.effort}” reasoning effort; it uses the model’s default`);
+        if (op.effort && !effort) adjust(`「${title}」改用了「${named(placed)}」，它没有「${op.effort}」这档思考强度，使用模型默认`,
+          `“${title}” now uses “${named(placed)}”, which has no “${op.effort}” reasoning effort; it uses the model’s default`);
         node.runtime = placed.runtime; node.model = placed.model; node.effort = effort;
         follow();
         modelSetNodeIds.add(node.id);
