@@ -218,7 +218,10 @@ async function renderWithNoNetwork(name, html, { width = 320, height = 180, fps 
       AWWO_RENDER_FFPROBE: process.env.AWWO_RENDER_FFPROBE, AWWO_RENDER_CHROME_SANDBOX: process.env.AWWO_RENDER_CHROME_SANDBOX, AWWO_RENDER_TMP: tmp,
       AWWO_RENDER_TIMEOUT_MS: '120000' });
     const { value, launched } = await withNoNetwork(() => renderPage(validateRenderRequest({ renderId: name, html, width, height, fps, seconds }), config));
-    assert.equal(launched, 1);
+    // The picture's browser, and one more for the page's own sound when the page defines window.renderAudio, as every
+    // page that loads the film kit (by its URL or inlined) does: the sound is made in a browser of its own.
+    const ownSound = html.includes(FILM.url) || html.includes('renderAudio');
+    assert.equal(launched, ownSound ? 2 : 1);
     return value;
   } finally {
     rmSync(tmp, { recursive: true, force: true });
