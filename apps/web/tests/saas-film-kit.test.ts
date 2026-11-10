@@ -7,7 +7,7 @@ import { buildFilmKit, GLYPH_PROBE_ADVANCES, probeFont } from '../scripts/build-
 import { FILM_GUIDE, FILM_GUIDE_HEADING, FILM_GUIDE_OLD_HEADINGS, FILM_KIT_BYTES, FILM_KIT_SHA256, FILM_KIT_URL, filmPersona, filmRole } from '../src/canvas/filmKit/filmKit';
 import { loadPreviewLibraries, PREVIEW_LIBRARIES, previewScriptNeeds } from '../src/canvas/previewLibraries';
 import { htmlPreviewDocument } from '../src/canvas/htmlDeliverable';
-import { PREVIEW_FONTS } from '../src/canvas/previewFontList';
+import { PREVIEW_FONTS, PREVIEW_FONTS_ATTRIBUTE } from '../src/canvas/previewFontList';
 
 const web = join(__dirname, '..');
 const kitText = readFileSync(join(web, 'src', 'canvas', 'filmKit', 'film-kit.js'), 'utf8');
@@ -383,7 +383,7 @@ describe('the film kit bundle', () => {
    *  own, or a running preview's), and which lists the faces the kit adds and every load it asks the document for. The
    *  document answers a load as Chrome does: with the faces of the family it holds when asked (the kit's own among
    *  them), each started and waited for, those that loaded. */
-  const fontPage = (load: (family: string, cut: Cut) => Promise<void>, pageFaces: Held[] = [], policy: string | null = null) => {
+  const fontPage = (load: (family: string, cut: Cut) => Promise<void>, pageFaces: Held[] = [], policy: string | null = null, styleSheets?: unknown[]) => {
     const added: string[] = [], asked: string[] = [];
     class FontFace {
       family: string;
@@ -404,7 +404,7 @@ describe('the film kit bundle', () => {
       },
     };
     const meta = policy === null ? null : { getAttribute: () => policy };
-    return { page: kitInSandbox({ window: { FontFace }, document: { fonts, querySelector: () => meta } }), added, asked, held };
+    return { page: kitInSandbox({ window: { FontFace }, document: { fonts, querySelector: () => meta, ...(styleSheets ? { styleSheets } : {}) } }), added, asked, held };
   };
   const settle = (ms = 20) => new Promise(resolve => setTimeout(resolve, ms));
   const never = () => new Promise<never>(() => {});
@@ -553,6 +553,62 @@ describe('the film kit bundle', () => {
     expect(() => arriving.page.renderAt(0)).not.toThrow();
   });
 
+  it('fetches none of a brand role\'s faces that an AwwO preview wrote into the page and started, as in the studio\'s live page, and waits for those', async () => {
+    // The live page's policy lets fonts come from the CDN; its preview wrote the brand faces the page names into a style
+    // element it marks, as data: @font-face rules, and started them. Browsers report a rule's family quoted or not
+    // (Chrome: Inter, "Noto Sans SC"; Firefox: both quoted).
+    const LIVE_POLICY = "default-src 'none'; font-src data: blob: https://cdn.jsdelivr.net";
+    const DATA = 'url("data:font/woff2;base64,d09GMgABAAAAAA") format("woff2")';
+    const fontRule = (family: string, weight: string, style = 'normal', src = DATA) => ({ type: 5, style: { getPropertyValue: (name: string) =>
+      ({ 'font-family': family, 'font-weight': weight, 'font-style': style, src } as Record<string, string>)[name] ?? '' } });
+    // A style sheet of the preview's (its element marked as the preview marks it), or the page's own.
+    const preview = (cssRules: unknown[]) => ({ ownerNode: { hasAttribute: (name: string) => name === PREVIEW_FONTS_ATTRIBUTE }, cssRules });
+    const own = (cssRules: unknown[]) => ({ ownerNode: { hasAttribute: () => false }, cssRules });
+    const noto = () => [fontRule('"Noto Sans SC"', '700'), fontRule('"Noto Sans SC"', '700')];
+    const notoFaces = (status = 'loading', outcome: 'load' | 'fail' = 'load') =>
+      [pageFace('Noto Sans SC', { status, outcome, ms: 5 }), pageFace('Noto Sans SC', { status, ms: 5 })];
+    const inter = () => [fontRule('Inter', '100 900'), fontRule('Inter', '100 900', 'italic')];
+    const interFaces = () => [pageFace('Inter', { status: 'loaded' }), pageFace('Inter', { status: 'loaded' })];
+    const run = (page: ReturnType<typeof fontPage>, roles: Record<string, unknown>) => page.page.Film.run({ duration: 2, type: { lang: 'zh', roles }, scenes: scene });
+    const live = fontPage(ok, [...notoFaces(), ...interFaces()], LIVE_POLICY, [preview([...noto(), ...inter()])]);
+    run(live, { display: 'Noto Sans SC', text: 'Inter', mono: 'JetBrains Mono' });
+    // The page's own faces (no mark), a source list with a fallback, a sheet that cannot be read, or any other face of
+    // the family in the document, whatever its case: the kit fetches the role's faces as before.
+    const unmarked = fontPage(ok, notoFaces(), LIVE_POLICY, [own(noto())]);
+    run(unmarked, { display: 'Noto Sans SC' });
+    const fallback = fontPage(ok, notoFaces(), LIVE_POLICY,
+      [preview([fontRule('"Noto Sans SC"', '700'), fontRule('"Noto Sans SC"', '700', 'normal', `${DATA}, url("https://fonts.gstatic.com/x.woff2") format("woff2")`)])]);
+    run(fallback, { display: 'Noto Sans SC' });
+    const unreadable = fontPage(ok, notoFaces(), LIVE_POLICY, [preview(noto()), { get cssRules() { throw new Error('SecurityError'); } }]);
+    run(unreadable, { display: 'Noto Sans SC' });
+    const scripted = fontPage(ok, [...notoFaces(), pageFace('noto sans sc', { status: 'loaded' })], LIVE_POLICY, [preview(noto())]);
+    run(scripted, { display: 'Noto Sans SC' });
+    // Faces no one started (the kit would start one cut only, and the first frame that drew another, the rest), fewer
+    // faces than the kit would make, or a role that asks for other faces than its brand family's.
+    const unstarted = notoFaces('unloaded');
+    const idle = fontPage(ok, unstarted, LIVE_POLICY, [preview(noto())]);
+    run(idle, { display: 'Noto Sans SC' });
+    const partial = fontPage(ok, interFaces().slice(0, 1), LIVE_POLICY, [preview(inter().slice(0, 1))]);
+    run(partial, { text: 'Inter' });
+    const other = fontPage(ok, interFaces(), LIVE_POLICY, [preview(inter())]);
+    run(other, { text: { family: 'Inter', subsets: ['latin', 'latin-ext'] } });
+    // One of the preview's faces fails: the kit fetches its own after all.
+    const failing = fontPage(ok, notoFaces('loading', 'fail'), LIVE_POLICY, [preview(noto())]);
+    run(failing, { display: 'Noto Sans SC' });
+    await settle();
+    expect(live.added).toEqual(['JetBrains Mono', 'JetBrains Mono italic']);
+    // It waited for the preview's faces and asked the document to load nothing.
+    expect(live.asked).toEqual([]);
+    expect(live.page.__ready).toBe(true);
+    expect(() => live.page.renderAt(0)).not.toThrow();
+    for (const page of [unmarked, fallback, unreadable, scripted, idle, failing]) expect(page.added).toEqual(['Noto Sans SC ranged', 'Noto Sans SC ranged']);
+    expect(unstarted.some(face => face.started)).toBe(false);
+    expect(partial.added).toEqual(['Inter', 'Inter italic']);
+    expect(other.added).toEqual(['Inter ranged', 'Inter ranged', 'Inter italic ranged', 'Inter italic ranged']);
+    expect(failing.page.__ready).toBe(true);
+    expect(() => failing.page.renderAt(0)).not.toThrow();
+  });
+
   it('counts none of its own faces, nor a failed face of the page\'s, as the page having the family', async () => {
     const failing = fontPage((_family, cut) => cut.style === 'italic' ? fail() : ok(), [pageFace('Inter', { status: 'loading', outcome: 'fail', ms: 5 })]);
     failing.page.Film.run({ duration: 2, type: { roles: { text: 'Inter' } }, scenes: scene });
@@ -649,7 +705,8 @@ describe('the film kit bundle', () => {
   /** A render's page (no font policy) whose canvas measures as chromeContext does, with every FontFace loading: what the
    *  kit made (family and whether from bytes), and the families in the document's set, now and ever. Its FontFace
    *  refuses a family a word of which starts with a digit, as Firefox 142's does: the face is made, in error, and its
-   *  load() rejects ("probe 1", "Exo 2" and "Press Start 2P" are no family names there; "probe1" is one). */
+   *  load() rejects ("probe 1", "Exo 2" and "Press Start 2P" are no family names there; "probe1" is one, and so is any
+   *  name written as a CSS string, in quotes). */
   const glyphPage = (covers: (family: string, char: string) => boolean, { bytes = true }: { bytes?: boolean } = {}) => {
     const made: { family: string; bytes: boolean }[] = [], set = new Set<{ family: string }>(), ever: string[] = [];
     class FontFace {
@@ -657,7 +714,7 @@ describe('the film kit bundle', () => {
       status: string;
       constructor(family: string, source: unknown) {
         this.family = family;
-        this.status = /(?:^|\s)\d/.test(family) ? 'error' : 'unloaded';
+        this.status = !/^".*"$/.test(family) && /(?:^|\s)\d/.test(family) ? 'error' : 'unloaded';
         made.push({ family, bytes: typeof source !== 'string' });
       }
       load() {
@@ -749,19 +806,67 @@ describe('the film kit bundle', () => {
     page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Noto Sans SC', text: 'Inter' } }, scenes: scene });
     await settle();
     expect(page.__ready).toBe(true);
-    expect(made.map(face => face.family)).toEqual(['Noto Sans SC', 'Inter', 'Inter']);
+    expect(made.map(face => face.family)).toEqual(['Noto Sans SC', 'Noto Sans SC', 'Inter', 'Inter']);
     expect(() => page.renderAt(0)).not.toThrow();
   });
 
-  it('loads Noto Sans SC as its one bold cut of the simplified Chinese subset, for any role that names it', async () => {
+  it('loads a family Firefox takes for no name ("Exo 2", "Press Start 2P") under its name quoted, and only after that refusal', async () => {
+    /** A page whose FontFace refuses a family as `refuse` says, recording the families it was given and those added. */
+    const page = (refuse: (family: string) => Error | null) => {
+      const made: string[] = [], added: string[] = [];
+      class FontFace {
+        family: string;
+        error: Error | null;
+        constructor(family: string) { this.family = family; this.error = refuse(family); made.push(family); }
+        load() { return this.error ? Promise.reject(this.error) : Promise.resolve(this); }
+      }
+      const fonts = { ready: Promise.resolve(), forEach() {}, add: (face: FontFace) => { added.push(face.family); }, load: async () => [] };
+      return { page: kitInSandbox({ window: { FontFace }, document: { fonts } }), made, added };
+    };
+    // Firefox 142 reads a family as CSS: a word that starts with a digit is no name there, a CSS string is one.
+    const firefox = page(family => (/^".*"$/.test(family) || !/(?:^|\s)\d/.test(family) ? null : new SyntaxError('no family name')));
+    const chrome = page(() => null);
+    const offline = page(() => Object.assign(new Error('fetch failed'), { name: 'NetworkError' }));
+    for (const { page: film } of [firefox, chrome, offline]) {
+      film.Film.run({ duration: 2, type: { roles: { display: 'Exo 2', text: 'Press Start 2P' } }, scenes: scene });
+    }
+    await settle();
+    expect(firefox.made).toEqual(['Exo 2', 'Exo 2', 'Press Start 2P', '"Exo 2"', '"Exo 2"', '"Press Start 2P"']);
+    expect(firefox.added).toEqual(['"Exo 2"', '"Exo 2"', '"Press Start 2P"']);
+    expect(() => firefox.page.renderAt(0)).not.toThrow();
+    // Chrome takes the name as written: quoted, the quotes would be part of it.
+    expect(chrome.made).toEqual(['Exo 2', 'Exo 2', 'Press Start 2P']);
+    expect(chrome.added).toEqual(chrome.made);
+    // A face that fails for any other reason is not made again.
+    expect(offline.made).toEqual(['Exo 2', 'Exo 2', 'Press Start 2P']);
+    expect(() => offline.page.renderAt(0)).toThrow(/^Film: fonts not loaded: display "Exo 2", text "Press Start 2P"$/);
+  });
+
+  it('loads Noto Sans SC as its one bold cut, the simplified Chinese subset and the latin-ext one, for any role that names it', async () => {
     const faces: [string, string, Record<string, string>][] = [];
     class FontFace { constructor(family: string, source: string, descriptors: Record<string, string>) { faces.push([family, source, descriptors]); } load() { return Promise.resolve(this); } }
     const page = kitInSandbox({ window: { FontFace } });
     page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Noto Sans SC', text: { family: 'Noto Sans SC' } } }, scenes: scene });
     await settle();
-    const url = 'url(https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.0/files/noto-sans-sc-chinese-simplified-700-normal.woff2)';
-    expect(faces).toEqual([['Noto Sans SC', url, { style: 'normal', weight: '700' }], ['Noto Sans SC', url, { style: 'normal', weight: '700' }]]);
+    const url = (subset: string) => `url(https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.3.0/files/noto-sans-sc-${subset}-700-normal.woff2)`;
+    // The Chinese file is tried for every character, as Fontsource's stylesheet leaves it, and the latin-ext one (the
+    // rest of pinyin's letters) for its range, the one a running preview gives the same file.
+    const latinExt = PREVIEW_FONTS.find(font => font.family === 'Noto Sans SC')!.faces.find(face => face.file.includes('-latin-ext-'))!.unicodeRange!;
+    expect(latinExt).toMatch(/^U\+0100-02BA,/);
+    const cut = [['Noto Sans SC', url('chinese-simplified'), { style: 'normal', unicodeRange: 'U+0-10FFFF', weight: '700' }],
+      ['Noto Sans SC', url('latin-ext'), { style: 'normal', unicodeRange: latinExt, weight: '700' }]];
+    expect(faces).toEqual([...cut, ...cut]);
     expect(page.Film.font('display', 40)).toBe('700 normal 40px "Noto Sans SC", ui-sans-serif, -apple-system, "Helvetica Neue", Arial, sans-serif');
+  });
+
+  it('names Noto Sans SC\'s subset a role lacks when only the other one loaded', async () => {
+    const chinese = fontPage((_family, cut) => cut.unicodeRange === 'U+0-10FFFF' ? fail() : ok());
+    chinese.page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Noto Sans SC' } }, scenes: scene });
+    const pinyin = fontPage((_family, cut) => cut.unicodeRange?.startsWith('U+0100') ? fail() : ok());
+    pinyin.page.Film.run({ duration: 2, type: { lang: 'zh', roles: { display: 'Noto Sans SC' } }, scenes: scene });
+    await settle();
+    expect(() => chinese.page.renderAt(0)).toThrow(/^Film: fonts not loaded: display "Noto Sans SC" chinese-simplified$/);
+    expect(() => pinyin.page.renderAt(0)).toThrow(/^Film: fonts not loaded: display "Noto Sans SC" latin-ext$/);
   });
 
   it('carries the glyph probes the build script makes: TrueType fonts whose one blank glyph every character maps to', () => {
@@ -821,6 +926,83 @@ describe('the film kit bundle', () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(() => page.renderAt(0)).toThrow(/scenes 1 and 2 leave a gap/);
     expect(() => page.renderAt(1 / 30)).not.toThrow();
+  });
+
+  // A context that measures every character 10 px wide, a space too: where a line breaks is then plain to see.
+  const evenly = { measureText: (text: string) => ({ width: [...String(text)].length * 10 }) };
+
+  it('breaks a Chinese line between its characters, never before a closing mark nor after an opening one', () => {
+    const { Film } = kitInSandbox();
+    // Breaking at every character would start a line with the comma, or end one with the opening bracket or quote.
+    expect([...Film.wrap(evenly, '我们出发吧，好吗', 50)]).toEqual(['我们出发', '吧，好吗']);
+    expect([...Film.wrap(evenly, '他说「好的」', 30)]).toEqual(['他说', '「好', '的」']);
+    expect([...Film.wrap(evenly, '他说：“你好。”', 30)]).toEqual(['他说：', '“你', '好。”']);
+    expect([...Film.wrap(evenly, '说——好', 10)]).toEqual(['说——', '好']);
+    // Small kana, and a character's variation selector, stay with the character before them.
+    expect([...Film.wrap(evenly, 'ちょっとまって', 10)]).toEqual(['ちょっ', 'と', 'まっ', 'て']);
+    const variant = '葛' + String.fromCodePoint(0xE0100);
+    expect([...Film.wrap(evenly, variant + '城', 10)]).toEqual([variant, '城']);
+    // No last line of one character where that can be avoided, and lines of similar length when balanced.
+    expect([...Film.wrap(evenly, '一二三四五六七八九十甲', 100)]).toEqual(['一二三四五六七八九', '十甲']);
+    expect([...Film.wrap(evenly, '雨停了，天亮了。我们出发吧！', 100, true)]).toEqual(['雨停了，天亮了。', '我们出发吧！']);
+  });
+
+  it('keeps the spaces a mixed line has, adds none between Chinese characters, and keeps what may not be parted', () => {
+    const { Film } = kitInSandbox();
+    expect([...Film.wrap(evenly, 'AwwO 让文字动起来', 80)]).toEqual(['AwwO 让文字', '动起来']);
+    expect([...Film.wrap(evenly, '用AwwO做影片', 50)]).toEqual(['用AwwO', '做影片']);
+    // A full-width currency sign keeps its amount, and a no-break space the characters on either side of it.
+    expect([...Film.wrap(evenly, '售价￥99元', 20)]).toEqual(['售价', '￥99', '元']);
+    const noBreak = String.fromCodePoint(0xA0);
+    expect([...Film.wrap(evenly, '雨' + noBreak + '停了', 10)]).toEqual(['雨' + noBreak + '停', '了']);
+  });
+
+  it('keeps a Chinese or Japanese mark with its neighbour across a space, and half-width small kana with the kana before', () => {
+    const { Film } = kitInSandbox();
+    expect([...Film.wrap(evenly, '一二 。', 20)]).toEqual(['一', '二 。']);
+    expect([...Film.wrap(evenly, '一二「 三四」', 30)]).toEqual(['一二', '「 三', '四」']);
+    expect([...Film.wrap(evenly, 'ｷｬｯﾄ', 10)]).toEqual(['ｷｬｯ', 'ﾄ']);
+    expect([...Film.wrap(evenly, 'ｺｰﾋｰ', 10)]).toEqual(['ｺｰ', 'ﾋｰ']);
+    // A mark Latin shares (a curly quote, a bracket) joins across a space where Chinese stands beside it.
+    expect([...Film.wrap(evenly, '他说：“ 你好。”', 40)]).toEqual(['他说：', '“ 你', '好。”']);
+    expect([...Film.wrap(evenly, '你好 )世界', 20)]).toEqual(['你', '好 )', '世界']);
+    expect([...Film.wrap(evenly, 'English ( 中文 )', 70)]).toEqual(['English', '( 中文 )']);
+    // Judged by the words on either side of the space, so a mark next to another mark, or after a character with a
+    // combining mark, still joins.
+    expect([...Film.wrap(evenly, '中( A)', 40)]).toEqual(['中', '( A)']);
+    const voiced = 'か' + String.fromCodePoint(0x3099);
+    expect([...Film.wrap(evenly, `${voiced} )文`, 20)]).toEqual([`${voiced} )`, '文']);
+    // An opening mark with a variation selector still keeps the character after it.
+    const opener = '（' + String.fromCodePoint(0xFE00);
+    expect([...Film.wrap(evenly, `中文${opener}字）`, 20)]).toEqual(['中文', `${opener}字）`]);
+    // Vertical and spacing forms, and the figure space and non-breaking hyphen, which allow no break.
+    expect([...Film.wrap(evenly, '中︵文', 20)]).toEqual(['中', '︵文']);
+    expect([...Film.wrap(evenly, 'か゛か', 10)]).toEqual(['か゛', 'か']);
+    const figure = String.fromCodePoint(0x2007), hyphen = String.fromCodePoint(0x2011);
+    expect([...Film.wrap(evenly, `中${figure}文`, 20)]).toEqual([`中${figure}文`]);
+    expect([...Film.wrap(evenly, `北京${hyphen}上海`, 20)]).toEqual(['北', `京${hyphen}上`, '海']);
+    // Latin punctuation after a space stays a word of its own, as in cinecode.
+    expect([...Film.wrap(evenly, 'one two .', 30)]).toEqual(['one', 'two', '.']);
+    expect([...Film.wrap(evenly, 'word ( x )', 40)]).toEqual(['word', '( x', ')']);
+  });
+
+  it('breaks Latin text exactly where cinecode\'s own wrap does', () => {
+    const start = upstream.indexOf('function wrap(g, str, maxW, balance = false) {');
+    const original = vm.runInNewContext(`(${upstream.slice(start, upstream.indexOf('\n}\n', start) + 2)})`) as
+      (g: unknown, str: string, maxW: number, balance: boolean) => string[];
+    const { Film } = kitInSandbox();
+    // Characters of different widths; words parted by spaces, tabs and new lines, some joined by a no-break space.
+    const varied = { measureText: (text: string) => ({ width: [...String(text)].reduce((sum, c) => sum + (c === ' ' ? 3 : 4 + (c.codePointAt(0)! % 5)), 0) }) };
+    let seed = 7;
+    const random = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const letters = [...'abcdefghijklmnopqrstuvwxyzÉü,.!()[]"\'-“”', ...[0xA0, 0x2007, 0x2011].map(code => String.fromCodePoint(code))];
+    for (let n = 0; n < 500; n++) {
+      const words = Array.from({ length: 1 + Math.floor(random() * 14) },
+        () => Array.from({ length: 1 + Math.floor(random() * 11) }, () => letters[Math.floor(random() * letters.length)]).join(''));
+      const text = words.map((word, i) => (i ? [' ', '  ', '\t', '\n', ' \n '][Math.floor(random() * 5)] : '') + word).join('');
+      const width = 10 + Math.floor(random() * 220), balance = random() < 0.5;
+      expect([...Film.wrap(varied, text, width, balance)], JSON.stringify([text, width, balance])).toEqual([...original(varied, text, width, balance)]);
+    }
   });
 
   it('is supplied to a running page for its fixed URL and inlined ahead of the page script', async () => {

@@ -1,5 +1,5 @@
 import { PAGE_ERROR_SCRIPT } from './pageErrors';
-import { fontStyleText, PREVIEW_FONT_LOAD_SCRIPT, PREVIEW_FONTS_KEY } from './previewFontList';
+import { fontStyleText, PREVIEW_FONT_LOAD_SCRIPT, PREVIEW_FONTS_ATTRIBUTE, PREVIEW_FONTS_KEY } from './previewFontList';
 import { applyModuleEntries, moduleImport, PREVIEW_IMPORT_MAP_KEY } from './previewImportMap';
 
 /** Strip only a complete HTML fence; preserve every byte of the document inside it. */
@@ -209,9 +209,10 @@ export function htmlPreviewDocument(value: string, interactive = false, librarie
   const body = previewRootAttributes(source, 'body', interactive);
   // Escaping '<' in CSS prevents a model-supplied style value from closing the trusted style tag.
   const rootStyle = root.deferredStyle.replace(/</g, '\\3c ');
-  // Brand fonts AwwO supplies (previewFonts.ts): their @font-face rules ahead of the page's own styles.
+  // Brand fonts AwwO supplies (previewFonts.ts): their @font-face rules ahead of the page's own styles, marked as AwwO's
+  // for the film kit (its policy here lets the kit fetch no font anyway; the mark says the same as in the live page).
   const fonts = libraries?.get(PREVIEW_FONTS_KEY);
-  const fontStyle = fonts ? `<style>${fontStyleText(fonts)}</style>` : '';
+  const fontStyle = fonts ? `<style ${PREVIEW_FONTS_ATTRIBUTE}>${fontStyleText(fonts)}</style>` : '';
   return `<!doctype html><html${root.attributes}><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${interactive ? ARTIFACT_INTERACTIVE_CSP : ARTIFACT_PREVIEW_CSP}"><meta name="referrer" content="no-referrer"><style>html{color-scheme:light;background:#fff}body{margin:20px;color:#202828;font:14px/1.55 system-ui,sans-serif}img,svg,canvas{max-width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere}table{max-width:100%}html{${rootStyle}}</style>${fontStyle}${interactive ? `<script>${PREVIEW_HOST_SCRIPT}${fonts ? PREVIEW_FONT_LOAD_SCRIPT : ''}</script>` : ''}</head><body${body.attributes}>${template.innerHTML}</body></html>`;
 }
 

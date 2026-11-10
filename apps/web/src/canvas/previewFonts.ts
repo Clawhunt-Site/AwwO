@@ -54,9 +54,10 @@ export function previewFontSource(entry: PreviewFontFace): Promise<string> {
   return pending;
 }
 
-/** The @font-face rules of these families, every face of each (a variable font is one face per style). */
+/** The @font-face rules of these families, every face of each (a variable font is one face per style), with the range
+ *  of characters a face that is one of several subsets of a cut is for. */
 export async function previewFontFaces(fonts: readonly PreviewFont[]): Promise<string> {
   const rules = await Promise.all(fonts.flatMap(font => font.faces.map(async entry =>
-    `@font-face{font-family:"${font.family}";src:url(${await previewFontSource(entry)}) format("woff2");font-weight:${entry.weight};font-style:${entry.style};font-display:block}`)));
+    `@font-face{font-family:"${font.family}";src:url(${await previewFontSource(entry)}) format("woff2");font-weight:${entry.weight};font-style:${entry.style};font-display:block${entry.unicodeRange ? `;unicode-range:${entry.unicodeRange}` : ''}}`)));
   return rules.join('\n');
 }

@@ -125,6 +125,12 @@ const EDITS = [
     replace: '\n}\n',
   },
   {
+    why: 'Google Fonts\' simplified Chinese subset is one file with no unicode-range (Fontsource\'s stylesheet gives it none): as one of a role\'s subsets it is tried for every character, as a face with no range is, and a role that lacks it can say so by name',
+    find: '};\nconst TYPE_FALLBACK = {',
+    replace: "  'chinese-simplified': 'U+0-10FFFF',            // AwwO: Noto Sans SC's (BRAND_FONTS), beside its latin-ext subset\n"
+      + '};\nconst TYPE_FALLBACK = {',
+  },
+  {
     why: 'the glyph check measures after fonts of the kit\'s own (the generic families cannot tell a missing Chinese glyph: every font that has one draws it an em wide)',
     find: "    const a = w('monospace'), b = w('serif'), c = w('cursive');\n"
       + '    if (Math.abs(a - b) > 0.01 || Math.abs(b - c) > 0.01) miss.add(ch);\n',
@@ -136,6 +142,96 @@ const EDITS = [
     find: "    const strs = [...(c.strings?.[name] || []), ...(T.lang === 'tr' || T.lang == null ? [TYPE_TR_TEST] : [])].join('');\n",
     replace: "    const strs = [...[].concat(c.strings?.[name] || []).map((s) => String(s).replace(EMOJI, '')),   // AwwO: emoji aside\n"
       + "      ...(T.lang === 'tr' || T.lang == null ? [TYPE_TR_TEST] : [])].join('');\n",
+  },
+  {
+    why: 'a line breaks between Chinese and Japanese characters too, which put no space between words (cinecode breaks at spaces only, so a Chinese line never wrapped), as typesetters do: never before a closing mark or after an opening one; text with spaces between its words breaks at them, as before',
+    find: [
+      'function wrap(g, str, maxW, balance = false) {',
+      String.raw`  const words = String(str).split(/[ \t\n]+/).filter(Boolean);   // a no-break space (\u00A0) keeps '24.990\u00A0₺' together`,
+      '  const fit = (w) => {',
+      "    const lines = []; let cur = '';",
+      '    for (const word of words) {',
+      '      const t = cur ? `${cur} ${word}` : word;',
+      '      if (g.measureText(t).width <= w || !cur) cur = t; else { lines.push(cur); cur = word; }',
+      '    }',
+      '    if (cur) lines.push(cur);',
+      '    return lines;',
+      '  };',
+      '  let lines = fit(maxW);',
+      '  if (balance && lines.length > 1) {',
+      '    let lo = maxW * 0.5, hi = maxW;',
+      '    for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2; if (fit(mid).length > lines.length) lo = mid; else hi = mid; }',
+      '    lines = fit(hi);',
+      '  }',
+      '  const n = lines.length;',
+      "  if (n > 1 && !lines[n - 1].includes(' ')) {",
+      "    const prev = lines[n - 2].split(' ');",
+      "    if (prev.length > 2) { lines[n - 1] = `${prev.pop()} ${lines[n - 1]}`; lines[n - 2] = prev.join(' '); }",
+      '  }',
+      '  return lines;',
+      '}',
+      '',
+    ].join('\n'),
+    replace: String.raw`// AwwO: a line also breaks between Chinese and Japanese characters, which put no space between words (wrapUnits);
+// text written with spaces between its words, as Latin is, breaks at them and only there, as before.
+function wrap(g, str, maxW, balance = false) {
+  const units = wrapUnits(str);                 // a no-break space (\u00A0) keeps '24.990\u00A0₺' together
+  const line = (us) => us.map((u, i) => (i && u.space ? ' ' : '') + u.text).join('');
+  const fit = (w) => {
+    const lines = []; let cur = [];
+    for (const unit of units) {
+      const t = [...cur, unit];
+      if (g.measureText(line(t)).width <= w || !cur.length) cur = t; else { lines.push(cur); cur = [unit]; }
+    }
+    if (cur.length) lines.push(cur);
+    return lines;
+  };
+  let lines = fit(maxW);
+  if (balance && lines.length > 1) {
+    let lo = maxW * 0.5, hi = maxW;
+    for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2; if (fit(mid).length > lines.length) lo = mid; else hi = mid; }
+    lines = fit(hi);
+  }
+  const n = lines.length;
+  if (n > 1 && lines[n - 1].length === 1 && lines[n - 2].length > 2) lines[n - 1].unshift(lines[n - 2].pop());
+  return lines.map(line);
+}
+
+// AwwO: what wrap may break a line between, in order, each with whether a space stood before it: the words between
+// spaces, and inside a word each Chinese or Japanese character (Han, kana, bopomofo, the full-width forms) apart. A
+// closing mark (，。、」』）…, a small kana, a mark that combines with the character before it) joins the unit before it,
+// an opening one (「『（…) the unit after it, and a no-break space both, so a line neither starts with the one nor ends
+// with the other.
+const WRAP_CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Bopomofo}\u3000-\u303F\u309B-\u309C\u30A0-\u30FF\u3200-\u33FF\uFE10-\uFE19\uFE30-\uFE4F\uFF01-\uFF9F\uFFE0-\uFFE6]/u;
+const WRAP_CLOSE = /^[\p{M}\u00A0\u2007\u2011\u200D\u2060\u202F\uFEFF\u3000)\]}!?,.:;%\/°′″‰℃¢’”»›…‥‐–—～〜、。，．：；！？％）］｝｠」』】〕〗〙〛〉》〞〟・ー々〻ゝゞヽヾぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶㇰ-ㇿ｡｣､･ﾞﾟｧ-ｰ゛゜︐-︖︘︙︶︸︺︼︾﹀﹂﹄﹈﹐-﹗﹚﹜﹞-]/u;
+const WRAP_OPEN = /[\u00A0\u2007\u2011\u2060\u202F\uFEFF(\[{«‹‘“（［｛｟「『【〔〖〘〚〈《〝｢＄￡￥︗︵︷︹︻︽︿﹁﹃﹇﹙﹛﹝]$/u;
+function wrapUnits(str) {
+  const units = [];
+  let after = false;                            // whether the word before held a Chinese or Japanese character
+  for (const word of String(str).split(/[ \t\n]+/).filter(Boolean)) {
+    const pieces = [];
+    let run = '', cjk = false;
+    for (const ch of word) {
+      const now = WRAP_CJK.test(ch);
+      if ((now || cjk) && run) { pieces.push(run); run = ''; }
+      run += ch; cjk = now;
+    }
+    if (run) pieces.push(run);
+    // Inside a word a mark joins its neighbour; across a space only where the word on either side of the space holds
+    // Chinese or Japanese, the space kept (text with no such word, Latin, breaks at its spaces, as before).
+    const near = after || WRAP_CJK.test(word);
+    pieces.forEach((piece, i) => {
+      // The unit before ends with the piece before (joined to it or not); an opening mark is read past the marks that
+      // combine with it, such as a variation selector.
+      const last = units[units.length - 1], before = last ? last.text : '';
+      if (last && (i || near) && (WRAP_CLOSE.test(piece) || WRAP_OPEN.test(before.replace(/\p{M}+$/u, '')))) last.text += (i ? '' : ' ') + piece;
+      else units.push({ text: piece, space: !i });
+    });
+    after = WRAP_CJK.test(word);
+  }
+  return units;
+}
+`,
   },
 ];
 
@@ -212,8 +308,9 @@ const beat = (n) => BEAT0 + n * 60 / BPM, bar = (n) => beat(4 * n);
 
 // AwwO's brand fonts, the families its running previews supply by name (apps/web/src/canvas/previewFontList.ts), as
 // the Fontsource 5.3.0 packages on jsDelivr: their Latin subsets, and for Noto Sans SC, the face a film's Chinese words
-// have, Google Fonts' simplified Chinese subset of it (7,333 Han characters, with Latin and CJK punctuation) in one
-// bold cut. A TYPE role may name one by family alone. AwwO's render worker answers the URLs these name from its own
+// have, two of Google Fonts' subsets of its one bold cut: the simplified Chinese one (7,333 Han characters, with ASCII,
+// Latin-1 and CJK punctuation) and the latin-ext one (4 KB), which has the rest of pinyin's letters (ā ǎ ǜ …). A TYPE
+// role may name one by family alone. AwwO's render worker answers the URLs these name from its own
 // copies (apps/render-worker/fonts.mjs), so a render of a role that names a brand family alone needs no network (one
 // that sets other subsets or another version names other files, which it fetches); a downloaded page loads them from
 // jsDelivr.
@@ -235,7 +332,7 @@ const BRAND_FONTS = {
   'JetBrains Mono': { pkg: 'jetbrains-mono', variable: 'wght', axes: { wght: [100, 800] }, styles: ['normal', 'italic'] },
   'Press Start 2P': { pkg: 'press-start-2p', weights: [400] },
   'Pixelify Sans': { pkg: 'pixelify-sans', variable: 'wght', axes: { wght: [400, 700] } },
-  'Noto Sans SC': { pkg: 'noto-sans-sc', weights: [700], subsets: ['chinese-simplified'] },
+  'Noto Sans SC': { pkg: 'noto-sans-sc', weights: [700], subsets: ['chinese-simplified', 'latin-ext'] },
 };
 
 /** A TYPE role as the engine reads it: a brand family by name, a full Fontsource role, or any other family as written
@@ -263,9 +360,11 @@ const kitFaces = new WeakSet();
 
 /** Loads every role's faces, the roles together. A face that cannot load (a preview reaches no network) is fine when
  *  the page has the family itself: AwwO's previews supply its brand fonts by name (and AwwO's render worker answers
- *  their URLs, so in a render they load). A face that loads only after a renderer has drawn its first frame is not
- *  used, so a film keeps one type from its first frame to its last. Returns each role that lacks a face the page does
- *  not make up for, in role order, as { name, state, used } (used[i]: whether state.faces[i] is in use). */
+ *  their URLs, so in a render they load). A role whose faces an AwwO preview wrote into the page and started gets none
+ *  of the kit's (pageHolds), which would be the same type fetched again, unless one of the page's fails before the first
+ *  frame. A face that loads only after a renderer has drawn its first frame is not used, so a film keeps one type from
+ *  its first frame to its last. Returns each role that lacks a face the page does not make up for, in role order, as
+ *  { name, state, used } (used[i]: whether state.faces[i] is in use). */
 async function loadFilmType(T) {
   // Whether the page has faces of the family itself, as the browser picks them for the role's first weight upright:
   // asked, as before, only once the kit's own faces are not all used, since asking starts loading them, and a face in
@@ -277,21 +376,24 @@ async function loadFilmType(T) {
       return (await document.fonts.load((r.weights?.[0] ?? 400) + ' 40px "' + r.family + '"')).some((face) => !kitFaces.has(face));
     } catch (e) { return false; }
   };
-  const remote = remoteFontsAllowed();
+  const remote = remoteFontsAllowed(), held = remote ? heldFaces() : null;
   const outcomes = await Promise.all(Object.entries(T.roles || {}).map(async ([name, r]) => {
     if (!r || (!r.pkg && !r.files)) return null;
-    const state = { family: r.family, faces: remote ? roleFaces(r) : [], used: [], late: [], settled: [] };
+    const page = remote ? pageHolds(r, held) : null;
+    const state = { family: r.family, faces: remote && !page ? roleFaces(r) : [], used: [], late: [], settled: [] };
     typeLoading.set(name, state);
     try {
-      const used = await Promise.all(state.faces.map(([family, url, desc], i) => {
-        const face = new FontFace(family, 'url(' + url + ')', desc);
-        kitFaces.add(face);
-        return face.load().then(() => {
-          state.settled[i] = true;
-          if (rendering) { state.late[i] = true; return false; }
-          document.fonts.add(face); state.used[i] = true; return true;
-        }, () => { state.settled[i] = true; return false; });
-      }));
+      // The faces a preview wrote in and started: waited for (the kit starts none of them). One that fails, and the
+      // kit's own are fetched after all, unless a frame is drawn by then.
+      if (page) {
+        if ((await Promise.all(page.map((face) => face.loaded.then(() => true, () => false)))).every(Boolean)) return null;
+        if (!rendering) state.faces = roleFaces(r);
+      }
+      const used = await Promise.all(state.faces.map(([family, url, desc], i) => kitFace(family, 'url(' + url + ')', desc).then((face) => {
+        state.settled[i] = true;
+        if (rendering) { state.late[i] = true; return false; }
+        document.fonts.add(face); state.used[i] = true; return true;
+      }, () => { state.settled[i] = true; return false; })));
       if (used.length && used.every(Boolean)) return null;
       if (await supplied(r)) return null;
       // A role with no face of the kit's own, reached once a frame is drawn: nothing of the kit's is missing, and the
@@ -306,6 +408,20 @@ async function loadFilmType(T) {
     }
   }));
   return outcomes.filter(Boolean);
+}
+
+/** One face of the kit's own, made and loaded (it resolves with the face): under its family's name as written, and once
+ *  more with that name quoted only where the browser took it for no name at all. Firefox reads a FontFace's family as
+ *  CSS, where a word that starts with a digit ("Exo 2", "Press Start 2P") or a stop's name ("Fraunces~SOFT50") names no
+ *  family: the face is made in error and its load() rejects with a SyntaxError, so the film drew in another font. As a
+ *  CSS string (the JSON form of the name, for any name a font has) it is taken as written. Never quoted up front:
+ *  Chrome keeps the quotes as part of the name. */
+function kitFace(family, source, desc) {
+  const load = (name) => { const face = new FontFace(name, source, desc); kitFaces.add(face); return face.load().then(() => face); };
+  return load(family).catch((e) => {
+    if (!e || e.name !== 'SyntaxError') throw e;
+    return load(JSON.stringify(family));
+  });
 }
 
 /** What of the kit's own fonts a role lacks, in words for a renderer (what draws instead is the browser's choice: a cut
@@ -358,6 +474,58 @@ function remoteFontsAllowed() {
   const directive = (name) => { const m = new RegExp('(?:^|;)\\s*' + name + '\\s+([^;]*)', 'i').exec(policy); return m ? m[1] : null; };
   const sources = directive('font-src') ?? directive('default-src');
   return sources === null || /(?:^|\s)(?:\*|https?:\S*)(?:\s|$)/i.test(sources);
+}
+
+/** The brand faces AwwO's running previews wrote into the page, by family (in lower case, as CSS matches names): the
+ *  @font-face rules of the style element they mark (data-awwo-fonts, previewFontList.ts PREVIEW_FONTS_ATTRIBUTE), each
+ *  from one data: source and no other, counted by cut ("normal 700"), with the document's FontFace objects of the
+ *  family. A family the document has any other face of is left out (a rule of the page's own, one this does not read,
+ *  in @media or an imported sheet, or a face a script made), and every family is when a style sheet cannot be read (one
+ *  from elsewhere). Null where the page cannot be asked. Reading the rules, and listing the document's faces, starts no
+ *  font. */
+function heldFaces() {
+  try {
+    const name = (family) => String(family || '').trim().replace(/^(["'])(.*)\1$/, '$2').toLowerCase();
+    const held = new Map(), other = new Set();
+    for (const sheet of Array.from(document.styleSheets || [])) {
+      const node = sheet.ownerNode, awwo = !!(node && node.hasAttribute && node.hasAttribute('data-awwo-fonts'));
+      for (const rule of Array.from(sheet.cssRules)) {   // throws for a sheet from elsewhere: then nothing is known
+        if (rule.type !== 5) continue;                   // CSSRule.FONT_FACE_RULE
+        const style = rule.style, family = name(style.getPropertyValue('font-family'));
+        if (!awwo || !ONE_DATA_SOURCE.test(style.getPropertyValue('src').trim())) { other.add(family); continue; }
+        const entry = held.get(family) || { cuts: new Map(), faces: [] };
+        const cut = (style.getPropertyValue('font-style') || 'normal') + ' ' + (style.getPropertyValue('font-weight') || '400');
+        entry.cuts.set(cut, (entry.cuts.get(cut) || 0) + 1);
+        held.set(family, entry);
+      }
+    }
+    if (!held.size) return held;
+    document.fonts.forEach((face) => { const entry = !kitFaces.has(face) && held.get(name(face.family)); if (entry) entry.faces.push(face); });
+    for (const [family, entry] of held) {
+      if (other.has(family) || entry.faces.length !== [...entry.cuts.values()].reduce((a, b) => a + b, 0)) held.delete(family);
+    }
+    return held;
+  } catch (e) {
+    return null;
+  }
+}
+
+// One source, a data: URL with at most its format, as a preview writes a face (previewFonts.ts). A list with a fallback
+// (another URL, a local font) could start a request the kit would not have made.
+const ONE_DATA_SOURCE = /^url\(\s*(["']?)data:[^"'()\s]*\1\s*\)(?:\s*format\(\s*["']?[\w-]+["']?\s*\))?$/i;
+
+/** The page's own faces of a role's family where an AwwO preview wrote them in and started them (heldFaces): for a
+ *  role that names its brand family alone (asks for no other face), when the preview gave the family a face for each
+ *  one the kit would make, by cut, and each is loading or loaded already. The kit then fetches none of its own for the
+ *  role and waits for these, starting none (the studio's live page, whose policy allows the CDN, had the kit fetch the
+ *  same type again: Noto Sans SC's 1.17 MB, waited for before the film's first still). Null otherwise. */
+function pageHolds(r, held) {
+  const entry = held && BRAND_FONTS[r.family] ? held.get(r.family.toLowerCase()) : null;
+  if (!entry || JSON.stringify(roleFaces(r)) !== JSON.stringify(roleFaces(filmRole(r.family)))) return null;
+  const need = new Map();
+  for (const [, , desc] of roleFaces(r)) need.set(desc.style + ' ' + desc.weight, (need.get(desc.style + ' ' + desc.weight) || 0) + 1);
+  if (![...need].every(([cut, n]) => (entry.cuts.get(cut) || 0) >= n)) return null;
+  return entry.faces.every((face) => face.status === 'loading' || face.status === 'loaded') ? entry.faces : null;
 }
 
 // The glyph check (typeCheck) measures each character in a role's family twice, followed each time by another font: a

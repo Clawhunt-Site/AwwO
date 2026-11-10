@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { htmlPreviewDocument } from '../src/canvas/htmlDeliverable';
-import { PREVIEW_FONT_RULE, PREVIEW_FONTS, PREVIEW_FONTS_KEY, type PreviewFont } from '../src/canvas/previewFontList';
+import { PREVIEW_FONT_RULE, PREVIEW_FONTS, PREVIEW_FONTS_ATTRIBUTE, PREVIEW_FONTS_KEY, type PreviewFont } from '../src/canvas/previewFontList';
 import { previewFontFaces, previewFontNeeds, previewFontSource } from '../src/canvas/previewFonts';
 import { FILM_FONT_DEADLINE_MS, FONT_DEADLINE_MS, loadPreviewLibraries, previewScriptNeeds, PREVIEW_FONTS_LIBRARY, suppliedFontRules } from '../src/canvas/previewLibraries';
 import { buildLiveDocument } from '../src/canvas/studio/liveDocument';
@@ -133,6 +133,9 @@ describe('brand fonts AwwO supplies to running pages', () => {
     const html = htmlPreviewDocument(page, true, code);
     const head = html.slice(0, html.indexOf('</head>'));
     expect(head).toContain('@font-face{font-family:"Orbitron"');
+    // In a style element marked as AwwO's, which the film kit reads (and no other is).
+    expect(head).toContain(`<style ${PREVIEW_FONTS_ATTRIBUTE}>@font-face{font-family:"Orbitron"`);
+    expect(head.split(PREVIEW_FONTS_ATTRIBUTE)).toHaveLength(2);
     expect(head.indexOf('Content-Security-Policy')).toBeLessThan(head.indexOf('@font-face'));
     expect(head).toContain('document.fonts');
     expect(html.indexOf('@font-face')).toBeLessThan(html.indexOf('h1{font-family'));
@@ -153,6 +156,9 @@ describe('brand fonts AwwO supplies to running pages', () => {
     expect(policy).toBeGreaterThanOrEqual(0);
     expect(style).toBeGreaterThan(policy);
     expect(guard).toBeGreaterThan(style);
+    // Marked as AwwO's, which the film kit reads: its policy here lets the kit fetch fonts, and it fetches none of these.
+    expect(doc.querySelectorAll(`[${PREVIEW_FONTS_ATTRIBUTE}]`)).toHaveLength(1);
+    expect(children[style].hasAttribute(PREVIEW_FONTS_ATTRIBUTE)).toBe(true);
   });
 
   it('tells a model the families by name, but the film kit\'s Chinese face, which only a film page gets', () => {
@@ -205,10 +211,18 @@ describe('brand fonts AwwO supplies to running pages', () => {
     expect(previewScriptNeeds(page).fonts?.map(font => font.family)).toEqual(['Inter']);
     expect(previewScriptNeeds(page.replace('h1{font-family:Inter}', '')).fonts).toBeUndefined();
     expect(previewScriptNeeds(page.replace('h1{font-family:Inter}', '')).libraries).not.toContain(PREVIEW_FONTS_LIBRARY);
-    // The film page's preview has the face as its pinned bytes, at its one weight.
+    // The film page's preview has the face as its pinned bytes, at its one weight: the Chinese file for every character,
+    // as Fontsource's stylesheet gives it, and the latin-ext file, the rest of pinyin's letters, for its range.
     const code = await loadPreviewLibraries(previewScriptNeeds(film));
     const css = code.get(PREVIEW_FONTS_KEY) ?? '';
     const noto = PREVIEW_FONTS.find(font => font.family === 'Noto Sans SC')!;
-    expect(css).toContain(`@font-face{font-family:"Noto Sans SC";src:url(data:font/woff2;base64,${readFileSync(path.join(FONT_DIR, noto.faces[0].file)).toString('base64')}) format("woff2");font-weight:700;font-style:normal;font-display:block}`);
+    const data = (file: string) => `url(data:font/woff2;base64,${readFileSync(path.join(FONT_DIR, file)).toString('base64')}) format("woff2")`;
+    expect(noto.faces.map(face => face.file)).toEqual(['noto-sans-sc-chinese-simplified-700-normal.woff2', 'noto-sans-sc-latin-ext-700-normal.woff2']);
+    expect(css).toContain(`@font-face{font-family:"Noto Sans SC";src:${data(noto.faces[0].file)};font-weight:700;font-style:normal;font-display:block}`);
+    expect(css).toContain(`@font-face{font-family:"Noto Sans SC";src:${data(noto.faces[1].file)};font-weight:700;font-style:normal;font-display:block;`
+      + 'unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,'
+      + 'U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}');
+    // Only a face that is one of several subsets of a cut has a range.
+    expect(PREVIEW_FONTS.flatMap(font => font.faces.filter(face => face.unicodeRange).map(face => face.file))).toEqual(['noto-sans-sc-latin-ext-700-normal.woff2']);
   });
 });

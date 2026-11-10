@@ -50,7 +50,7 @@ test('only the exact kit URL is supplied', () => {
 });
 
 test('each brand font copy is the file the module names, by size and sha256, with its family\'s license beside it', () => {
-  assert.equal(FONTS.length, 27);
+  assert.equal(FONTS.length, 28);
   assert.equal(new Set(FONTS.map((font) => font.family)).size, 18);
   assert.equal(new Set(FONTS.map((font) => font.url)).size, FONTS.length);
   for (const font of FONTS) {
@@ -285,20 +285,24 @@ test('a film whose font cannot load says which role, and draws that role in a st
   assert.ok(!result.warnings.includes('ready_timeout'), result.warnings.join(','));
 });
 
-test('a film sets its Chinese words in Noto Sans SC with no network, and its glyph check names a family that lacks them', { skip, timeout: 120_000 }, async () => {
-  // The film lists its display role's words. The worker's Noto Sans SC has them; Instrument Serif, a Latin face, has
-  // none, which the kit's glyph probes tell (after a generic family, every Han character measures an em wide).
+test('a film sets its Chinese words and their pinyin in Noto Sans SC with no network, and its glyph check names a family that lacks them', { skip, timeout: 180_000 }, async () => {
+  // The film lists its display role's words and their pinyin. The worker's Noto Sans SC has them all, ǔ in its latin-ext
+  // file; its Chinese file alone lacks ǔ; Instrument Serif, a Latin face, has no Han and no ǔ, which the kit's glyph
+  // probes tell (after a generic family, every Han character measures an em wide).
   const film = (display) => typePage({ display }, [])
-    .replace("type: { lang: 'en', roles:", "type: { lang: 'zh', check: { strings: { display: ['雨停了'] } }, roles:")
-    .replace("g.fillText('TYPE ' + Math.round(k * 9), S.W * 0.1, S.H * 0.5)", "g.fillText('雨停了 ' + Math.round(k * 9), S.W * 0.1, S.H * 0.5)");
-  assert.ok(film('Noto Sans SC').includes("display: ['雨停了']") && film('Noto Sans SC').includes("fillText('雨停了 '"), 'the page is built as meant');
+    .replace("type: { lang: 'en', roles:", "type: { lang: 'zh', check: { strings: { display: ['雨停了', 'yǔ tíng le'] } }, roles:")
+    .replace("g.fillText('TYPE ' + Math.round(k * 9), S.W * 0.1, S.H * 0.5)", "g.fillText('雨停了 yǔ ' + Math.round(k * 9), S.W * 0.1, S.H * 0.5)");
+  assert.ok(film('Noto Sans SC').includes("display: ['雨停了', 'yǔ tíng le']") && film('Noto Sans SC').includes("fillText('雨停了 yǔ '"), 'the page is built as meant');
   const noto = await renderWithNoNetwork('film_fonts_chinese', film('Noto Sans SC'));
   assert.equal(noto.mode, 'contract');
   assert.deepEqual(noto.pageErrors, []);
   assert.deepEqual(noto.warnings.filter((w) => NOT_A_FAULT.test(w)), [], noto.warnings.join(','));
+  const chineseOnly = await renderWithNoNetwork('film_fonts_chinese_only', film({ family: 'Noto Sans SC', subsets: ['chinese-simplified'] }));
+  assert.equal(chineseOnly.mode, 'contract');
+  assert.deepEqual(chineseOnly.pageErrors, ['Film: display "Noto Sans SC" has no glyphs for: ǔ']);
   const latin = await renderWithNoNetwork('film_fonts_chinese_latin', film('Instrument Serif'));
   assert.equal(latin.mode, 'contract');
-  assert.deepEqual(latin.pageErrors, ['Film: display "Instrument Serif" has no glyphs for: 雨停了']);
+  assert.deepEqual(latin.pageErrors, ['Film: display "Instrument Serif" has no glyphs for: 雨停了ǔ']);
 });
 
 test('a film in a page that supplies its brand faces itself, as a running preview does, draws them and checks their glyphs', { skip, timeout: 120_000 }, async () => {

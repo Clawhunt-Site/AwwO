@@ -17,7 +17,7 @@
 // Relative URLs (an archive's own files, or a canvas file named by the page) are inlined from bytes the studio has,
 // so a multi-file site or a page that uses an image another node generated renders without a server.
 import { htmlDocumentSource, PREVIEW_HOST_SCRIPT } from '../htmlDeliverable';
-import { fontStyleText, PREVIEW_FONT_LOAD_SCRIPT, PREVIEW_FONTS_KEY } from '../previewFontList';
+import { fontStyleText, PREVIEW_FONT_LOAD_SCRIPT, PREVIEW_FONTS_ATTRIBUTE, PREVIEW_FONTS_KEY } from '../previewFontList';
 import { loadPreviewLibraries, previewScriptNeeds } from '../previewLibraries';
 import { applyModuleEntries, PREVIEW_IMPORT_MAP_KEY } from '../previewImportMap';
 import { scriptSpecifiers } from '../previewModules';
@@ -286,10 +286,11 @@ export async function buildLiveDocument(value: string, options: LiveDocumentOpti
   }
   const head = parsed.head;
   const guard = parsed.createElement('script');
-  // Brand fonts AwwO supplies (previewFonts.ts) come first, so the guard can start loading them.
+  // Brand fonts AwwO supplies (previewFonts.ts) come first, so the guard can start loading them; marked as AwwO's, so the
+  // film kit fetches no face of its own that is already in them.
   const fonts = supplied?.get(PREVIEW_FONTS_KEY);
   const fontStyle = fonts ? parsed.createElement('style') : null;
-  if (fontStyle) fontStyle.textContent = fontStyleText(fonts!);
+  if (fontStyle) { fontStyle.textContent = fontStyleText(fonts!); fontStyle.setAttribute(PREVIEW_FONTS_ATTRIBUTE, ''); }
   // With the link guard: a page that started in a 0×0 frame is told its real size, and a page that fails says so
   // (htmlDeliverable.ts, pageErrors.ts).
   guard.textContent = LINK_GUARD + PREVIEW_HOST_SCRIPT + (fonts ? PREVIEW_FONT_LOAD_SCRIPT : '') + (Object.keys(assets).length ? assetScript(assets) : '');

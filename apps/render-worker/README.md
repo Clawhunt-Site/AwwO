@@ -88,17 +88,17 @@ frames 0 … N-1 and repeats seamlessly.
   the web preview's `LIVE_CDNS`), and the kits AwwO supplies by their exact URLs (`kits.mjs`: the film kit,
   `https://awwo.clawhunt.store/kits/film/1/film.js`, answered from the pinned copy in `kits/`, which a release ships);
   everything else is blocked. It must not navigate away (that fails the render).
-- **Brand fonts come from the worker, not the network.** The 27 faces of AwwO's 18 brand fonts are answered at exactly
+- **Brand fonts come from the worker, not the network.** The 28 faces of AwwO's 18 brand fonts are answered at exactly
   the jsDelivr URLs the film kit names for them (the Fontsource 5.3.0 files, e.g.
   `https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.3.0/files/inter-latin-wght-normal.woff2`) from the copies
   in `fonts/` (`fonts.mjs`; each family's SIL Open Font License beside its files), which a release ships as it ships
   `kits/`: the worker refuses to start when a copy differs from its pinned size and sha256 or has no license beside
   it. So a film whose roles name brand families, as its guide says, draws its type with no network, as its preview
-  does. 23 of the copies are the file at their URL byte for byte, Noto Sans SC's among them (Google Fonts' simplified
-  Chinese subset of its bold cut, 1.17 MB: the face a film's Chinese words have); Orbitron, Playfair Display and Press
-  Start 2P reserve their names, which no subset may keep, so their four URLs are answered with the full fonts AwwO carries,
-  which draw the subsets' Latin range pixel for pixel (Playfair Display's ⁒ aside) and, as a preview's do, the
-  characters a subset lacks too. Any other font URL (another family, or a brand family's other subsets or versions) is
+  does. 24 of the copies are the file at their URL byte for byte, Noto Sans SC's two among them (Google Fonts'
+  simplified Chinese subset of its bold cut, 1.17 MB, and its latin-ext subset, 4 KB, which has the rest of pinyin's
+  letters: the face a film's Chinese words have); Orbitron, Playfair Display and Press Start 2P reserve their names,
+  which no subset may keep, so their four URLs are answered with the full fonts AwwO carries, which draw the subsets'
+  Latin range pixel for pixel (Playfair Display's ⁒ aside) and, as a preview's do, the characters a subset lacks too. Any other font URL (another family, or a brand family's other subsets or versions) is
   fetched or blocked as before.
 - **A film keeps the type its first frame has, and says what it lacks.** The film kit uses no face of its own that
   loads after the renderer's first frame, so its own type never changes mid-film. What of its own fonts a role lacks
@@ -110,7 +110,11 @@ frames 0 … N-1 and repeats seamlessly.
   cut it makes from those that loaded, a local font of that name, the fallback). A family the page supplies itself, as
   a running preview supplies the brand fonts, draws the role and is not named: the kit asks the browser for the page's
   faces of it only where it did before, once its own faces are not all used and no frame is drawn yet, since asking
-  starts loading them (a face in flight while the page loads holds up the load event a render waits for). A page's own
+  starts loading them (a face in flight while the page loads holds up the load event a render waits for). A role
+  named by its brand family alone whose faces an AwwO preview wrote into the page and started (its `data-awwo-fonts`
+  style, one `data:` source each), with no other face of that family in the document, gets none of the kit's own: the
+  kit waits for those and fetches its own only if one fails. Only AwwO's previews write that style, so a render's page
+  has none. A page's own
   `@font-face` of a role's family, which the film guide does not ask for, stays the page's: the kit cannot refuse one,
   so one that arrives late can still change the film's type.
 - **A film's listed words are checked in the faces that draw them, Chinese too.** The words a film lists for each role

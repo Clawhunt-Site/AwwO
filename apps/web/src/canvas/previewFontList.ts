@@ -4,9 +4,10 @@
  * subsets of the Fontsource 5.3.0 packages, byte for byte. Orbitron, Playfair Display and Press Start 2P reserve their
  * names, which no subset may keep, so those three are the full fonts as Google Fonts publishes them, converted to WOFF2
  * with nothing else changed, beside Google Fonts' license of each. Noto Sans SC, the face a film's Chinese words have,
- * is Google Fonts' simplified Chinese subset of its bold cut as the Fontsource 5.3.0 package ships it, beside Google
- * Fonts' license of it (its Reserved Font Name, "Source", is no part of its name). Plain data with no loader, so the case
- * canvases (officialWorkflows.ts) and the publish script can name the families without bundling the files.
+ * is two of Google Fonts' subsets of its bold cut as the Fontsource 5.3.0 package ships them, beside Google Fonts'
+ * license of it (its Reserved Font Name, "Source", is no part of its name): the simplified Chinese one (with ASCII and
+ * Latin-1), and the latin-ext one, which has the rest of pinyin's letters (ā ǎ ǜ …). Plain data with no loader, so the
+ * case canvases (officialWorkflows.ts) and the publish script can name the families without bundling the files.
  * tests/canvas-preview-fonts.test.ts pins every file's size and sha256.
  */
 export interface PreviewFontFace {
@@ -17,6 +18,9 @@ export interface PreviewFontFace {
   readonly style: 'normal' | 'italic';
   readonly bytes: number;
   readonly sha256: string;
+  /** The characters it is used for, a CSS unicode-range, when it is one of several subsets of a cut (as Fontsource's
+   *  stylesheet gives it); none when it is tried for every character, as a family's one file of a cut is. */
+  readonly unicodeRange?: string;
 }
 
 export interface PreviewFont {
@@ -30,8 +34,11 @@ export interface PreviewFont {
   readonly film?: true;
 }
 
-const face = (file: string, weight: string, bytes: number, sha256: string, style: 'normal' | 'italic' = 'normal'): PreviewFontFace =>
-  ({ file, weight, style, bytes, sha256 });
+const face = (file: string, weight: string, bytes: number, sha256: string, style: 'normal' | 'italic' = 'normal', unicodeRange?: string): PreviewFontFace =>
+  ({ file, weight, style, bytes, sha256, ...(unicodeRange ? { unicodeRange } : {}) });
+
+/** Google Fonts' latin-ext range, as Fontsource's stylesheet gives each latin-ext file (the film kit's own, cinecode's). */
+const LATIN_EXT = 'U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF';
 
 export const PREVIEW_FONTS: readonly PreviewFont[] = [
   { family: 'Inter', use: 'sans', faces: [
@@ -78,13 +85,19 @@ export const PREVIEW_FONTS: readonly PreviewFont[] = [
   { family: 'Pixelify Sans', use: 'pixel', faces: [
     face('pixelify-sans-latin-wght-normal.woff2', '400 700', 12016, '4a5633a0c9c1b73abd133a56d3716c2d8df2ed03cb987346f72194aeb224f382')] },
   { family: 'Noto Sans SC', use: 'sans', film: true, faces: [
-    face('noto-sans-sc-chinese-simplified-700-normal.woff2', '700', 1172244, 'e1df51edc00bce27b58044e829fb8ec6accc8a5daece475413de90d52818845c')] },
+    face('noto-sans-sc-chinese-simplified-700-normal.woff2', '700', 1172244, 'e1df51edc00bce27b58044e829fb8ec6accc8a5daece475413de90d52818845c'),
+    face('noto-sans-sc-latin-ext-700-normal.woff2', '700', 4468, 'c97ec9b95b51c36a26302e4623c671bcee1f88ea23ea4302c107e83325997863', 'normal', LATIN_EXT)] },
 ];
 
 const families = (use: PreviewFont['use']) => PREVIEW_FONTS.filter(font => font.use === use && !font.film).map(font => font.family).join(', ');
 
 /** Where loadPreviewLibraries hands the fonts' @font-face rules to the document builders. */
 export const PREVIEW_FONTS_KEY = 'awwo:fonts';
+
+/** The attribute of the <style> element a preview writes those rules into: the film kit takes the faces in it for the
+ *  brand faces AwwO supplied (apps/web/scripts/build-film-kit.mjs, heldFaces), and in a page whose policy lets it
+ *  fetch fonts (the studio's live page) fetches none of its own for a role whose faces are there. */
+export const PREVIEW_FONTS_ATTRIBUTE = 'data-awwo-fonts';
 
 /** Run in a page that has the supplied faces: start loading every one at once, so text a script draws into a canvas
  * soon after the page starts already has its font. */
