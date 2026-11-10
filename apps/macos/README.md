@@ -1,6 +1,6 @@
 # AwwO for Mac
 
-Source candidate **0.10.1, build 12** is the Apple Silicon desktop app for AwwO. It requires
+Source candidate **0.10.2, build 13** is the Apple Silicon desktop app for AwwO. It requires
 macOS 14 or later. The Swift/AppKit/WebKit shell opens the hosted service (the hosted
 account, workspaces and history; the website and server deploy separately) and, in a
 build that carries its payload, the local workspace: **AwwO 本地版**, the hosted product's
@@ -98,7 +98,7 @@ APP_ENV=production VITE_APP_ENV=production \
 
 The script reads `latest.json`, requires its revision and app metadata to match
 `HEAD`, rejects builds with modified inputs, and runs `verify-bundle.ts`.
-It creates `.local/releases/macos-0.10.1-build12-<sha7>/` and refuses to overwrite
+It creates `.local/releases/macos-0.10.2-build13-<sha7>/` and refuses to overwrite
 an existing release directory. Earlier build 8 artifacts remain separate.
 The output contains stable release names for the DMG, ZIP, `INSTALL.txt`,
 `SHA256SUMS`, a Fold brand kit ZIP (MIT license, SVG/PNG, vector source and
