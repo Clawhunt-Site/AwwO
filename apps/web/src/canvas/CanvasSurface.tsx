@@ -4863,7 +4863,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     canUndoPlan: boolean; undo: typeof undo; readAssistantPages: typeof readAssistantPages } | null>(null);
   // Hands the latest request over to the other way with a correction added, as the latest render can (set below):
   // false when it cannot, so the correction is handled as a message of its own.
-  const redirectLatest = useRef<((to: AssistantRoute, correction: string) => boolean) | null>(null);
+  const redirectLatest = useRef<((to: AssistantRoute, correction: string, pages?: MessagePage[]) => boolean) | null>(null);
   // Routing needs to know whether a task can start, so a canvas that routes has the service read once it opens.
   useEffect(() => { if (!readOnly && routeAssistant) executionRef.current?.activate(); }, [readOnly, routeAssistant]);
   // The unconfirmed turn a settled submission belongs to: the one carrying its identity. None may be here (another
@@ -5052,7 +5052,8 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     }
     // A correction (别改画布，直接写吧) hands the request before it over to the other way, with the correction added:
     // the reader never picks a way by hand. Where that request cannot be handed over, the message is handled alone.
-    if (redirect && redirectLatest.current?.(route, prompt)) return;
+    // The pages read for the correction go with it: its turn lists them, and says which were not read.
+    if (redirect && redirectLatest.current?.(route, prompt, pages)) return;
     if (route === 'execute') await startAssistantTask(prompt, id, pages);
     else planRouted(prompt, id, pages);
   };
@@ -5460,8 +5461,9 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   planning.messages.forEach((message, index) => { if (message.role === 'user') lastRequestIndex = index; });
   const lastRequest = lastRequestIndex >= 0 ? planning.messages[lastRequestIndex] : undefined;
   const lastReply = lastRequest ? planning.messages.slice(lastRequestIndex + 1).find(message => message.role === 'assistant' && message.route) : undefined;
-  // `prompt` is what the other way is given (the request with the correction after it); `shown`, the reader's own words.
-  const switchToTask = async (prompt: string, planOnCanvas: boolean, shown = prompt) => {
+  // `prompt` is what the other way is given (the request with the correction after it); `shown`, the reader's own words;
+  // `pages`, the web pages read for those words, which their turn lists.
+  const switchToTask = async (prompt: string, planOnCanvas: boolean, shown = prompt, pages?: MessagePage[]) => {
     const host = executionRef.current;
     if (!host) return;
     const id = `turn-${Date.now()}-${++planningSequence.current}`;
@@ -5478,7 +5480,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       if (undone) showPlanUndone();
       setPlanning(previous => ({ draft: previous.draft.trim() === shown ? '' : previous.draft, messages: [...previous.messages,
         ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: undone ? surfaceNotice(t, 'plan_undone') : t('assistant.planKept') }] : []),
-        userTurn(id, shown, 'execute', prompt), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
+        userTurn(id, shown, 'execute', prompt, pages), { id: `${id}-task`, role: 'assistant' as const, content: '', route: 'execute' as const, taskId }].slice(-60) }));
       setAssistantOpen(true);
       // As for a task's start (startAssistantTask): from the welcome; the panel's own hand-back where it had the request.
       if (waitFromWelcome.current && welcomeShownRef.current) refocusInCommit(PANEL_BOX);
@@ -5488,7 +5490,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       // and the plan stays until it is known.
       if (error instanceof TaskStartUnconfirmed) {
         setPlanning(previous => ({ draft: previous.draft.trim() === shown ? '' : previous.draft, messages: [...previous.messages,
-          ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: t('assistant.planKept') }] : []), userTurn(id, shown, 'execute', prompt),
+          ...(planOnCanvas ? [{ id: `${id}-undo`, role: 'assistant' as const, content: t('assistant.planKept') }] : []), userTurn(id, shown, 'execute', prompt, pages),
           { id: `${id}-task`, role: 'assistant' as const, content: t('assistant.startUnconfirmed'), status: 'unconfirmed' as const, route: 'execute' as const,
             operationId }].slice(-60) }));
       } else setPlanningError(failureText(error));
@@ -5501,7 +5503,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     }
     return messages[index].request ?? messages[index].content;
   };
-  const switchToCanvas = async (prompt: string, taskId?: string, shown = prompt) => {
+  const switchToCanvas = async (prompt: string, taskId?: string, shown = prompt, pages?: MessagePage[]) => {
     const blocked = planBlocker();
     if (blocked !== null) { setPlanningError(blocked || t('assistant.canvasBusy')); return; }
     const host = executionRef.current;
@@ -5517,28 +5519,29 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
       const again = assistantLatest.current!.planBlocker();
       if (again !== null) { setPlanningError(`${t('assistant.taskStopped')}${again || t('assistant.canvasBusy')}`); return; }
     }
-    void assistantLatest.current!.sendPlanningMessage(prompt, false, shown);
+    void assistantLatest.current!.sendPlanningMessage(prompt, false, shown, pages);
   };
   // Whether the latest request can be handed over to `to`: it went the other way, has its reply, and that way can take it
   // now. A task whose start is unconfirmed may exist, so it is reconciled, never planned over. A plan still on the canvas
   // is undone once its task exists where it can be, and otherwise kept, and the conversation says which.
   const canHandOver = (to: AssistantRoute) => Boolean(unifiedHost && !readOnly && lastRequest?.route && lastRequest.route !== to && lastReply && !planningBusy
     && (to === 'execute' ? unifiedHost.ready : planAvailable && lastReply.status !== 'unconfirmed'));
-  // Hands the latest request over with the reader's correction after it; false where nothing was done with it.
-  const switchLastRequest = (to: AssistantRoute, correction: string) => {
+  // Hands the latest request over with the reader's correction after it (and the pages read for the correction); false
+  // where nothing was done with it.
+  const switchLastRequest = (to: AssistantRoute, correction: string, pages?: MessagePage[]) => {
     if (!lastRequest || !lastReply || pendingRef.current || planningRequest.current) return false;
     const request = to === 'plan' ? handOverRequest(planning.messages, lastRequestIndex) : lastRequest.request ?? lastRequest.content;
     const prompt = `${request}\n\n${correction}`;
     // The planner takes at most 8000 bytes: a longer hand-over is not made, and the correction is planned on its own.
     if (to === 'plan' && new TextEncoder().encode(prompt).length > 8000) return false;
-    if (to === 'plan') { void switchToCanvas(prompt, lastReply.taskId, correction); return true; }
+    if (to === 'plan') { void switchToCanvas(prompt, lastReply.taskId, correction, pages); return true; }
     const planOnCanvas = lastReply.status === 'applied' && !undoneHere(lastReply);
     // A node that began talking since this render would keep the plan from being undone once the task exists.
     if (planOnCanvas && !canEditStructure()) { setPlanningError(surfaceNotice(t, 'planning_busy')); return true; }
-    void switchToTask(prompt, planOnCanvas, correction);
+    void switchToTask(prompt, planOnCanvas, correction, pages);
     return true;
   };
-  redirectLatest.current = (to, correction) => canHandOver(to) && switchLastRequest(to, correction);
+  redirectLatest.current = (to, correction, pages) => canHandOver(to) && switchLastRequest(to, correction, pages);
   // Tasks the conversation mentions; the host lists the canvas's others (earlier ones, other devices') at its top.
   const mentionedTasks = useMemo(() => new Set(planning.messages.flatMap(message => message.taskId ? [message.taskId] : [])), [planning.messages]);
   // With the planner closed, tasks are the one way left, and the composer says so.

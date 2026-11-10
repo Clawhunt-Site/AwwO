@@ -101,16 +101,26 @@ export function createMessagePageReader(tenantId: string, canvasId: string, loca
     const known = stillCited(address);
     if (known) added.find(entry => entry.revision === known.revisionId)?.scopes.add(scope);
   };
-  /** Lets go of the oldest page only the box `scope` added or named that is still cited and not in `keep`; false when
-   *  there is none. */
-  const letGoOldest = (keep: ReadonlySet<string>, scope: string) => {
+  /** The pages this box would let go of to make room for `count` more: the oldest pages only the box `scope` added or
+   *  named that are still cited and not in `keep`, those of `base` (set aside before) first, and `extra` beyond what
+   *  the eight and `base` take (the server found the room too small). Nothing is let go of here; null when there are
+   *  not that many. */
+  const roomPlan = (count: number, keep: ReadonlySet<string>, scope: string, extra = 0, base: ReadonlySet<string> = new Set()): Set<string> | null => {
     const now = cited();
-    const index = added.findIndex(entry => entry.scopes.size === 1 && entry.scopes.has(scope) && now.includes(entry.revision) && !keep.has(entry.revision));
-    if (index < 0) return false;
-    const [{ revision }] = added.splice(index, 1);
-    cite(now.filter(id => id !== revision));
-    for (const [key, entry] of read) if (entry.revisionId === revision) read.delete(key);
-    return true;
+    const free = (entry: { revision: string; scopes: Set<string> }) => entry.scopes.size === 1 && entry.scopes.has(scope)
+      && now.includes(entry.revision) && !keep.has(entry.revision);
+    const spare = new Set(added.filter(entry => base.has(entry.revision) && free(entry)).map(entry => entry.revision));
+    const wanted = Math.max(now.length + count - KNOWLEDGE_CONTEXT_ITEMS, spare.size) + extra;
+    for (const entry of added) {
+      if (spare.size >= wanted) break;
+      if (free(entry)) spare.add(entry.revision);
+    }
+    return spare.size >= wanted ? spare : null;
+  };
+  /** Forgets the pages let go of (`spare`, no longer cited once the citations that leave them out are set). */
+  const forget = (spare: ReadonlySet<string>) => {
+    added = added.filter(entry => !spare.has(entry.revision));
+    for (const [key, entry] of read) if (spare.has(entry.revisionId)) read.delete(key);
   };
 
   // One message's pages at a time across the canvas (the assistant and the nodes' chats): each read measures its room
@@ -217,18 +227,19 @@ export function createMessagePageReader(tenantId: string, canvasId: string, loca
     const refusal = (error: string): MessagePage => ({ url: address, host, error });
     const full = () => refusal(words(locale(), `这次任务已引用 ${cited().length} 份知识，放不下更多网页；可以先清除画布栏里的引用。`,
       `The task already cites ${cited().length} knowledge items, with no room for another page. Clear the references in the canvas bar first.`));
-    // A task cites at most eight revisions: room for `count` more, letting go of this box's earlier pages.
-    const roomFor = (count: number, kept: ReadonlySet<string>) => {
-      while (cited().length + count > KNOWLEDGE_CONTEXT_ITEMS && letGoOldest(kept, scope)) { /* made room */ }
-      return cited().length + count <= KNOWLEDGE_CONTEXT_ITEMS;
-    };
+    // A task cites at most eight revisions. The box's earlier pages that make room stay cited until this page is cited in
+    // their place, in one change of the citations: a page refused (by robots.txt, its size, the server) lets go of none.
     let revision = '';
     let page: MessagePage | null = null;
+    let extra = 0;
+    let aside: ReadonlySet<string> = new Set();
     while (!page) {
-      // Room for this page and the ones after it.
-      if (!roomFor(share, keep)) return full();
+      // Room for this page and the ones after it, as the server is to measure it.
+      const spare = roomPlan(share, keep, scope, extra);
+      if (!spare) return full();
       if (!here()) throw closed();
-      const revisionIds = cited();
+      aside = spare;
+      const revisionIds = cited().filter(id => !spare.has(id));
       try {
         // The page as the browser reads the address (pageKey): a spelling of it written elsewhere in the message
         // (dot segments, another case) carries nothing the person's own address does not name.
@@ -239,13 +250,15 @@ export function createMessagePageReader(tenantId: string, canvasId: string, loca
       } catch (error) {
         // Stopped, or the reader opened another canvas meanwhile: nothing more is read or cited.
         if (signal.aborted || !here()) throw error;
-        // No room beside what is cited, refused before the page was read (nothing counted): let go of an earlier page
-        // and ask again. A page refused after its read (web_page_no_room) is not read again.
-        if (error instanceof SaaSApiError && error.code === 'knowledge_context_limit' && letGoOldest(keep, scope)) continue;
+        // No room beside what is cited, refused before the page was read (nothing counted): ask again with one more
+        // earlier page set aside. A page refused after its read (web_page_no_room) is not read again.
+        if (error instanceof SaaSApiError && error.code === 'knowledge_context_limit' && roomPlan(share, keep, scope, extra + 1)) { extra += 1; continue; }
         return refusal(saasErrorMessage(error, locale()));
       }
     }
     const kept = new Set([...keep, revision]);
+    // The page was cut for the room the pages set aside leave: they make way for it, and more if the server says so.
+    extra = 0;
     for (;;) {
       // An answer that comes after a stop, or after the reader opened another canvas, is not cited.
       signal.throwIfAborted();
@@ -257,22 +270,26 @@ export function createMessagePageReader(tenantId: string, canvasId: string, loca
         added.find(entry => entry.revision === revision)?.scopes.add(scope);
         return page;
       }
-      if (!roomFor(1, kept)) return full();
+      const spare = roomPlan(1, kept, scope, extra, aside);
+      if (!spare) return full();
       // The task's whole quoted knowledge, measured by the server as a run will: the same text saved before, or
       // references added while the page was read, can leave less room than the page was cut for.
-      const before = cited();
+      const before = cited().filter(id => !spare.has(id));
       try {
         await readKnowledgeRevisionContext(tenantId, [...before, revision], signal);
       } catch (error) {
         if (signal.aborted || !here()) throw error;
-        if (error instanceof SaaSApiError && error.code === 'knowledge_context_limit' && letGoOldest(kept, scope)) continue;
+        if (error instanceof SaaSApiError && error.code === 'knowledge_context_limit' && roomPlan(1, kept, scope, extra + 1, aside)) { extra += 1; continue; }
         return refusal(saasErrorMessage(error, locale()));
       }
       signal.throwIfAborted();
       if (!here()) throw closed();
-      // References changed while the server measured: measured again as they are now.
-      if (!sameRevisions(cited(), before)) continue;
-      cite([...cited(), revision]);
+      // References changed while the server measured, or a page set aside is no longer this box's alone: measured
+      // again as they are now.
+      const now = roomPlan(1, kept, scope, extra, aside);
+      if (!now || !sameRevisions(cited().filter(id => !now.has(id)), before)) continue;
+      cite([...before, revision]);
+      forget(now);
       added.push({ revision, scopes: new Set([scope]) });
       read.set(pageKey(address), { revisionId: revision, page });
       return page;

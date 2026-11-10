@@ -394,6 +394,34 @@ describe('the canvas assistant reading the pages a message names', () => {
     await waitFor(() => expect(loadPlanningConversation().messages[0]).toMatchObject({ route: 'plan', pages: [pageA] }));
   });
 
+  it('lists them under a correction that hands the request before it over to the other way, each way', async () => {
+    seedNode();
+    const host = fakeHost();
+    const decisions: AssistantRouteDecision[] = [{ route: 'plan' }, { route: 'execute', redirect: true }, { route: 'plan', redirect: true }];
+    const router = vi.fn(async (_request: AssistantRouteRequest, _signal: AbortSignal): Promise<AssistantRouteDecision> => decisions.shift()!);
+    const reader = fakeReader({ hold: false, pages: [pageA] });
+    const planRequest = vi.fn<typeof requestCanvasPlan>().mockResolvedValue(plan);
+    render(<CanvasSurface assistantExecution={host} routeAssistant={router} readMessagePages={reader} planRequest={planRequest} />);
+    fireEvent.click(toggle()!);
+    send('加一个节点');
+    await waitFor(() => expect(planRequest).toHaveBeenCalledOnce());
+    await waitFor(() => expect(box()).toBeEnabled());
+    // Planned, then corrected to a task with a page: the task is given the request and the correction, and the
+    // correction's turn lists the page.
+    send('别改画布，直接做吧，参考 https://a.example/one');
+    await waitFor(() => expect(host.start).toHaveBeenCalledOnce());
+    expect(vi.mocked(host.start).mock.calls[0][0]).toBe('加一个节点\n\n别改画布，直接做吧，参考 https://a.example/one');
+    await waitFor(() => expect(loadPlanningConversation().messages.filter(message => message.role === 'user').at(-1))
+      .toMatchObject({ content: '别改画布，直接做吧，参考 https://a.example/one', route: 'execute', pages: [pageA] }));
+    expect(panel().getByRole('link', { name: 'Page A' })).toHaveAttribute('href', 'https://a.example/one');
+    // Corrected back to the canvas with the same page: the plan's turn lists it too.
+    await waitFor(() => expect(box()).toBeEnabled());
+    send('还是放到画布上吧，参考 https://a.example/one');
+    await waitFor(() => expect(planRequest).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(loadPlanningConversation().messages.filter(message => message.role === 'user').at(-1))
+      .toMatchObject({ content: '还是放到画布上吧，参考 https://a.example/one', route: 'plan', pages: [pageA] }));
+  });
+
   it('says which page it is reading, and stop keeps the message in the box', async () => {
     seedNode();
     const router = routeTo('execute');

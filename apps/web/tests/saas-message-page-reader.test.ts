@@ -21,6 +21,8 @@ let posted: Array<{ url: string; fit: { revisionIds: string[]; share: number } }
 // The server's answers to the context check before a page is cited, and whether it reads the web at all.
 let contextChecks: string[][];
 let tooLarge: (ids: string[]) => boolean;
+// The context check fails (the server does not answer it) rather than measuring.
+let contextFails: boolean;
 let readsTheWeb: boolean;
 // What happens on the canvas while the server measures the context, or reads a page; how it answers the capabilities.
 let duringContext: (() => void) | null;
@@ -37,6 +39,7 @@ beforeEach(() => {
   posted = [];
   contextChecks = [];
   tooLarge = () => false;
+  contextFails = false;
   readsTheWeb = true;
   cutsToFit = true;
   duringContext = null;
@@ -58,6 +61,7 @@ beforeEach(() => {
       const meanwhile = duringContext;
       duringContext = null;
       meanwhile?.();
+      if (contextFails) return new Response(JSON.stringify(refused(502, 'unavailable').body), { status: 502 });
       return tooLarge(ids) ? new Response(JSON.stringify(refused(413, 'knowledge_context_limit').body), { status: 413 })
         : new Response(JSON.stringify({ text: 'Quoted knowledge evidence', truncated: false, items: ids.map(contextItem) }), { status: 200 });
     }
@@ -452,6 +456,31 @@ describe('reading the web pages a message names', () => {
     expect(canvasKnowledgeRevisionIds()).toEqual(['member-1', 'rev-a', 'rev-c']);
     expect(posted.filter(item => item.url === 'https://c.example/three').map(item => item.fit.revisionIds))
       .toEqual([['member-1', 'rev-a', 'rev-b'], ['member-1', 'rev-a']]);
+  });
+
+  it('lets go of none of its pages for a page then refused, by robots.txt or the server, and of the oldest once one is cited', async () => {
+    const pages = reader();
+    for (let n = 1; n <= 8; n += 1) {
+      answer(`https://p${n}.example/`, { status: 201, body: page(String(n), `Page ${n}`, `https://p${n}.example/`) });
+      await read(pages, `读 https://p${n}.example/`);
+    }
+    const eight = Array.from({ length: 8 }, (_, n) => `rev-${n + 1}`);
+    expect(canvasKnowledgeRevisionIds()).toEqual(eight);
+    // The ninth is read with the room the oldest would leave, and refused by robots.txt: the oldest stays cited.
+    answer('https://nine.example/', refused(403, 'web_robots_disallowed'));
+    expect(await read(pages, '读 https://nine.example/')).toEqual({ hold: true, pages: [{ url: 'https://nine.example/', host: 'nine.example', error: ROBOTS }] });
+    expect(posted.at(-1)).toEqual({ url: 'https://nine.example/', fit: { revisionIds: eight.slice(1), share: 1 } });
+    expect(canvasKnowledgeRevisionIds()).toEqual(eight);
+    // A tenth is read, but the server does not measure the task: refused, and the oldest still stays.
+    answer('https://ten.example/', { status: 201, body: page('10', 'Page 10', 'https://ten.example/') });
+    contextFails = true;
+    expect((await read(pages, '读 https://ten.example/')).hold).toBe(true);
+    expect(canvasKnowledgeRevisionIds()).toEqual(eight);
+    // Measured, it is cited in the oldest's place.
+    contextFails = false;
+    expect((await read(pages, '再读 https://ten.example/')).hold).toBe(false);
+    expect(contextChecks.at(-1)).toEqual([...eight.slice(1), 'rev-10']);
+    expect(canvasKnowledgeRevisionIds()).toEqual([...eight.slice(1), 'rev-10']);
   });
 
   it('says so where the task’s eight references leave no room, and reads what fits', async () => {
