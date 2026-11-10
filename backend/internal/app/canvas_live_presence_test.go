@@ -231,6 +231,49 @@ func TestPostgresCanvasLivePresenceTrustsASessionForAMoment(t *testing.T) {
 	}
 }
 
+// A presence post that names another workspace's canvas under the caller's own workspace, or a canvas that does not
+// exist, answers 404 as everywhere (AWWO-LAW-001): checked in full, and trusted for presence too.
+func TestPostgresCanvasLivePresenceAnswersNotFoundForAnotherWorkspacesCanvas(t *testing.T) {
+	lt := newLiveTeam(t)
+	otherOwner, otherTid, _ := lt.h.register(t, "live-other-owner@example.test")
+	other := lt.h.request(t, otherOwner, "POST", "/tenants/"+otherTid+"/canvases", map[string]any{"name": "Other", "document": liveCanvasDocument()}, 201)["id"].(string)
+	post := func(who *http.Cookie, cid string) int {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"clientId": "member-page-5", "state": map[string]any{"status": "here"}})
+		r, _ := http.NewRequest("POST", lt.h.server.URL+"/api/v1/tenants/"+lt.tid+"/canvases/"+cid+"/live/presence", bytes.NewReader(raw))
+		r.Header.Set("Origin", lt.h.cfg.PublicOrigin)
+		r.Header.Set("Content-Type", "application/json")
+		r.AddCookie(who)
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	// The first post is checked in full, the next ones within the session's trust: the same answers both ways.
+	for round := 0; round < 2; round++ {
+		if got := post(lt.member, other); got != 404 {
+			t.Fatalf("round %d, another workspace's canvas: %d", round, got)
+		}
+		if got := post(lt.member, "no-such-canvas"); got != 404 {
+			t.Fatalf("round %d, a canvas that does not exist: %d", round, got)
+		}
+		if got := post(lt.member, lt.cid); got != 204 {
+			t.Fatalf("round %d, the workspace's own canvas: %d", round, got)
+		}
+	}
+	// On a canvas the member is on (a stream open), the post moves their state.
+	live := lt.openLive(t, lt.member, "", "after=1&client=member-page-5")
+	live.next(t, "hello")
+	if got := post(lt.member, lt.cid); got != 204 {
+		t.Fatalf("on the open canvas: %d", got)
+	}
+	if p, ok := lt.h.a.multiplayer.participant(lt.tid, lt.cid, "member-page-5"); !ok || p.State.Status == nil || *p.State.Status != "here" {
+		t.Fatalf("the member's state: %+v", p)
+	}
+}
+
 // The trust ends too when another device of the person's ends the session, and with any admin update of the workspace
 // (once it is committed): the next post is checked in full.
 func TestPostgresCanvasLivePresenceTrustEndsFromAnotherDeviceAndTheAdmin(t *testing.T) {

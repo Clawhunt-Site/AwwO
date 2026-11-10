@@ -346,10 +346,18 @@ func (a *App) canvasLivePresence(w http.ResponseWriter, r *http.Request) {
 	if agent != nil {
 		a.touchCanvasAgent(r, tid, cid)
 	}
-	if a.multiplayer.setState(tid, cid, actor, role, update) == liveStateTooFast {
+	switch a.multiplayer.setState(tid, cid, actor, role, update) {
+	case liveStateTooFast:
 		w.Header().Set("Retry-After", "1")
 		fail(w, 429, "presence_too_fast", fmt.Sprintf("At most %d presence updates a second: send the latest again in a moment", livePresencePerSecond))
 		return
+	case liveStateAbsent:
+		// Nothing moved: no page of the caller's is on this canvas (an agent's post with no one on it, a page between its
+		// streams). Another workspace's canvas, or none, answers 404 as everywhere (AWWO-LAW-001), also to a session
+		// trusted for presence (livePresenceAccess); asked only here, so a post on a canvas someone is on reads no row.
+		if !a.canvasExists(w, r, tid, cid) {
+			return
+		}
 	}
 	w.WriteHeader(204)
 }
