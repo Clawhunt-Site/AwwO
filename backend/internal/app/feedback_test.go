@@ -186,9 +186,50 @@ func TestFeedbackReplyIsReadAsItsJSONOrAsWords(t *testing.T) {
 	if got, ok := parseFeedbackReply("Which canvas was it?"); !ok || got.Reply != "Which canvas was it?" || got.Ready {
 		t.Fatalf("plain words: %+v %v", got, ok)
 	}
-	for _, text := range []string{`{"reply":"cut off at the tok`, `Sure: {"reply":"half`, `<think>still thinking`, "", `{"ready":true}`} {
+	for _, text := range []string{`{"reply":"cut off at the tok`, `Sure: {"reply":"half`, `<think>still thinking`, "", `{"ready":true}`,
+		`{"reply":"cut off with a "quote`, `{"title":"a report alone","category":"bug"}`} {
 		if got, ok := parseFeedbackReply(text); ok {
 			t.Errorf("%q read as %+v", text, got)
+		}
+	}
+}
+
+// Haiku in production (2026-11-10) quoted a Chinese word with plain double quotes inside its JSON, and the answer was
+// refused as unreadable: such quotes, raw line breaks, words around the object and a field of another type are read.
+func TestFeedbackReplyIsReadAsAModelWritesIt(t *testing.T) {
+	quoted := `{"reply":"明白了，我会把它整理成一份"测试"报告。","ready":true,"report":{"title":"反馈助手"自检"","category":"other","severity":"low","summary":"确认"测试"报告能送到。","steps":["打开主页","点"反馈""],"expected":"","actual":""}}`
+	got, ok := parseFeedbackReply(quoted)
+	if !ok || got.Reply != `明白了，我会把它整理成一份"测试"报告。` || !got.Ready || got.Report == nil || got.Report.Title != `反馈助手"自检"` ||
+		got.Report.Summary != `确认"测试"报告能送到。` || len(got.Report.Steps) != 2 || got.Report.Steps[1] != `点"反馈"` {
+		t.Fatalf("plain quotes inside the texts: %+v %v", got, ok)
+	}
+	if got, ok := parseFeedbackReply("{\"reply\":\"第一行\n第二行\",\"ready\":false}"); !ok || got.Reply != "第一行\n第二行" || got.Ready {
+		t.Fatalf("a raw line break: %+v %v", got, ok)
+	}
+	around := `好的 {先说一句} 这是回答：` + "```json\n" + `{"reply":"收到","ready":false}` + "\n```\n请查看上方摘要 {以上}"
+	if got, ok := parseFeedbackReply(around); !ok || got.Reply != "收到" || got.Ready {
+		t.Fatalf("words and braces around the answer: %+v %v", got, ok)
+	}
+	loose := `{"reply":"好","ready":"true","report":{"title":"按钮没反应","category":"bug","severity":"high","summary":3,"steps":"打开画布\n\n点按钮","expected":["x"],"actual":null}}`
+	got, ok = parseFeedbackReply(loose)
+	if !ok || !got.Ready || got.Report == nil || got.Report.Title != "按钮没反应" || got.Report.Summary != "" || got.Report.Expected != "" ||
+		len(got.Report.Steps) != 2 || got.Report.Steps[0] != "打开画布" || got.Report.Steps[1] != "点按钮" {
+		t.Fatalf("fields of other types: %+v %v", got, ok)
+	}
+	// JSON written correctly reads the same through the repair: an escaped quote and a backslash stay what they were.
+	exact := `{"reply":"a \"quoted\" word and a \\ mark","ready":false}`
+	if repaired := feedbackJSONRepaired(exact); repaired != exact {
+		t.Fatalf("correct JSON repaired into %q", repaired)
+	}
+	if got, ok := parseFeedbackReply(exact); !ok || got.Reply != `a "quoted" word and a \ mark` {
+		t.Fatalf("escaped quotes: %+v %v", got, ok)
+	}
+	// Whatever json.Marshal writes is left byte for byte.
+	for _, s := range []string{`plain`, `a "quote"`, `back\slash`, "line\nbreak\ttab\x01", `中文“引号”和「括号」`, `</script> & <b>`, "\u2028",
+		`{"nested":"json"}`, `ends with \`, `"`, `", "ready": true`} {
+		raw, _ := json.Marshal(map[string]any{"reply": s, "ready": false, "report": map[string]any{"title": s, "steps": []string{s, s}}})
+		if repaired := feedbackJSONRepaired(string(raw)); repaired != string(raw) {
+			t.Errorf("%s repaired into %s", raw, repaired)
 		}
 	}
 }

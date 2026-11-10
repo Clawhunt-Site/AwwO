@@ -59,7 +59,10 @@ while a release holds the worker. Its model is
 `AWWO_FEEDBACK_MODEL`, else the operator's planner model (`AWWO_PLANNER_MODEL`), else the worker's default where that
 costs nothing (the assistant router's rule); a Bedrock model needs the worker's Converse bridge (`computerBedrock`).
 Personal-credential deployments (the local edition) have no platform model, so their panel sends words only. The call
-is the platform's: no workspace allowance counts it, and its text is never logged.
+is the platform's: no workspace allowance counts it, and its text is never logged. Its answer is read as models write
+it: the first JSON object holding a `reply`, with the words around it left out, plain double quotes and control
+characters left raw inside its texts escaped (Haiku quotes a Chinese word with plain marks, which refused the release's
+first live answer on 2026-11-10), and a report's field of another type left empty; the prompt asks for “” or 「」.
 
 Limits, in memory per API process (a restart forgets them): per person (an account, else a network address, an IPv6
 one by its /64) 8 answers a minute and 80 a day (30 for a visitor who is not signed in), one at a time; for the
