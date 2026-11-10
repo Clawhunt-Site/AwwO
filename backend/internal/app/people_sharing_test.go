@@ -394,6 +394,101 @@ func TestPostgresARunIsStoppedByItsStarterOrAnOwnerOrAdmin(t *testing.T) {
 	}
 }
 
+// An auto rerun's operation names the canvas run it reruns, so another member could keep it from starting before it is
+// admitted: it is kept from starting only by the person whose run it reruns, or an owner or admin, as a stop is.
+func TestPostgresAnAutoRerunNotAdmittedYetIsCancelledByItsRunsStarterOrAnOwnerOrAdmin(t *testing.T) {
+	h := newHarness(t, "http://127.0.0.1:1")
+	owner, tid, _ := h.register(t, "rerun-owner@example.test")
+	admin, _ := joinAs(t, h, owner, tid, "rerun-admin@example.test", "admin")
+	starter, starterID := joinAs(t, h, owner, tid, "rerun-starter@example.test", "member")
+	other, _ := joinAs(t, h, owner, tid, "rerun-other@example.test", "member")
+	cid, doc := graphFixture(t, h, owner, tid)
+	base := "/tenants/" + tid + "/canvases/" + cid + "/graph-runs/operations/"
+	tombstones := func(op string) int {
+		return countRows(t, h, "SELECT count(*) FROM graph_operation_cancellations WHERE tenant_id=$1 AND operation_id=$2", tid, op)
+	}
+	failed := func() string {
+		gid, _ := seedUnprojectedGraph(t, h, tid, cid, starterID, doc, map[string]string{"a": "failed"})
+		execSQL(t, h, "UPDATE graph_runs SET status='failed' WHERE id=$1", gid)
+		return autoRerunPrefix + gid
+	}
+	// Another member is refused as a stop of the starter's run is, and leaves no cancellation behind.
+	op := failed()
+	requireCode(t, h.request(t, other, "POST", base+op+"/cancel", map[string]any{}, 403), "run_not_yours")
+	if n := tombstones(op); n != 0 {
+		t.Fatal("a refused cancellation of another's auto rerun was kept", n)
+	}
+	// The person whose run it reruns may, and so may an admin and the owner.
+	h.request(t, starter, "POST", base+op+"/cancel", map[string]any{}, 200)
+	if n := tombstones(op); n != 1 {
+		t.Fatal("the starter's cancellation of the auto rerun", n)
+	}
+	for _, c := range []*http.Cookie{admin, owner} {
+		op = failed()
+		h.request(t, c, "POST", base+op+"/cancel", map[string]any{}, 200)
+		if n := tombstones(op); n != 1 {
+			t.Fatal("an admin's or owner's cancellation of the auto rerun", n)
+		}
+	}
+	// One naming no run of the canvas reruns nothing a person started: its cancellation is kept as asked.
+	h.request(t, other, "POST", base+autoRerunPrefix+"no-such-run/cancel", map[string]any{}, 200)
+	if n := tombstones(autoRerunPrefix + "no-such-run"); n != 1 {
+		t.Fatal("the cancellation of an auto rerun naming no run", n)
+	}
+}
+
+// An auto rerun is started as it is kept from starting: by the person whose canvas run it reruns, or an owner or admin.
+// Another member, who reads its operation on the canvas (pending.rerun), is refused before anything is admitted, so
+// that the rerun is never theirs to stop and stays due for its starter.
+func TestPostgresAnAutoRerunIsAdmittedForItsRunsStarterOrAnOwnerOrAdmin(t *testing.T) {
+	h := newHarness(t, newEvolutionPi(t, func(node, effort string, call int) piReply { return piReply{text: "RESULT-" + node} }).URL)
+	owner, tid, ownerID := h.register(t, "admit-owner@example.test")
+	admin, adminID := joinAs(t, h, owner, tid, "admit-admin@example.test", "admin")
+	starter, starterID := joinAs(t, h, owner, tid, "admit-starter@example.test", "member")
+	other, _ := joinAs(t, h, owner, tid, "admit-other@example.test", "member")
+	// A canvas whose latest run, the starter's, failed and was learnt from while its auto rerun was on: a rerun is due.
+	due := func() (string, string) {
+		cid, doc := graphFixture(t, h, owner, tid)
+		h.request(t, owner, "PUT", "/tenants/"+tid+"/canvases/"+cid+"/evolution", map[string]any{"autoRerun": true}, 200)
+		gid, _ := seedUnprojectedGraph(t, h, tid, cid, starterID, doc, map[string]string{"a": "failed"})
+		execSQL(t, h, "UPDATE graph_run_nodes SET state='failed' WHERE graph_id=$1 AND node_id='a'", gid)
+		execSQL(t, h, "UPDATE graph_runs SET status='failed',lessons_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1", gid)
+		return cid, autoRerunPrefix + gid
+	}
+	admit := func(c *http.Cookie, cid, op string, status int) map[string]any {
+		return h.request(t, c, "POST", "/tenants/"+tid+"/canvases/"+cid+"/graph-runs", map[string]any{"operationId": op, "scope": []string{"a"}}, status)
+	}
+	admitted := func(cid, op, by string) int {
+		return countRows(t, h, "SELECT count(*) FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 AND operation_id=$3 AND actor_id=$4", tid, cid, op, by) +
+			countRows(t, h, "SELECT count(*) FROM canvas_evolution_log WHERE tenant_id=$1 AND canvas_id=$2 AND kind='rerun' AND actor_id=$3", tid, cid, by)
+	}
+	cid, op := due()
+	if rerun := rerunOf(h.request(t, other, "GET", "/tenants/"+tid+"/canvases/"+cid+"/evolution", nil, 200)); rerun == nil || rerun["operationId"] != op {
+		t.Fatal("the rerun due, as another member reads it", rerun)
+	}
+	// Another member is refused as a stop of the starter's run is: nothing is admitted or claimed, and the rerun stays due.
+	requireCode(t, admit(other, cid, op, 403), "run_not_yours")
+	if n := countRows(t, h, "SELECT (SELECT count(*) FROM graph_runs WHERE tenant_id=$1 AND operation_id=$2)+(SELECT count(*) FROM canvas_evolution_log WHERE tenant_id=$1 AND kind='rerun')", tid, op); n != 0 {
+		t.Fatal("another member's refused rerun admitted something", n)
+	}
+	if rerun := rerunOf(h.request(t, starter, "GET", "/tenants/"+tid+"/canvases/"+cid+"/evolution", nil, 200)); rerun == nil || rerun["operationId"] != op {
+		t.Fatal("the rerun due after another member was refused", rerun)
+	}
+	// The person whose run it reruns starts it, as its starter.
+	admit(starter, cid, op, 202)
+	if n := admitted(cid, op, starterID); n != 2 {
+		t.Fatal("the starter's rerun", n)
+	}
+	// So do an admin and the owner, each as the rerun's starter.
+	for c, id := range map[*http.Cookie]string{admin: adminID, owner: ownerID} {
+		cid, op = due()
+		admit(c, cid, op, 202)
+		if n := admitted(cid, op, id); n != 2 {
+			t.Fatal("an admin's or owner's rerun", n)
+		}
+	}
+}
+
 // A downgrade that commits while a delete or a stop waits after the middleware is seen by the role read inside the
 // write's transaction (AWWO-LAW-003): an admin made a member may no longer delete another's canvas or stop another's run.
 func TestPostgresDeleteAndStopRecheckTheRoleInTheirTransaction(t *testing.T) {

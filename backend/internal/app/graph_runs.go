@@ -119,6 +119,18 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The auto rerun of a person's canvas run is started by those who may keep it from starting (rerunsAnothersRun):
+	// another member, who reads its operation on the canvas, is refused before anything is admitted or claimed, so the
+	// rerun stays due for its run's starter and never becomes the other member's to stop.
+	others, e := rerunsAnothersRun(r.Context(), tx, tid, cid, b.OperationID, actorRole, currentUser(r).ID)
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if others {
+		runNotYours(w)
+		return
+	}
 	var cancelled bool
 	if e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM graph_operation_cancellations WHERE tenant_id=$1 AND canvas_id=$2 AND operation_id=$3)", tid, cid, b.OperationID).Scan(&cancelled); e != nil {
 		a.dbError(w, e)
@@ -1311,6 +1323,24 @@ func (a *App) recoverGraphs(ctx context.Context) error {
 	return nil
 }
 
+// rerunsAnothersRun is whether operation op is the auto rerun (autoRerunParent) of a canvas run of canvas cid that user
+// did not start, for a user whose workspace role stops only their own runs (stopsOthersRuns). Such a rerun is its run's
+// starter's, or an owner's or admin's, to start (createGraphRun) and to keep from starting (cancelGraphOperation), as
+// that run is theirs to stop: anyone else gets runNotYours. An operation of any other shape, or an auto rerun's that
+// names no run of the canvas, is no one's in particular.
+func rerunsAnothersRun(ctx context.Context, q querier, tid, cid, op, role, user string) (bool, error) {
+	parent, auto := autoRerunParent(op)
+	if !auto || parent == "" || stopsOthersRuns(role) {
+		return false, nil
+	}
+	var starter string
+	err := q.QueryRow(ctx, "SELECT COALESCE(actor_id,'') FROM graph_runs WHERE tenant_id=$1 AND canvas_id=$2 AND id=$3", tid, cid, parent).Scan(&starter)
+	if noRows(err) {
+		return false, nil
+	}
+	return err == nil && starter != user, err
+}
+
 // Cancelling an operation before its response arrives creates a durable tombstone.
 // Admission and cancellation share tenant/canvas locks, so a delayed POST cannot
 // start a paid run after the caller has received positive cancellation evidence.
@@ -1351,6 +1381,19 @@ func (a *App) cancelGraphOperation(w http.ResponseWriter, r *http.Request) {
 	if gid != "" && (status == "queued" || status == "running") && starter != currentUser(r).ID && !stopsOthersRuns(role) {
 		runNotYours(w)
 		return
+	}
+	// But an auto rerun's operation names the canvas run it reruns, so anyone who reads the canvas knows it before it is
+	// admitted: it is kept from starting only by those who may start it (rerunsAnothersRun).
+	if gid == "" {
+		others, err := rerunsAnothersRun(r.Context(), tx, tid, cid, op, role, currentUser(r).ID)
+		if err != nil {
+			a.dbError(w, err)
+			return
+		}
+		if others {
+			runNotYours(w)
+			return
+		}
 	}
 	if _, e = tx.Exec(r.Context(), "INSERT INTO graph_operation_cancellations(tenant_id,canvas_id,operation_id,actor_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING", tid, cid, op, currentUser(r).ID); e != nil {
 		a.dbError(w, e)
