@@ -127,6 +127,12 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
     changes: [{ on: '2026-10-24', text: {
       en: 'Recorded again on the live AwwO, on the whole of Episode I: its 298 nodes in six stages, 93 runs, six editors and ten edits, three acts on one canvas, and what a copy makes again and costs.',
       zh: '在线上 AwwO 重新录制，讲的是完整的第一集：298 个节点、六个阶段、93 次运行、六个剪辑智能体和十个剪辑节点、一张画布上的三幕，以及副本要重新生成什么、要花多少。' } }] },
+  { id: 'launch-film', section: 'flagship', caseId: 'launch-film', voice: 'en', recordedOn: '2026-11-10',
+    title: { en: 'AwwO · launch film: a film written as code by nine agents', zh: 'AwwO · launch film：九个 Agent 用代码写出的发布影片' },
+    summary: { en: 'Read how a Director, six builders side by side, a tester and an editor wrote an 18-second three.js film on one canvas, play it in the case with its own sound, then copy its canvas as a draft.',
+      zh: '看 Director、六个并行的制作 Agent、测试和 Editor 怎样在一张画布上用代码写出一部 18 秒的 three.js 影片，在案例里带原声播放它，再把画布复制成草稿。' },
+    seconds: 482, src: '/showcase/staged/academy/1fcfe92053382acd.mp4', bytes: 67398465, sha256: '1fcfe92053382acd933d4b4801a17039a7933d4d6a9d21cadcdcd28189b35b75',
+    poster: null },
   { id: 'umber-photo', section: 'flagship', caseId: 'umber-photo', voice: 'en', recordedOn: '2026-10-24',
     title: { en: 'Umber: a photo editor built by twelve agents', zh: 'Umber：十二个 Agent 做出的网页图片编辑器' },
     summary: { en: 'A layered photo editor in one web page: how its twelve agents wrote it in a clean room, how to copy its canvas, and the editor at work in Results.',
