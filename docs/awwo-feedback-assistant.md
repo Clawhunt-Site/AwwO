@@ -54,8 +54,7 @@ waits on a sign-in). Both writes are same-origin only, like every API write.
 The assistant is one completion on the router's runtime (Pi, else OpenAI Agents), thinking off, at most 1,600 output
 tokens and 25 s, reading the latest of the conversation only (8 messages, 8,000 characters). The worker's slots are its
 runs' first: one answer at a time for the whole deployment, and none while fewer than three of the worker's slots are
-free (the assistant router may take one), so people chatting at once can never hold the slots a run needs; none either
-while a release holds the worker. Its model is
+free (the assistant router may take one), so people chatting at once can never hold the slots a run needs. Its model is
 `AWWO_FEEDBACK_MODEL`, else the operator's planner model (`AWWO_PLANNER_MODEL`), else the worker's default where that
 costs nothing (the assistant router's rule); a Bedrock model needs the worker's Converse bridge (`computerBedrock`).
 Personal-credential deployments (the local edition) have no platform model, so their panel sends words only. The call

@@ -731,8 +731,7 @@ type feedbackError string
 func (e feedbackError) Error() string { return string(e) }
 
 // feedbackModelTurn asks the assistant's model for its next answer: one completion on the router's runtime, thinking
-// off, never the last free slot of the worker, and never while a release holds it. The call is the platform's and its
-// text is never logged.
+// off, and never the last free slot of the worker. The call is the platform's and its text is never logged.
 func (a *App) feedbackModelTurn(ctx context.Context, in feedbackTurnInput, signedIn bool) (feedbackTurnResult, error) {
 	runtime := a.routerRuntime()
 	if runtime == "" || a.cfg.UserCredentials {
@@ -756,7 +755,7 @@ func (a *App) feedbackModelTurn(ctx context.Context, in feedbackTurnInput, signe
 		return feedbackTurnResult{}, feedbackError("assistant_model_unavailable")
 	}
 	endpoint, token, err := a.runtimeEndpoint(runtime)
-	if err != nil || a.runtimeHeld(ctx, runtime) {
+	if err != nil {
 		return feedbackTurnResult{}, feedbackError("assistant_runtime_unavailable")
 	}
 	messages := []map[string]string{{"role": "system", "content": a.feedbackSystemPrompt(in, signedIn)}}
