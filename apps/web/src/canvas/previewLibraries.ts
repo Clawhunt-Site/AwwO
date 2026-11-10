@@ -152,17 +152,7 @@ export const NO_PREVIEW_SCRIPT_NEEDS: PreviewScriptNeeds = { libraries: [], addi
 export function previewScriptNeeds(source: string, inlined: readonly string[] = [], texts: readonly string[] = []): PreviewScriptNeeds {
   const template = document.createElement('template');
   template.innerHTML = source;
-  const libraries = new Set<PreviewLibrary>();
-  const blocked = new Set<string>();
-  for (const script of Array.from(template.content.querySelectorAll('script'))) {
-    const reference = (script.getAttribute('src') ?? script.getAttribute('href') ?? script.getAttribute('xlink:href'))?.trim();
-    if (reference === undefined) continue;
-    // A module script naming a pinned module file is supplied through the import map (moduleNeeds, below).
-    if ((script.getAttribute('type') || '').trim().toLowerCase() === 'module' && pinnedModuleFile(reference)) continue;
-    const library = script.namespaceURI === HTML_NAMESPACE && script.hasAttribute('src') ? BY_URL.get(reference) : undefined;
-    if (library) libraries.add(library);
-    else blocked.add(scriptOrigin(reference));
-  }
+  const { libraries, blocked } = taggedLibraries(template.content);
   const modules = moduleNeeds(template.content, inlined);
   if (modules?.files.length) libraries.add(THREE_MODULES_LIBRARY);
   for (const host of modules?.blocked ?? []) blocked.add(host);
@@ -171,6 +161,32 @@ export function previewScriptNeeds(source: string, inlined: readonly string[] = 
   if (!libraries.size && !blocked.size) return NO_PREVIEW_SCRIPT_NEEDS;
   const additions = [...libraries].flatMap(library => (library.additions ?? []).filter(addition => addition.used.test(source)));
   return { libraries: [...libraries], additions, blocked: [...blocked], ...(modules?.files.length ? { modules } : {}), ...(fonts.length ? { fonts } : {}) };
+}
+
+/** The libraries AwwO supplies that the page's own script tags name, in first-use order, and where its other external
+ *  scripts come from: previewScriptNeeds' first step. */
+function taggedLibraries(content: DocumentFragment): { libraries: Set<PreviewLibrary>; blocked: Set<string> } {
+  const libraries = new Set<PreviewLibrary>();
+  const blocked = new Set<string>();
+  for (const script of Array.from(content.querySelectorAll('script'))) {
+    const reference = (script.getAttribute('src') ?? script.getAttribute('href') ?? script.getAttribute('xlink:href'))?.trim();
+    if (reference === undefined) continue;
+    // A module script naming a pinned module file is supplied through the import map (moduleNeeds, in previewScriptNeeds).
+    if ((script.getAttribute('type') || '').trim().toLowerCase() === 'module' && pinnedModuleFile(reference)) continue;
+    const library = script.namespaceURI === HTML_NAMESPACE && script.hasAttribute('src') ? BY_URL.get(reference) : undefined;
+    if (library) libraries.add(library);
+    else blocked.add(scriptOrigin(reference));
+  }
+  return { libraries, blocked };
+}
+
+/** The libraries AwwO supplies that a page's own script tags name, in first-use order (previewScriptNeeds' first step,
+ *  without reading the page's modules or fonts): a running preview inlines a classic library such as the film kit
+ *  exactly when this lists it. */
+export function previewScriptLibraries(source: string): readonly PreviewLibrary[] {
+  const template = document.createElement('template');
+  template.innerHTML = source;
+  return [...taggedLibraries(template.content).libraries];
 }
 
 function scriptOrigin(reference: string): string {

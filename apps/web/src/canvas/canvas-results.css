@@ -72,6 +72,9 @@
 /* A delivered page gets the room the homepage gives a case's focused result (production-made.css), so a game laid
    out for a browser window fits on a 1080p screen without going full screen. */
 .awwo-results-body .awwo-artifact-frame { height: min(820px, 78dvh); }
+/* A film page shown here in a page frame (the single result an acceptance step returned; the workbench shows results in
+   the studio's live page) keeps its own shape (artifactPreview.css, .is-film), within the same height. */
+.awwo-results-body .awwo-artifact-frame.is-film { height: auto; --awwo-film-cap: min(820px, 78dvh); }
 .awwo-results-nothing, .awwo-results-form > p { margin: 0; padding: 28px 22px; border-radius: var(--saas-radius-lg); background: var(--saas-card); box-shadow: 0 0 0 1px var(--saas-hairline) inset; color: var(--saas-muted); }
 .awwo-results-form {
   & h3 { margin: 0 0 10px; color: var(--saas-muted); font-size: var(--saas-text-xs); font-weight: 600; }

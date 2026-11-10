@@ -20,7 +20,9 @@
 @keyframes awwo-wire-signal { to { stroke-dashoffset: -36; } }
 @keyframes awwo-msg-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes awwo-dot-hold { 0%, 100% { opacity: .25; } 30% { opacity: 1; } 60% { opacity: .25; } }
-/* The delivery drawer's fade while more is below (scroll-driven; see .awwo-deliverables below). */
+/* The delivery drawer's fade while more is below (scroll-driven; see .awwo-deliverables below). Its 44px is also the
+   drawer's scroll-padding-bottom, which a film's preview frame keeps clear (ArtifactPreview's useScrollRoom): change both
+   together (saas-film-frame.test.ts checks they agree). */
 @property --awwo-scroll-fade { syntax: '<length>'; inherits: false; initial-value: 0px; }
 @keyframes awwo-scroll-fade { from, 88% { --awwo-scroll-fade: 44px; } to { --awwo-scroll-fade: 0px; } }
 
@@ -614,7 +616,8 @@ html:root .saas-canvas-shell {
      fade lifts at the end. Scroll-driven, so it follows the reader; where that is unsupported, or the
      content fits, nothing fades. */
   .canvas-root .awwo-node-delivery-drawer .awwo-deliverables {
-    /* A control scrolled into view by the keyboard stops above the fade, focus ring and all. */
+    /* A control scrolled into view by the keyboard stops above the fade, focus ring and all, and a film's preview frame
+       stays above it (useScrollRoom): the fade's height (@keyframes awwo-scroll-fade). */
     scroll-padding-bottom: 44px;
     scrollbar-width: thin; scrollbar-color: var(--saas-border-strong) transparent;
     mask-image: linear-gradient(to bottom, #000 calc(100% - var(--awwo-scroll-fade)), transparent);
@@ -642,6 +645,10 @@ html:root .saas-canvas-shell {
     & .awwo-deliverable-files { margin-bottom: 8px; }
     & .awwo-deliverable-body:not(.awwo-deliverable-with-preview) { padding: 18px 20px; font-size: var(--saas-text-md); line-height: 1.7; }
     & .awwo-artifact-frame { min-height: 0; height: clamp(420px, calc(100dvh - 330px), 1100px); }
+    /* A film page shown here in a page frame (the single result an acceptance step returned: the workbench shows a canvas's
+       results in the studio's live page instead) keeps its own shape (artifactPreview.css, .is-film), no taller than the
+       exhibit's height. */
+    & .awwo-artifact-frame.is-film { height: auto; --awwo-film-cap: clamp(420px, calc(100dvh - 330px), 1100px); }
     & :is(.awwo-artifact-source, .awwo-artifact-markdown) { max-height: clamp(420px, calc(100dvh - 330px), 1100px); }
     & .awwo-artifact-markdown { padding: 22px 26px; font-size: var(--saas-text-md); }
     /* A page that needs its scripts (a game, an animation) shows little until it runs; running it is the
@@ -651,7 +658,7 @@ html:root .saas-canvas-shell {
       &:hover { background: var(--saas-primary-hover); color: var(--saas-on-primary); }
       &[aria-pressed='true'] { background: var(--saas-field); color: var(--saas-text); }
     }
-    @media (max-width: 760px) { & .awwo-artifact-frame { height: 62dvh; } }
+    @media (max-width: 760px) { & .awwo-artifact-frame { height: 62dvh; } & .awwo-artifact-frame.is-film { height: auto; --awwo-film-cap: 62dvh; } }
   }
 
   /* Fields inside a node (task, contract, outputs). */

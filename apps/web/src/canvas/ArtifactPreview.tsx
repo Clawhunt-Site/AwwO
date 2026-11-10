@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, File, Maximize2, X } from 'lucide-react';
 import { currentSaaSCanvas, storedArtifactUrl } from '../saas/canvasBridge';
@@ -9,6 +9,7 @@ import { downloadTextDeliverable, htmlDocumentSource, htmlPreviewDocument, MAX_A
 import { loadPreviewLibraries, NO_PREVIEW_SCRIPT_NEEDS, previewScriptNeeds, type PreviewScriptNeeds } from './previewLibraries';
 import { motionNotes, type MotionNote, type MotionRule } from './motionNotes';
 import { revealLine } from './revealLine';
+import { filmFrame } from './filmKit/filmFrame';
 import { readPageErrorMessage, reportPageError } from './pageErrors';
 import { LivePage } from './studio/LivePage';
 import type { AssetResolver } from './studio/liveDocument';
@@ -200,6 +201,78 @@ function fingerprint(text: string): string {
   return `${(hash >>> 0).toString(36)}-${text.length}`;
 }
 
+/** The least room a film's frame is given, however short its scroll box: below it the film would be too small to tell. */
+const MIN_FILM_ROOM = 96;
+
+/** The nearest ancestor that scrolls its content: what a reader sees of the frame's surroundings. */
+function scrollBox(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if (overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay') return node;
+  }
+  return null;
+}
+
+/** A frame that fits under what stands above it in its box keeps at least this share of the height it would take; below
+ *  it, the frame takes the whole room and is seen whole once the box is scrolled to it. */
+const OPEN_ROOM_SHARE = 0.6;
+
+/**
+ * The height an element of the given shape (width / height) may take in the scroll box it stands in, or null where no
+ * scroll box holds it or the box has no size yet. The box's visible height less what it keeps clear at its edges (its
+ * scroll padding: a node's drawer keeps 44 px at its foot, where its fade is) is its whole room. The element would take
+ * its place's width at its shape, at most that room; from where it stands in the box's content (what is above it in the
+ * box: in a node's drawer the deliverable's heading and the rows above it, and the preview's toolbar), the room left below
+ * is used when it holds at least OPEN_ROOM_SHARE of that height, so the element is seen whole as the box opens; else the
+ * whole room. Kept current as the box changes size and as what is in it changes; not measured while the element is full
+ * screen (it is out of the box then), and again when it leaves it.
+ */
+function useScrollRoom(target: RefObject<HTMLElement | null>, on: boolean, ratio: number, key: string): number | null {
+  const [room, setRoom] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const element = on ? target.current : null;
+    const box = element ? scrollBox(element) : null;
+    if (!element || !box) { setRoom(null); return; }
+    const measure = () => {
+      const full = document.fullscreenElement;
+      if (full && (full === element || element.contains(full))) return;
+      if (!(box.clientHeight > 0)) { setRoom(null); return; }
+      const style = getComputedStyle(box);
+      const top = parseFloat(style.scrollPaddingTop) || 0;
+      const bottom = parseFloat(style.scrollPaddingBottom) || 0;
+      const whole = box.clientHeight - top - bottom;
+      // Where the element stands in the box's content, in layout px: a canvas zoom scales the boxes, not the layout.
+      const outer = box.getBoundingClientRect();
+      const scale = box.offsetHeight > 0 && outer.height > 0 ? outer.height / box.offsetHeight : 1;
+      const offset = (element.getBoundingClientRect().top - outer.top) / scale - box.clientTop + box.scrollTop;
+      const open = box.clientHeight - bottom - offset;
+      const width = element.parentElement?.clientWidth ?? 0;
+      const natural = width > 0 && ratio > 0 ? Math.min(whole, width / ratio) : whole;
+      const value = open >= OPEN_ROOM_SHARE * natural ? open : whole;
+      setRoom(Math.max(MIN_FILM_ROOM, Math.floor(value)));
+    };
+    measure();
+    document.addEventListener('fullscreenchange', measure);
+    const observers: Array<{ disconnect(): void }> = [];
+    if (typeof ResizeObserver === 'function') {
+      const sizes = new ResizeObserver(measure);
+      const watch = () => { sizes.disconnect(); sizes.observe(box); for (const child of Array.from(box.children)) sizes.observe(child); };
+      watch();
+      observers.push(sizes);
+      if (typeof MutationObserver === 'function') {
+        const content = new MutationObserver(() => { watch(); measure(); });
+        content.observe(box, { childList: true });
+        observers.push(content);
+      }
+    }
+    return () => {
+      document.removeEventListener('fullscreenchange', measure);
+      for (const observer of observers) observer.disconnect();
+    };
+  }, [target, on, ratio, key]);
+  return room;
+}
+
 /** A rendition of published bytes. Switching presentation never republishes an output. */
 export function ArtifactPreview({ source, previewSource, type, title, renderMarkdown, downloadUrl, canDownload = true, onStoredDownload, allowExpand = true, resolveAsset, market = false, handedInBy, agentWords, runChosen = false }: ArtifactPreviewProps) {
   const { locale, t } = useCanvasI18n();
@@ -211,6 +284,12 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   const [navigation, setNavigation] = useState({ notice: false, stopped: false });
   const documentSource = type === 'html' ? htmlDocumentSource(source) : source;
   const tooLarge = new TextEncoder().encode(documentSource).byteLength > MAX_ARTIFACT_PREVIEW_BYTES;
+  // A film page (AwwO's film kit) is framed at its own shape rather than the tall page frame (artifactPreview.css). The
+  // page is a model's text: whatever reading it fails is a page frame, never a preview that cannot be drawn.
+  const film = useMemo(() => {
+    if (type !== 'html' || tooLarge) return null;
+    try { return filmFrame(documentSource); } catch { return null; }
+  }, [type, tooLarge, documentSource]);
   // A delivered page runs as soon as it is shown, like the homepage cases: in its own sandbox, with no AwwO account or
   // storage access and no network. While its expanded copy is open the inline one stays static, so it never runs twice.
   // A market Agent's page, or one an invited Agent handed in or wrote words of (agentPages.ts), runs only once the reader
@@ -305,6 +384,12 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
   // One frame per page, run and restart: a new delivery, a restart or leaving the expanded view mounts a fresh one.
   const sourceKey = useMemo(() => fingerprint(documentSource), [documentSource]);
   const frameKey = `${running ? 'run' : 'static'}:${epoch}:${sourceKey}`;
+  // A film's frame (the page frame, or the box of the live page a film that shows the canvas's files runs in) is no
+  // taller than the room its scroll box shows (a node's drawer, less the fade at its foot). The same conditions as those
+  // two below.
+  const filmFramed = film !== null && type === 'html' && mode === 'preview' && !tooLarge && (live || !(running && libraries === 'loading'));
+  const filmRoom = useScrollRoom(live ? liveRef : frameRef, filmFramed, film?.ratio ?? 0, `${frameKey}:${live ? 'live' : 'frame'}`);
+  const filmStyle = film ? { '--awwo-film-aspect': film.aspect, '--awwo-film-ratio': String(film.ratio), ...(filmRoom ? { '--awwo-film-room': `${filmRoom}px` } : {}) } as CSSProperties : undefined;
   const loads = useRef({ key: '', count: 0 });
   const redirects = useRef<number[]>([]);
   const onFrameLoad = () => {
@@ -377,13 +462,14 @@ export function ArtifactPreview({ source, previewSource, type, title, renderMark
       </>
         : type === 'html' ? <>
           {live
-            ? <div ref={liveRef} className="awwo-artifact-frame awwo-artifact-live">
+            ? <div ref={liveRef} className={`awwo-artifact-frame awwo-artifact-live${film ? ' is-film' : ''}`} style={filmStyle}>
               <LivePage html={documentSource} title={title} path="index.html" resolve={resolveAsset} reloadKey={epoch} market={market} handedInBy={handedInBy} agentWords={agentWords} runChosen={!held} />
             </div>
             : running && libraries === 'loading'
             ? <p className="awwo-artifact-status" role="status">{text.libraryLoading.replace('{name}', libraryNames)}</p>
             // Pointer lock lets a game's mouse look work; the browser offers Esc to release it.
-            : <iframe ref={frameRef} key={frameKey} className="awwo-artifact-frame" title={`${title} · ${text.html}`}
+            : <iframe ref={frameRef} key={frameKey} className={`awwo-artifact-frame${film ? ' is-film' : ''}`} title={`${title} · ${text.html}`}
+              style={filmStyle}
               sandbox={running ? 'allow-scripts allow-pointer-lock' : ''} referrerPolicy="no-referrer" srcDoc={html} onLoad={onFrameLoad} />}
           <p className="awwo-artifact-note">{running ? `${text.hint} ${text.interactive}` : held ? stillNote : text.static}</p>
           {live && <p className="awwo-artifact-note">{text.canvasFiles}</p>}

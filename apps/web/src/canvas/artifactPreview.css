@@ -13,6 +13,16 @@
 .awwo-artifact-toolbar button:focus-visible, .awwo-artifact-toolbar a:focus-visible { outline: 2px solid var(--accent, #237562); outline-offset: 2px; }
 .awwo-artifact-toolbar > .awwo-artifact-download { margin-left: auto; }
 .awwo-artifact-frame { display: block; width: 100%; min-height: 400px; height: min(62vh, 760px); border: 0; background: #fff; }
+/* A film page (AwwO's film kit) is framed at the film's own shape (--awwo-film-aspect, and --awwo-film-ratio as a number,
+   from filmFrame.ts), not the page frame's tall default: its picture fills the frame instead of floating in a band of
+   black. As wide as its place, no taller than that place's own page height (--awwo-film-cap: each view sets its own) or
+   the room its scroll box shows (--awwo-film-room, which ArtifactPreview measures: a node's drawer less its fade), so a
+   frame scrolled into view shows all of the film. A film the height makes narrower than its place stands centred. */
+.awwo-artifact-frame.is-film {
+  --awwo-film-cap: min(62vh, 760px);
+  width: min(100%, calc(min(var(--awwo-film-cap), var(--awwo-film-room, 100vh)) * var(--awwo-film-ratio, 1.7778)));
+  height: auto; min-height: 0; max-height: none; aspect-ratio: var(--awwo-film-aspect, 16 / 9); margin-inline: auto; background: #000;
+}
 /* A page showing the canvas's files runs in the studio's live page, in a box sized like the frame it replaces. */
 .awwo-artifact-frame.awwo-artifact-live { display: flex; overflow: hidden; }
 .awwo-artifact-live > .awwo-live-page { flex: 1 1 auto; min-width: 0; background: #fff; }
@@ -49,7 +59,9 @@
 .awwo-artifact-dialog-content { flex: 1; min-height: 0; overflow: auto; }
 .awwo-artifact-dialog-content > .awwo-artifact-preview { display: flex; flex-direction: column; height: 100%; }
 .awwo-artifact-dialog-content .awwo-artifact-frame { flex: 1; height: 100%; min-height: 0; }
+/* Enlarged, a film fills the dialog like any page; the kit letterboxes it. */
+.awwo-artifact-dialog-content .awwo-artifact-frame.is-film { width: 100%; height: 100%; aspect-ratio: auto; margin: 0; }
 .awwo-artifact-dialog-content .awwo-artifact-source, .awwo-artifact-dialog-content .awwo-artifact-markdown { flex: 1; min-height: 0; max-height: none; overflow: auto; }
 .awwo-artifact-dialog-content .awwo-artifact-source { font-size: clamp(14px, 1.1vw, 16px); line-height: 1.65; padding: 24px; }
-@media (max-width: 640px) { .awwo-artifact-frame { min-height: 320px; height: 55vh; } .awwo-artifact-toolbar { padding-inline: 6px; flex-wrap: wrap; } }
+@media (max-width: 640px) { .awwo-artifact-frame { min-height: 320px; height: 55vh; } .awwo-artifact-frame.is-film { --awwo-film-cap: 55vh; } .awwo-artifact-toolbar { padding-inline: 6px; flex-wrap: wrap; } }
 @media (max-width: 640px) { .awwo-artifact-dialog { width: 100vw; height: 100dvh; border: 0; border-radius: 0; } }

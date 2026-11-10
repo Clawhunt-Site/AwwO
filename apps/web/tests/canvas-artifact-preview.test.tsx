@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ArtifactPreview, artifactFilename, readArtifactPreview, StoredArtifactPreview } from '../src/canvas/ArtifactPreview';
@@ -145,6 +145,136 @@ describe('isolated HTML rendition', () => {
         else Reflect.deleteProperty(window, key);
       }
     }
+  });
+
+  it('frames a film page at the shape its film names, and any other page at the page frame', async () => {
+    const film = (aspect: string) => '<!doctype html><html><head></head><body><script src="https://awwo.clawhunt.store/kits/film/1/film.js"></script>'
+      + `<script>Film.run({ title: 'x', ${aspect} duration: 2, scenes: [{ from: 0, to: 2, draw() {} }] });</script></body></html>`;
+    const wide = render(<ArtifactPreview source={film("aspect: '16:9',")} type="html" title="影片" renderMarkdown={markdown} />);
+    const frame = await screen.findByTitle('影片 · HTML 预览');
+    expect(frame).toHaveClass('awwo-artifact-frame', 'is-film');
+    expect(frame.style.getPropertyValue('--awwo-film-aspect')).toBe('16 / 9');
+    expect(Number(frame.style.getPropertyValue('--awwo-film-ratio'))).toBeCloseTo(16 / 9, 6);
+    // No box scrolls it here, so no room is measured: the view's own cap holds (artifactPreview.css).
+    expect(frame.style.getPropertyValue('--awwo-film-room')).toBe('');
+    wide.unmount();
+    const tall = render(<ArtifactPreview source={film("aspect: '9:16',")} type="html" title="竖片" renderMarkdown={markdown} />);
+    expect((await screen.findByTitle('竖片 · HTML 预览')).style.getPropertyValue('--awwo-film-aspect')).toBe('9 / 16');
+    tall.unmount();
+    render(<ArtifactPreview source={html} type="html" title="作品" renderMarkdown={markdown} />);
+    const page = screen.getByTitle('作品 · HTML 预览');
+    expect(page).not.toHaveClass('is-film');
+    expect(page.style.getPropertyValue('--awwo-film-aspect')).toBe('');
+  });
+
+  it('gives a film\'s frame the room its scroll box shows, from where it stands when that holds most of the frame, else the whole', async () => {
+    const film = (aspect: string) => '<!doctype html><html><body><script src="https://awwo.clawhunt.store/kits/film/1/film.js"></script>'
+      + `<script>Film.run({ aspect: '${aspect}', duration: 2, scenes: [{ from: 0, to: 2, draw() {} }] });</script></body></html>`;
+    // A node's drawer at 1440x900: a box that scrolls, 544 px high, keeping 8 px clear at its top and its 44 px foot for
+    // its fade, 574 px wide inside; the frame stands `offset` px down its content. The canvas is zoomed 1.05: boxes on
+    // screen are 1.05 times their layout size.
+    const zoom = 1.05;
+    let height = 544;
+    let offset = 190;
+    let scrolled = 0;
+    const real = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element: Element, pseudo?: string | null) => {
+      const style = real(element, pseudo);
+      if (!(element instanceof HTMLElement) || !element.classList.contains('drawer')) return style;
+      return new Proxy(style, { get: (target, key) => key === 'overflowY' ? 'auto' : key === 'scrollPaddingBottom' ? '44px' : key === 'scrollPaddingTop' ? '8px' : Reflect.get(target, key) });
+    });
+    const drawer = (element: Element) => element.classList.contains('drawer');
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return drawer(this as Element) ? height : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get() { return drawer(this as Element) ? height : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return (this as Element).classList.contains('awwo-artifact-preview') ? 574 : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'scrollTop', { configurable: true, get() { return drawer(this as Element) ? scrolled : 0; }, set() {} });
+    const rect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      // On screen the frame is `offset` layout px below the box's top, less what the box has scrolled, both zoomed.
+      const top = drawer(this) ? 100 : this.matches('iframe, .awwo-artifact-live') ? 100 + (offset - scrolled) * zoom : 0;
+      return { top, bottom: top, left: 0, right: 0, width: 0, height: drawer(this) ? height * zoom : 0, x: 0, y: top, toJSON() { return this; } } as DOMRect;
+    };
+    const observed: Element[] = [];
+    const resized: Array<() => void> = [];
+    let disconnects = 0;
+    vi.stubGlobal('ResizeObserver', class {
+      private targets: Element[] = [];
+      constructor(callback: () => void) { resized.push(callback); }
+      observe(target: Element) { this.targets.push(target); observed.push(target); }
+      disconnect() { for (const target of this.targets.splice(0)) { const at = observed.indexOf(target); if (at >= 0) observed.splice(at, 1); } disconnects += 1; }
+    });
+    const resize = () => act(() => { for (const callback of resized) callback(); });
+    const roomOf = (frame: HTMLElement) => frame.style.getPropertyValue('--awwo-film-room');
+    try {
+      // A portrait film: it would take the whole room (492 px); under the 190 px above it the drawer shows
+      // 544 - 44 - 190 = 310, 63 % of that: the film is whole as the drawer opens, at 310.
+      const tall = render(<div className="drawer"><ArtifactPreview source={film('9:16')} type="html" title="竖片" renderMarkdown={markdown} /></div>);
+      const frame = await screen.findByTitle('竖片 · HTML 预览');
+      const box = tall.container.querySelector('.drawer')!;
+      expect(observed).toContain(box);
+      expect(observed).toContain(box.firstElementChild);
+      expect(roomOf(frame)).toBe('310px');
+      // Scrolled, the frame stands where it stood in the content: the same room.
+      scrolled = 120;
+      resize();
+      expect(roomOf(frame)).toBe('310px');
+      scrolled = 0;
+      // A row added above it (a new child of the box) is watched and measured: 40 px more above it leaves 270, too little
+      // of 492, so the whole room; taken away again, 310.
+      const row = document.createElement('p');
+      offset = 230;
+      await act(async () => { box.insertBefore(row, box.firstChild); await Promise.resolve(); });
+      expect(observed).toContain(row);
+      expect(roomOf(frame)).toBe('492px');
+      offset = 190;
+      await act(async () => { row.remove(); await Promise.resolve(); });
+      expect(observed).not.toContain(row);
+      expect(roomOf(frame)).toBe('310px');
+      // Full screen takes the frame out of the box: nothing is measured until it ends.
+      Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => frame });
+      offset = -100;
+      resize();
+      expect(roomOf(frame)).toBe('310px');
+      Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => null });
+      offset = 200;   // where it stands now that it is back: measured as full screen ends
+      act(() => { document.dispatchEvent(new Event('fullscreenchange')); });
+      expect(roomOf(frame)).toBe('300px');
+      offset = 190;
+      resize();
+      expect(roomOf(frame)).toBe('310px');
+      // However short the box, the film keeps a size it can be told at.
+      height = 120;
+      resize();
+      expect(roomOf(frame)).toBe('96px');
+      height = 544;
+      tall.unmount();
+      expect(observed).toEqual([]);
+      expect(disconnects).toBeGreaterThan(0);
+      // A wide film is held back by the drawer's width (574 / (16 / 9) = 323 px): with 222 px above it the 278 px left
+      // under them is 86 % of that, so it is whole as the drawer opens, at 278 (not the whole 492, where its foot would
+      // fall under the fade).
+      offset = 222;
+      render(<div className="drawer"><ArtifactPreview source={film('16:9')} type="html" title="宽片" renderMarkdown={markdown} /></div>);
+      expect(roomOf(await screen.findByTitle('宽片 · HTML 预览'))).toBe('278px');
+    } finally {
+      for (const key of ['clientHeight', 'offsetHeight', 'clientWidth', 'scrollTop']) Reflect.deleteProperty(HTMLElement.prototype, key);
+      Reflect.deleteProperty(document, 'fullscreenElement');
+      Element.prototype.getBoundingClientRect = rect;
+    }
+  });
+
+  it('frames a film that shows the canvas\'s files, run in the live page, at its shape too', async () => {
+    const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+    const resolve = async (path: string) => path === 'hero/image-1.png' ? { bytes: PNG, name: 'image-1.png' } : null;
+    const film = '<!doctype html><html><body><img hidden src="hero/image-1.png" alt=""><script src="https://awwo.clawhunt.store/kits/film/1/film.js"></script>'
+      + "<script>Film.run({ aspect: '9:16', duration: 2, scenes: [{ from: 0, to: 2, draw() {} }] });</script></body></html>";
+    const { container } = render(<ArtifactPreview source={film} type="html" title="竖片" renderMarkdown={markdown} resolveAsset={resolve} />);
+    await waitFor(() => expect(container.querySelector('.awwo-artifact-live')).not.toBeNull());
+    const live = container.querySelector<HTMLElement>('.awwo-artifact-live')!;
+    expect(live).toHaveClass('awwo-artifact-frame', 'awwo-artifact-live', 'is-film');
+    expect(live.style.getPropertyValue('--awwo-film-aspect')).toBe('9 / 16');
+    expect(Number(live.style.getPropertyValue('--awwo-film-ratio'))).toBeCloseTo(9 / 16, 6);
+    expect(container.querySelector('iframe.awwo-artifact-frame')).toBeNull();
   });
 
   it('runs only the expanded copy while it is open, and the inline page again once it closes', () => {
