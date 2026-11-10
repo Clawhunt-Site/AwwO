@@ -314,6 +314,56 @@ export function mediaPortGuide(t: Translate, locale: string, node: CanvasNode, p
   return null;
 }
 
+/** A field label at rest is at most this wide (wider ones end in an ellipsis until hovered or focused): two or three short
+ *  words, such as a Code film's "Look and sound". */
+const FIELD_LABEL_MAX_PX = 96;
+/** The room a field label takes beside its port, outside the tile: its 18 px offset, its width and a little air. */
+const FIELD_LABEL_ROOM_PX = 18 + FIELD_LABEL_MAX_PX + 6;
+const NO_PORTS: ReadonlySet<string> = new Set();
+
+/**
+ * The ports (`side:id`) whose field label sits inside the tile: those the stage leaves no room beside, where it would
+ * clip the label (an opened node fills the stage but for a 28 px margin). One observer per side watches each handle
+ * against the stage less the label's room on that side, so a pan, a zoom or the opening glide decides again; the
+ * handle does not move when its label does, so the answer never flips back and forth. The label is drawn in the tile's
+ * own pixels and the observer's margin is in screen pixels, so the margin is the room times the zoom: a new zoom gives
+ * a new `watch`, React hands each handle over to it and it makes the side's observer anew, while a render at the same
+ * zoom keeps them. Without IntersectionObserver every label stays outside.
+ */
+function useFieldLabelsInside(zoom: number): [ReadonlySet<string>, (el: HTMLButtonElement | null) => (() => void) | undefined] {
+  const [inside, setInside] = useState(NO_PORTS);
+  // Rounded up, so the margin is never short of the room.
+  const margin = Math.ceil(FIELD_LABEL_ROOM_PX * zoom);
+  const observers = useRef(new Map<string, { observer: IntersectionObserver; root: Element; margin: number }>());
+  useEffect(() => () => { observers.current.forEach(({ observer }) => observer.disconnect()); observers.current.clear(); }, []);
+  const watch = useCallback((el: HTMLButtonElement | null) => {
+    const root = el?.closest('.canvas-root');
+    if (!el || !root || typeof IntersectionObserver !== 'function') return undefined;
+    const side = el.dataset.portSide === 'input' ? 'input' : 'output';
+    let made = observers.current.get(side);
+    if (!made || made.root !== root || made.margin !== margin) {
+      made?.observer.disconnect();
+      made = { root, margin, observer: new IntersectionObserver(entries => setInside(prev => {
+        let next: Set<string> | null = null;
+        for (const entry of entries) {
+          const port = entry.target as HTMLElement;
+          const key = `${port.dataset.portSide}:${port.dataset.portId}`;
+          const room = entry.intersectionRatio >= 0.99;
+          if (room !== prev.has(key)) continue;
+          next ??= new Set(prev);
+          if (room) next.delete(key); else next.add(key);
+        }
+        return next ?? prev;
+      }), { root, threshold: [0, 1], rootMargin: side === 'input' ? `0px 0px 0px -${margin}px` : `0px -${margin}px 0px 0px` }) };
+      observers.current.set(side, made);
+    }
+    const watching = made.observer;
+    watching.observe(el);
+    return () => watching.unobserve(el);
+  }, [margin]);
+  return [inside, watch];
+}
+
 /**
  * The node's typed port handles, positioned on the tile from the SAME anchor math the wires use
  * (`portAnchorWorld` minus the node origin) so a handle can never sit off the line that leaves it.
@@ -325,8 +375,10 @@ export function TilePorts({ node, wiring, media, scale = 1, tabbable = true }: T
   const guideIds = useId();
   // Counter-scale about the port's anchor: the guide's top-left sits on the anchor (transform-origin 0 0), is moved
   // beside the port in its own pixels, then scaled by 1/scale, so on screen it is always the same size and distance.
-  const unzoom = 1 / (Number.isFinite(scale) && scale > 0 ? scale : 1);
+  const zoom = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  const unzoom = 1 / zoom;
   const hasContract = node.kind === 'session' && Boolean(node.contract);
+  const [labelsInside, watchLabelRoom] = useFieldLabelsInside(zoom);
   const mediaPorts = node.kind === 'session' && !hasContract && Boolean(mediaKindOf(node.agentKind ?? ''));
   const editPorts = node.kind === 'edit';
   return (
@@ -377,6 +429,7 @@ export function TilePorts({ node, wiring, media, scale = 1, tabbable = true }: T
             data-node-id={node.id}
             data-port-side={p.side}
             data-data-type={p.dataType}
+            ref={hasContract ? watchLabelRoom : undefined}
             disabled={!interactive}
             tabIndex={tabbable ? undefined : -1}
             onMouseEnter={() => setExpandedLabel(portKey)}
@@ -390,10 +443,11 @@ export function TilePorts({ node, wiring, media, scale = 1, tabbable = true }: T
             onDoubleClick={(e) => e.stopPropagation()}
           >
             {hasContract ? <span className="canvas-port-field-label" aria-hidden="true" style={{
-              // Absolutely positioned OUTSIDE the handle: no card layout or hit-target changes.
+              // Absolutely positioned beside the handle, outside the tile where the stage has room for it, else inside:
+              // no card layout or hit-target changes.
               position: 'absolute', top: '50%', transform: 'translateY(-50%)',
-              ...(p.side === 'input' ? { right: 18 } : { left: 18 }),
-              maxWidth: expanded ? 220 : 72, width: 'max-content', boxSizing: 'border-box',
+              ...((p.side === 'input') !== labelsInside.has(portKey) ? { right: 18 } : { left: 18 }),
+              maxWidth: expanded ? 220 : FIELD_LABEL_MAX_PX, width: 'max-content', boxSizing: 'border-box',
               whiteSpace: expanded ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               overflowWrap: 'anywhere', pointerEvents: 'none', textAlign: 'left',
               fontSize: 11, fontWeight: 500, lineHeight: 1.4, padding: '2px 5px', borderRadius: 4,

@@ -167,7 +167,7 @@ export function RenderVideoPanel({ nodeId, pageName, capability, documentOf, doc
       <button type="button" className="awwo-studio-icon" aria-label={t('studio.renderClose')} title={t('studio.renderClose')} onClick={onClose}><X size={15} aria-hidden="true" /></button></header>
     <p className="awwo-studio-render-hint">{t('studio.renderHint')}</p>
     <div className="awwo-studio-render-form">
-      <label>{t('studio.renderSize')}<select value={preset} disabled={active(job) || starting} onChange={event => setPreset(event.target.value as PresetId)}>
+      <label className="is-wide">{t('studio.renderSize')}<select value={preset} disabled={active(job) || starting} onChange={event => setPreset(event.target.value as PresetId)}>
         {RENDER_PRESETS.map(item => <option key={item.id} value={item.id}>{t(`studio.renderPreset.${item.id}` as CanvasTextKey)}</option>)}</select></label>
       <label>{t('studio.renderSeconds')}<input type="number" min={0.5} max={limits.maxSeconds} step={0.5} value={seconds} disabled={active(job) || starting}
         onChange={event => setSeconds(Math.min(limits.maxSeconds, Math.max(0.5, Number(event.target.value) || 0.5)))} /></label>

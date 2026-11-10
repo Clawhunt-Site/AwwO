@@ -228,10 +228,12 @@ span.awwo-studio-disclose { cursor: default; }
   & a { display: inline-flex; align-items: center; gap: 6px; color: var(--studio-accent); font-size: 12px; }
 }
 .awwo-studio-render-hint, .awwo-studio-render-usage, .awwo-studio-render-note { color: var(--studio-muted); font-size: 12px; }
-.awwo-studio-render-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px;
+/* The size takes a row of its own: a third of the panel cuts its choices ("16:9 · 1920×1080") short. */
+.awwo-studio-render-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px;
   & label { display: grid; gap: 4px; color: var(--studio-muted); font-size: 11px; }
-  & label.is-check { display: flex; align-items: center; gap: 6px; grid-column: span 3; color: var(--studio-text); font-size: 12px; }
-  & select, & input[type='number'] { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--studio-line); border-radius: 8px; background: var(--studio-bg); color: var(--studio-text); font: inherit; }
+  & label.is-wide { grid-column: 1 / -1; }
+  & label.is-check { display: flex; align-items: center; gap: 6px; grid-column: 1 / -1; color: var(--studio-text); font-size: 12px; }
+  & select, & input[type='number'] { box-sizing: border-box; width: 100%; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--studio-line); border-radius: 8px; background: var(--studio-bg); color: var(--studio-text); font: inherit; }
 }
 .awwo-studio-render-actions { display: flex; justify-content: flex-end; gap: 8px;
   & .is-primary { border-color: var(--studio-accent); background: var(--studio-accent); color: #fff; }
