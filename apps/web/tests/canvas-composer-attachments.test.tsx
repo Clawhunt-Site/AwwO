@@ -197,7 +197,9 @@ describe('the node composer', () => {
     expect(picker).toBeTruthy();
     expect(screen.getByRole('button', { name: '添加文件' })).toBeEnabled();
     fireEvent.change(picker, { target: { files: [new File(['GLB'], 'robot.glb', { type: 'model/gltf-binary' })] } });
-    await waitFor(() => expect(screen.getByText('robot.glb')).toBeInTheDocument());
+    // The uploading chip shows the name too: wait for the uploaded file in the draft before typing over it.
+    await waitFor(() => expect(screen.getByTestId('draft').textContent).toBe(`[附件] robot.glb · awwo-file:${ID_A}`));
+    expect(screen.getByText('robot.glb')).toBeInTheDocument();
     expect(FakeUpload.sent[0].url).toBe('/api/v1/tenants/tenant-a/canvases/canvas-a/uploads?name=robot.glb&node=node-a');
     expect(FakeUpload.sent[0].method).toBe('POST');
     // The box shows only the words; the file rides as a line at the end of the draft.
@@ -284,7 +286,8 @@ describe('the canvas assistant', () => {
     const onSend = vi.fn();
     render(<Host onSend={onSend} />);
     fireEvent.change(document.querySelector('input[type=file]')!, { target: { files: [new File(['%PDF'], '需求.pdf', { type: 'application/pdf' })] } });
-    await waitFor(() => expect(screen.getByText('需求.pdf')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('draft').textContent).toBe(`[附件] 需求.pdf · awwo-file:${ID_A}`));
+    expect(screen.getByText('需求.pdf')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('画布需求'), { target: { value: '按这份需求搭画布' } });
     expect(screen.getByTestId('draft').textContent).toBe(`按这份需求搭画布\n\n[附件] 需求.pdf · awwo-file:${ID_A}`);
     expect((screen.getByLabelText('画布需求') as HTMLTextAreaElement).value).toBe('按这份需求搭画布');
@@ -342,8 +345,9 @@ describe('node inputs', () => {
     render(<FieldsHost initial={[{ id: 'brief', label: '素材', type: 'file', required: true, value: '' }]} />);
     expect(screen.getByText('点 + 上传文件（也可拖入），或填写文件路径、https:// 链接。')).toBeInTheDocument();
     fireEvent.change(document.querySelector('input[type=file]')!, { target: { files: [new File(['mp4'], 'clip.mp4', { type: 'video/mp4' })] } });
-    await waitFor(() => expect(screen.getByText('clip.mp4')).toBeInTheDocument());
-    expect(JSON.parse(screen.getByTestId('raw').textContent!)[0].value).toBe(`[附件] clip.mp4 · awwo-file:${ID_A}`);
+    // Wait for the uploaded answer in the value, not the name: the uploading chip shows the name before it lands.
+    await waitFor(() => expect(JSON.parse(screen.getByTestId('raw').textContent!)[0].value).toBe(`[附件] clip.mp4 · awwo-file:${ID_A}`));
+    expect(screen.getByText('clip.mp4')).toBeInTheDocument();
     // Removing it from an input never deletes the file: an earlier run may have used it.
     fireEvent.click(screen.getByRole('button', { name: '移除 clip.mp4' }));
     expect(JSON.parse(screen.getByTestId('raw').textContent!)[0].value).toBe('');
@@ -353,9 +357,9 @@ describe('node inputs', () => {
   it('lets text inputs carry files too', async () => {
     render(<FieldsHost initial={[{ id: 'need', label: '需求', type: 'text', required: false, value: '做个落地页' }]} />);
     fireEvent.change(document.querySelector('input[type=file]')!, { target: { files: [new File(['a,b'], 'data.csv', { type: 'text/csv' })] } });
-    await waitFor(() => expect(screen.getByText('data.csv')).toBeInTheDocument());
+    await waitFor(() => expect(JSON.parse(screen.getByTestId('raw').textContent!)[0].value).toBe(`做个落地页\n\n[附件] data.csv · awwo-file:${ID_A}`));
+    expect(screen.getByText('data.csv')).toBeInTheDocument();
     expect((screen.getByLabelText('需求的值') as HTMLTextAreaElement).value).toBe('做个落地页');
-    expect(JSON.parse(screen.getByTestId('raw').textContent!)[0].value).toBe(`做个落地页\n\n[附件] data.csv · awwo-file:${ID_A}`);
   });
 
   it('holds a file that lands while they are read-only only where their owner asks for it', async () => {
