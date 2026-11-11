@@ -530,6 +530,12 @@ func (a *App) mediaCatalogue(w http.ResponseWriter, r *http.Request) {
 			models = append(models, entry)
 		}
 	}
+	// A workspace the operator sponsors has no daily limit to show (admitMediaGeneration): 0, which a node's settings
+	// leave unsaid.
+	runsPerDay := a.cfg.MediaRunsPerDay
+	if a.cfg.mediaSponsored(r.PathValue("tenantId")) {
+		runsPerDay = 0
+	}
 	writeJSON(w, 200, map[string]any{"configured": configured, "available": configured && len(models) > 0, "models": models,
-		"limits": map[string]any{"runsPerDay": a.cfg.MediaRunsPerDay, "timeoutSeconds": int(a.cfg.MediaTimeout.Seconds())}})
+		"limits": map[string]any{"runsPerDay": runsPerDay, "timeoutSeconds": int(a.cfg.MediaTimeout.Seconds())}})
 }

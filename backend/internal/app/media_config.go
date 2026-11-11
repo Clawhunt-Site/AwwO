@@ -29,6 +29,13 @@ type mediaSettings struct {
 	MediaMinFreeBytes int64
 	// MediaUnrestrictedWorkspaces lets workspaces without a model allowlist use media models.
 	MediaUnrestrictedWorkspaces bool
+	// MediaSponsoredWorkspaces (AWWO_MEDIA_SPONSORED_WORKSPACES, workspace ids separated by commas) are workspaces whose
+	// every generation the operator pays, as in the operator's own (operator_workspace.go): where no paid plan holds
+	// them, no free allowance does either, neither the workspace's nor the deployment's daily generations nor the free
+	// 3D caps, and a 3D model may be rigged and animated there; the deployment-wide totals still count what they make,
+	// and a workspace's own route limits, where it has any, still hold. For people the operator chooses to give the
+	// media in full without a plan or a platform role (owner, 2026-11-11).
+	MediaSponsoredWorkspaces []string
 	// MediaDevProxy is an explicit local proxy for result downloads, development only.
 	MediaDevProxy string
 	// MediaResultHosts are where a result file may be downloaded from: ".domain" allows its
@@ -108,6 +115,20 @@ func (c *Config) mediaFromEnv() error {
 		c.MediaUnrestrictedWorkspaces = true
 	default:
 		return errors.New("AWWO_MEDIA_UNRESTRICTED_WORKSPACES must be true or false")
+	}
+	// Checked here, whether or not a media provider is configured: a list that does not parse names no workspace the
+	// operator meant, so the API does not start on it.
+	c.MediaSponsoredWorkspaces = nil
+	for _, id := range strings.Split(os.Getenv("AWWO_MEDIA_SPONSORED_WORKSPACES"), ",") {
+		if id = strings.TrimSpace(id); id == "" {
+			continue
+		} else if !mediaWorkspaceID.MatchString(id) {
+			return errors.New("AWWO_MEDIA_SPONSORED_WORKSPACES must list workspace ids separated by commas")
+		}
+		c.MediaSponsoredWorkspaces = append(c.MediaSponsoredWorkspaces, id)
+	}
+	if len(c.MediaSponsoredWorkspaces) > 64 {
+		return errors.New("AWWO_MEDIA_SPONSORED_WORKSPACES lists at most 64 workspaces")
 	}
 	if s := os.Getenv("AWWO_MEDIA_MIN_FREE_MB"); s != "" {
 		n, e := strconv.Atoi(s)
@@ -433,6 +454,19 @@ func (c Config) runningHubConfigured() bool { return c.RunningHubAPIKey != "" &&
 func (c Config) tripoConfigured() bool      { return c.TripoAPIKey != "" && c.MediaDir != "" }
 func (c Config) xtasyConfigured() bool      { return c.XtasyAPIKey != "" && c.MediaDir != "" }
 func (c Config) jimengConfigured() bool     { return c.JimengCLI != "" && c.MediaDir != "" }
+
+// mediaWorkspaceID is the shape of a workspace id in a list of them (AWWO_MEDIA_SPONSORED_WORKSPACES).
+var mediaWorkspaceID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+// mediaSponsored reports whether the operator named workspace tid in AWWO_MEDIA_SPONSORED_WORKSPACES.
+func (c Config) mediaSponsored(tid string) bool {
+	for _, id := range c.MediaSponsoredWorkspaces {
+		if tid != "" && id == tid {
+			return true
+		}
+	}
+	return false
+}
 
 // jimengWorkspace reports whether the operator named workspace tid in AWWO_JIMENG_WORKSPACES.
 func (c Config) jimengWorkspace(tid string) bool {

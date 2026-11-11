@@ -485,13 +485,17 @@ func (a *App) admitMediaGeneration(ctx context.Context, tx pgx.Tx, tid string, s
 			}
 		}
 	}
-	// The operator's own workspace has no free allowance to run out of (operator_workspace.go); a paid plan's limits are
-	// the plan's, as before.
-	operator := false
+	// The operator's own workspace has no free allowance to run out of (operator_workspace.go), nor has a workspace the
+	// operator sponsors (AWWO_MEDIA_SPONSORED_WORKSPACES, which asks the database nothing); a paid plan's limits are the
+	// plan's, as before. noAllowance lifts the free allowances below and nothing else: a sponsored workspace is not the
+	// operator's own anywhere outside them.
+	noAllowance := false
 	if plan == nil {
-		var e error
-		if operator, e = operatorWorkspace(ctx, tx, tid); e != nil {
-			return none, e
+		if noAllowance = a.cfg.mediaSponsored(tid); !noAllowance {
+			var e error
+			if noAllowance, e = operatorWorkspace(ctx, tx, tid); e != nil {
+				return none, e
+			}
 		}
 	}
 	if plan != nil {
@@ -512,15 +516,15 @@ func (a *App) admitMediaGeneration(ctx context.Context, tx pgx.Tx, tid string, s
 				return none, &mediaRefusal{429, "plan_busy", "This plan's agents at once are all running, in this or another workspace; try again when one finishes"}
 			}
 		}
-	} else if !operator && today >= a.cfg.MediaRunsPerDay {
+	} else if !noAllowance && today >= a.cfg.MediaRunsPerDay {
 		return none, &mediaRefusal{429, "media_quota_exceeded", "This workspace has used today's image and video generations"}
 	}
-	if plan == nil && !operator && total >= a.cfg.mediaTotalNow() {
+	if plan == nil && !noAllowance && total >= a.cfg.mediaTotalNow() {
 		return none, &mediaRefusal{429, "media_capacity_exceeded", "Today's image and video generations are used up; try again tomorrow"}
 	}
 	// A 3D generation is paid from the operator's Tripo balance: free ones have their own, smaller caps, for the
 	// workspace and across every workspace, counted from durable rows under the same lock.
-	if plan == nil && !operator && snapshot.Media.Provider == mediaProviderTripo {
+	if plan == nil && !noAllowance && snapshot.Media.Provider == mediaProviderTripo {
 		// A rig and its animations cost the operator's balance several times a model (rig 25 Tripo credits, 50 per five
 		// clips), which a free 3D allowance counted per generation would hide: they need a paid plan.
 		if snapshot.Media.Motion != nil {
