@@ -137,7 +137,7 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 		}
 		resolved, selectedAgent, err := resolveWorkspaceAgent(r.Context(), tx, tid, original)
 		var market *marketSetup
-		var locked *marketModel
+		var locked *lockedMarketModel
 		if err == nil {
 			resolved, market, locked, err = a.resolveMarketNode(r.Context(), tx, tid, cid, currentUser(r), resolved)
 		}
@@ -186,6 +186,11 @@ func (a *App) initializeCanvas(w http.ResponseWriter, r *http.Request) {
 			// A market Agent runs as a text Agent only (market_use.go): not on a runtime this deployment runs in a sandbox.
 			if market != nil && a.marketSandboxed(snap) {
 				a.marketFailure(w, marketSandboxRefused())
+				return
+			}
+			// A locked model only a person may choose goes on a node only where it named that model itself.
+			if err = marketLockedModelUnchosen(locked, snap.Health); err != nil {
+				a.marketFailure(w, err)
 				return
 			}
 		} else {

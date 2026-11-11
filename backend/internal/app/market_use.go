@@ -208,7 +208,7 @@ func loadMarketUse(ctx context.Context, tx pgx.Tx, agentID string, version int, 
 // own keeps the workspace default; the web app offers the Agent's recommendation. The node's own persona and skills
 // stay in the document as they are and are not used while it runs the Agent. A node that names no market Agent comes
 // back unchanged with no setup.
-func (a *App) resolveMarketNode(ctx context.Context, tx pgx.Tx, tid, cid string, u User, raw json.RawMessage) (json.RawMessage, *marketSetup, *marketModel, error) {
+func (a *App) resolveMarketNode(ctx context.Context, tx pgx.Tx, tid, cid string, u User, raw json.RawMessage) (json.RawMessage, *marketSetup, *lockedMarketModel, error) {
 	var node map[string]json.RawMessage
 	if json.Unmarshal(raw, &node) != nil || node == nil {
 		return nil, nil, nil, invalidSetup("Invalid node configuration")
@@ -256,20 +256,49 @@ func (a *App) resolveMarketNode(ctx context.Context, tx pgx.Tx, tid, cid string,
 	if v.Kind != "llm" || sandboxRuntime(v.Model.Runtime) {
 		return nil, nil, nil, marketNotUsable("A market Agent runs on a text node")
 	}
-	putJSON(node, "agentKind", v.Kind)
-	var locked *marketModel
-	if v.Model.Locked {
-		putJSON(node, "runtime", v.Model.Runtime)
-		putJSON(node, "model", v.Model.ID)
-		putJSON(node, "effort", v.Model.Effort)
-		locked = &v.Model
-	}
+	locked := applyMarketVersion(node, v)
 	putJSON(node, "agentRef", marketAgentReference{Source: "market", AgentID: m.ID, Version: v.Version})
 	if strings.TrimSpace(rawString(node["title"])) == "" {
 		putJSON(node, "title", v.Name)
 	}
 	resolved, err := json.Marshal(node)
 	return resolved, &marketSetup{AgentID: m.ID, Version: v.Version, ContentHash: v.ContentHash}, locked, err
+}
+
+// lockedMarketModel is the model a market version's author locked, as setup puts it on a node. Named says the node
+// named that very model itself before setup put it there: a person chose it, in the market's dialog (which names a
+// locked model before the Agent is chosen and puts it on the node, apps/web canvas/marketAgents.ts withMarketAgent),
+// on the node, or in a canvas they imported or saved with the model set on the node.
+type lockedMarketModel struct {
+	marketModel
+	Named bool
+}
+
+// applyMarketVersion puts a market version's kind on a node, and its runtime, model and effort where its author locked
+// them; it returns the locked model, nil where none is.
+func applyMarketVersion(node map[string]json.RawMessage, v marketVersion) *lockedMarketModel {
+	putJSON(node, "agentKind", v.Kind)
+	if !v.Model.Locked {
+		return nil
+	}
+	named := v.Model.ID != "" && rawString(node["model"]) == v.Model.ID
+	putJSON(node, "runtime", v.Model.Runtime)
+	putJSON(node, "model", v.Model.ID)
+	putJSON(node, "effort", v.Model.Effort)
+	return &lockedMarketModel{marketModel: v.Model, Named: named}
+}
+
+// marketLockedModelUnchosen refuses setup to put a locked model only a person may choose (piHealth.userChosenOnly: the
+// DeepSeek API's, the Claude Fable models) on a node that did not name it itself: a node that keeps a market Agent's
+// reference without its model, as an imported canvas or another client's write can, would otherwise run it with no
+// person having picked it, which ClawHunt's privacy policy (clause 08) rules out. Choosing the Agent again on the node
+// shows the model before it is chosen. h is the health of the runtime the locked model runs on.
+func marketLockedModelUnchosen(locked *lockedMarketModel, h piHealth) error {
+	if locked == nil || locked.Named || !h.userChosenOnly(locked.ID) {
+		return nil
+	}
+	return marketError{409, "market_agent_model_choice_required",
+		"This Agent's author locked the model " + locked.ID + ", which runs only where a person chose it: choose the Agent again on the node to see the model before it runs"}
 }
 
 // marketSkillContext is a version's frozen skills as a run's snapshot keeps them, introduced as the author's
