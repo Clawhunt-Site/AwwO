@@ -230,33 +230,40 @@ class CatalogTests(unittest.TestCase):
                            ("an empty default", {**good, "reasoningEfforts": ["low"], "defaultReasoningEffort": ""})):
             with self.subTest(label), self.assertRaises(ValueError):
                 parse_catalog(catalog(bad))
-        # The built-in catalog lists them for Claude Opus 5.5, at its own default, and for Claude Fable 5.2 (not offered), at
-        # its family's documented default, as apps/bedrock-catalog.ts reads it; among the models it offers, for Opus 5.5 alone.
+        # The built-in catalog lists them for Claude Opus 5.5, at its own default, and for Claude Fable 5.2, at its own
+        # (high), as apps/bedrock-catalog.ts reads it: both took low, medium and high in real calls (2026-10-26, 2026-11-11).
         listed = [e for e in read_catalog() if "reasoningEfforts" in e]
         self.assertEqual([(e["id"], e["reasoningEfforts"], e.get("defaultReasoningEffort")) for e in listed],
                          [("bedrock.claude-fable-5-2", ["low", "medium", "high"], "high"), ("bedrock.claude-opus-5-5", ["low", "medium", "high"], "medium")])
-        self.assertEqual([e["id"] for e in listed if e["verified"]], ["bedrock.claude-opus-5-5"])
+        self.assertEqual([e["id"] for e in listed if e["verified"]], ["bedrock.claude-fable-5-2", "bedrock.claude-opus-5-5"])
 
-    def test_claude_fable_5_2_is_in_the_catalog_on_both_profiles_unverified_and_not_offered(self):
+    def test_claude_fable_5_2_is_in_the_catalog_on_both_profiles_verified_on_the_agents_runtime_only(self):
         entries = read_catalog()
         fable = entries[0]
         self.assertEqual(fable, {"id": "bedrock.claude-fable-5-2", "name": "Claude Fable 5.2", "vendor": "anthropic",
                                  "target": "global.anthropic.claude-fable-5-2", "fallbackTarget": "us.anthropic.claude-fable-5-2",
                                  "contextWindow": 200000, "maxTokens": 64000, "input": ["text", "image"], "tools": True, "runtime": "openai-agents",
-                                 "verified": "", "reasoningEfforts": ["low", "medium", "high"], "defaultReasoningEffort": "high"})
-        # No real call has answered (verified is empty), so the default selection of either runtime does not hold it.
-        for runtime in ("openai-agents", "pi"):
-            with self.subTest(runtime):
-                self.assertNotIn(fable["id"], [e["id"] for e in catalog_selection(runtime, {"AWWO_BEDROCK_CATALOG": "builtin"})])
+                                 "verified": "2026-11-11", "reasoningEfforts": ["low", "medium", "high"], "defaultReasoningEffort": "high"})
+        # Real calls answered on both profiles on 2026-11-11 (the catalog's first note): 49 entries, 41 of them verified,
+        # and no other Fable.
+        self.assertEqual((len(entries), len([e for e in entries if e["verified"]])), (49, 41))
         self.assertEqual([e["id"] for e in entries if "fable" in (e["id"] + e["name"] + e["target"]).lower()], [fable["id"]])
-        # Only an operator's explicit choice reaches it: builtin-all, or its id in AWWO_BEDROCK_MODELS.
+        # A verified entry is in its own runtime's default selection (builtin), first as in the catalog, and in no other's.
+        self.assertEqual(catalog_selection("openai-agents", {"AWWO_BEDROCK_CATALOG": "builtin"})[0]["id"], fable["id"])
+        self.assertNotIn(fable["id"], [e["id"] for e in catalog_selection("pi", {"AWWO_BEDROCK_CATALOG": "builtin"})])
         self.assertEqual(catalog_selection("openai-agents", {"AWWO_BEDROCK_CATALOG": "builtin-all"})[0]["id"], fable["id"])
+        # A worker whose AWWO_BEDROCK_MODELS names other models does not serve it; one that names it serves it alone.
+        self.assertEqual([e["id"] for e in catalog_selection("openai-agents", {"AWWO_BEDROCK_CATALOG": "builtin", "AWWO_BEDROCK_MODELS": "bedrock.claude-opus-5-5"})],
+                         ["bedrock.claude-opus-5-5"])
         self.assertEqual([e["id"] for e in catalog_selection("openai-agents", {"AWWO_BEDROCK_CATALOG": "builtin", "AWWO_BEDROCK_MODELS": fable["id"]})],
                          [fable["id"]])
-        # A worker that serves the default selection neither lists it nor resolves it.
+        # A worker that serves the default selection lists it and resolves it, on its global profile with the us. one
+        # behind it, at the efforts its entry offers.
         config = load_config({**GATE, "AWWO_BEDROCK_CATALOG": "builtin"})
-        self.assertNotIn(fable["id"], [model["id"] for model in public_health(config)["models"]])
-        self.assertEqual([m["id"] for m in public_health(config)["models"] if m["reasoningEfforts"]], ["bedrock.claude-opus-5-5"])
+        self.assertEqual([m["id"] for m in public_health(config)["models"] if m["reasoningEfforts"]], [fable["id"], "bedrock.claude-opus-5-5"])
+        resolved = resolve_model_config(config, fable["id"])
+        self.assertEqual((resolved.model, resolved.fallback_model, resolved.reasoning_efforts),
+                         ("global.anthropic.claude-fable-5-2", "us.anthropic.claude-fable-5-2", ("low", "medium", "high")))
 
 
 class ConfigTests(unittest.TestCase):
@@ -277,8 +284,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual((entry["reasoningEfforts"], entry["defaultReasoningEffort"]), (["low", "medium", "high"], "medium"))
         self.assertEqual(claude.reasoning_efforts, ("low", "medium", "high"))
         self.assertTrue(health["supportsEffortSelection"])
-        # This config is builtin-all (catalog_config), which also serves the entries no real call has answered: Claude
-        # Fable 5.2 lists efforts there too. Under builtin, Opus 5.5 alone (CatalogTests).
+        # The two entries that list efforts, Claude Fable 5.2 and Opus 5.5; under builtin the same two (CatalogTests).
         self.assertEqual([m["id"] for m in health["models"] if m["reasoningEfforts"]], ["bedrock.claude-fable-5-2", "bedrock.claude-opus-5-5"])
         self.assertNotIn("amazonaws", json.dumps(health))
         # The JS and Python workers advertise the same Bedrock catalog for the Agents runtime.
@@ -1374,16 +1380,22 @@ class SummaryWatchTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_only_a_model_asked_for_the_summary_is_watched(self):
         from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeout
-        for model in ("global.anthropic.claude-opus-4-8", "moonshotai.kimi-k2.5"):
+        # Claude Fable 5.2 thinks silently and is asked for no summary (2026-11-11): its stalled call waited the idle
+        # limit and tells the watch nothing.
+        for model, waited in (("global.anthropic.claude-opus-4-8", 180.0), ("moonshotai.kimi-k2.5", 900.0),
+                              ("global.anthropic.claude-fable-5-2", 900.0), ("us.anthropic.claude-fable-5-2", 900.0)):
             with self.subTest(model=model):
-                watch, facts = SummaryWatch(), []
+                watch, facts, timeouts = SummaryWatch(), [], []
+
+                def factory(region, auth, read_timeout, timeouts=timeouts):
+                    timeouts.append(read_timeout)
+                    return FakeClient({}, text_turn("x"), fail_after=0, fail_code=Urllib3ReadTimeout(None, None, "Read timed out."))
                 transport = BedrockConverseTransport(region="us-east-1", model=model, auth={"aws": True}, read_timeout=900.0, report=facts.append,
-                                                     client_factory=lambda *args: FakeClient({}, text_turn("x"), fail_after=0,
-                                                                                             fail_code=Urllib3ReadTimeout(None, None, "Read timed out.")),
-                                                     summary_watch=watch)
+                                                     client_factory=factory, summary_watch=watch)
                 async with httpx2.AsyncClient(transport=transport) as http:
                     await http.post(bridge_base_url("us-east-1") + "/chat/completions", json=chat_body(model=model))
                 self.assertEqual([fact["event"] for fact in facts], ["failed"])
+                self.assertEqual(timeouts, [waited])
                 self.assertTrue(watch.streams(model, ""))
         with mock.patch("bedrock_bridge.SUMMARIZED_THINKING_MODELS", frozenset()):
             watch, facts = SummaryWatch(), []
@@ -1603,9 +1615,9 @@ class SummarizedThinkingTests(unittest.IsolatedAsyncioTestCase):
 
     def test_only_a_model_that_thinks_silently_is_asked_for_its_thinking_summarized(self):
         command = {"modelId": CLAUDE, "messages": [{"role": "user", "content": [{"text": "hi"}]}], "inferenceConfig": {"maxTokens": 64000}}
-        # Claude Fable 5.2 beside Opus 5.5 since 2026-11-11, by its family's documented behaviour (in the catalog, not offered).
-        for model in (CLAUDE, "us.anthropic.claude-opus-5-5", "anthropic.claude-opus-5-5",
-                      "global.anthropic.claude-fable-5-2", "us.anthropic.claude-fable-5-2", "anthropic.claude-fable-5-2"):
+        # Claude Opus 5.5 alone: Claude Fable 5.2 thinks silently too, and streamed no summary when the production probe
+        # asked for one (2026-11-11), so it is asked as any other model is.
+        for model in (CLAUDE, "us.anthropic.claude-opus-5-5", "anthropic.claude-opus-5-5"):
             with self.subTest(model=model):
                 given = {**command, "modelId": model}
                 snapshot = json.dumps(given, sort_keys=True)
@@ -1615,38 +1627,44 @@ class SummarizedThinkingTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNot(asked["additionalModelRequestFields"]["thinking"], SUMMARIZED_THINKING)
                 self.assertEqual(json.dumps(given, sort_keys=True), snapshot, "the command given is not mutated")
         for model in ("global.anthropic.claude-opus-4-8", "global.anthropic.claude-sonnet-5", "moonshotai.kimi-k2.5",
-                      "global.anthropic.claude-opus-5-5-v2", "global.anthropic.claude-fable-5-1", "global.anthropic.claude-fable-5-2-v2"):
+                      "global.anthropic.claude-opus-5-5-v2", "global.anthropic.claude-fable-5-1", "global.anthropic.claude-fable-5-2-v2",
+                      "global.anthropic.claude-fable-5-2", "us.anthropic.claude-fable-5-2", "anthropic.claude-fable-5-2"):
             with self.subTest(model=model):
                 plain = {**command, "modelId": model}
                 self.assertIs(with_summarized_thinking(plain, model), plain)
 
-    def test_claude_fable_5_2_is_asked_for_the_summary_and_waits_the_idle_limit_whatever_it_is_asked(self):
-        # Its thinking is its family's (always on, silent unless asked for a summary), so it is in both sets; no call of
-        # it was measured, so it has no quick first-byte limit: with the summary, without it, with tools or with an effort
-        # beside it, a call waits the transport's limit.
+    def test_claude_fable_5_2_is_asked_for_no_summary_and_waits_the_idle_limit_whatever_it_is_asked(self):
+        # It thinks silently and streams no summary, asked or not (the production probe, 2026-11-11: nothing until its
+        # thinking ended, up to 114.3 s), so it is in THINKS_SILENTLY alone and has no quick first-byte limit: alone, with
+        # tools or at an effort, a call is sent no thinking field and waits the transport's limit, and no call of it asks
+        # for a summary, so the watch never hears of it.
         import bedrock_bridge
         fable = "anthropic.claude-fable-5-2"
         self.assertEqual((bedrock_bridge.THINKS_SILENTLY, bedrock_bridge.SUMMARIZED_THINKING_MODELS),
-                         (frozenset({"anthropic.claude-opus-5-5", fable}), frozenset({"anthropic.claude-opus-5-5", fable})))
+                         (frozenset({"anthropic.claude-opus-5-5", fable}), frozenset({"anthropic.claude-opus-5-5"})))
         self.assertEqual(sorted(bedrock_bridge.QUICK_FIRST_BYTE_SECONDS), ["anthropic.claude-opus-4-8", "anthropic.claude-opus-5-5"])
         tools = {"toolConfig": {"tools": [{"toolSpec": {"name": "t", "inputSchema": {"json": {"type": "object"}}}}]}}
         for model in ("global.anthropic.claude-fable-5-2", "us.anthropic.claude-fable-5-2", fable):
             with self.subTest(model=model):
                 plain = {"modelId": model, "messages": [{"role": "user", "content": [{"text": "hi"}]}]}
-                asked = with_summarized_thinking(plain, model)
-                self.assertTrue(bedrock_bridge.asks_for_summary(asked, model))
-                self.assertFalse(bedrock_bridge.asks_for_summary(plain, model))
                 effort = {**plain, "additionalModelRequestFields": {"output_config": {"effort": "high"}}}
-                self.assertEqual(with_summarized_thinking(effort, model)["additionalModelRequestFields"],
-                                 {"output_config": {"effort": "high"}, "thinking": {"type": "adaptive", "display": "summarized"}})
-                for command in (plain, asked, {**asked, **tools}, with_summarized_thinking(effort, model)):
-                    self.assertEqual(call_read_timeout(900.0, command, model, SummaryWatch()), 900.0)
+                watch = SummaryWatch()
+                for command in (plain, {**plain, **tools}, effort, {**effort, **tools}):
+                    self.assertIs(with_summarized_thinking(command, model), command)
+                    self.assertFalse(bedrock_bridge.asks_for_summary(command, model))
+                    self.assertEqual(call_read_timeout(900.0, command, model, watch), 900.0)
                     self.assertEqual(call_read_timeout(120.0, command, model), 120.0, "a run's shorter deadline still comes first")
+                self.assertTrue(watch.streams(model, "") and watch.streams(model, "high"))
+        # The request the bridge builds for it: its effort alone, as Claude's output_config.
+        built = with_summarized_thinking(to_converse_input(chat_body(model="global.anthropic.claude-fable-5-2", reasoning_effort="high"),
+                                                           "global.anthropic.claude-fable-5-2", REASONING_EFFORTS), "global.anthropic.claude-fable-5-2")
+        self.assertEqual(built["additionalModelRequestFields"], {"output_config": {"effort": "high"}})
 
     async def test_the_transport_asks_for_it_only_for_such_a_model_and_keeps_its_prompt_cache(self):
         events = text_turn("OK")
         body = chat_body(messages=[{"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello"}, {"role": "user", "content": "More"}])
-        for model, prompt_cache, asked in ((CLAUDE, False, True), (CLAUDE, True, True), ("global.anthropic.claude-opus-4-8", True, False)):
+        for model, prompt_cache, asked in ((CLAUDE, False, True), (CLAUDE, True, True), ("global.anthropic.claude-opus-4-8", True, False),
+                                           ("global.anthropic.claude-fable-5-2", False, False), ("us.anthropic.claude-fable-5-2", True, False)):
             with self.subTest(model=model, prompt_cache=prompt_cache):
                 record: dict = {}
                 transport = BedrockConverseTransport(region="us-east-1", model=model, auth={"aws": True}, prompt_cache=prompt_cache,

@@ -48,24 +48,32 @@ MAX_REQUEST_BYTES = 40 * 1024 * 1024
 # was 436 s (99th percentile 230-296 s), none over 600 s. Some silent far longer had stalled: on 2026-10-19 five Opus 5.5
 # calls gave nothing back for their runs' whole 25 minutes, and the same nodes, run again, answered in 64-164 s.
 BEDROCK_STREAM_IDLE_SECONDS = 15 * 60
-# Models that think before every answer (Bedrock refuses to turn it off, commit 7b495004) and stream their thinking only
-# when asked, by Converse model ID without its inference profile's prefix. As Bedrock calls them by default (adaptive
+# Models that think before every answer (Bedrock refuses to turn it off, commit 7b495004) and send nothing while they
+# think, by Converse model ID without its inference profile's prefix. As Bedrock calls them by default (adaptive
 # thinking, display "omitted") it sends nothing at all, not even messageStart, until the thinking ends, and since the
 # move to UCloud a stream silent for more than about 6 minutes has not been delivered: on 2026-10-21 Bedrock's records
 # showed it had run 11 calls of this worker to their 64,000-token cap in 559-647 s whose answers never arrived (the
 # sandbox worker lost 3 it finished in 435-457 s; fully silent streams of up to 360.6 s were delivered).
-# Claude Fable 5.2 (in the catalog since 2026-11-11, not offered) is in both sets by the Fable family's documented
-# behaviour alone (thinking always on, its text omitted unless display "summarized" is asked for), not by a call: the
-# production probe that sets its catalog entry's `verified` must see the summary stream. It is not in
-# QUICK_FIRST_BYTE_SECONDS, so its calls wait the stream's idle limit whatever they ask for.
+# Claude Opus 5.5 streams a summary of its thinking when asked (SUMMARIZED_THINKING_MODELS). Claude Fable 5.2 does not:
+# in the production probe of 2026-11-11 (real ConverseStream calls from the production host, with the workers' AWS
+# principal, through this bridge, on both inference profiles) Bedrock sent nothing, not even messageStart, until its
+# thinking had ended, with thinking display "summarized" and without the field alike; then one reasoning delta whose
+# text is empty, one signature (2,524 to 36,964 characters), and the answer, whose text streams as it is written (971
+# text deltas over 47 s for a 16,746-character file). The silence before the first byte was 10.4-13.6 s for a short
+# reasoning question at every effort (700-970 output tokens for a one-number answer), 114.3 s for a file of about 400
+# lines at high effort (18,866 output tokens in all) and 2.6 s for a plain list at low effort. So it is asked for no
+# summary and is not in QUICK_FIRST_BYTE_SECONDS: its calls wait the stream's idle limit, and one that thinks for more
+# than about 6 minutes is lost as above and fails at that limit.
 THINKS_SILENTLY = frozenset({"anthropic.claude-opus-5-5", "anthropic.claude-fable-5-2"})
 # Those asked to stream a summary of their thinking, which they then do from the start: in 14 probe calls to Claude
 # Opus 5.5 on 2026-10-21, the first reasoning text came 3.7-8.6 s into a call (8.6 s with a 110,668-token input) and no
 # call was ever silent for more than 6.5 s, also two that thought for 3.2 and 3.5 minutes (1,825 and 1,953 reasoning
 # deltas) on a question that, asked without the summary, sent nothing for 192.5 s; calls of the same question took about
 # as long as without it. The summary crosses the worker only as a count (runner.ReasoningCounter). A model taken out of
-# this set is asked as before, and THINKS_SILENTLY keeps it waiting the idle limit.
-SUMMARIZED_THINKING_MODELS = frozenset({"anthropic.claude-opus-5-5", "anthropic.claude-fable-5-2"})
+# this set is asked as before, and THINKS_SILENTLY keeps it waiting the idle limit. Claude Fable 5.2 is not in it: asked
+# for the summary on 2026-11-11 it streamed none (THINKS_SILENTLY), and a call without the field answered the same way
+# (9.4 s to the first byte), so the bridge sends it no thinking field.
+SUMMARIZED_THINKING_MODELS = frozenset({"anthropic.claude-opus-5-5"})
 SUMMARIZED_THINKING = {"type": "adaptive", "display": "summarized"}
 # The thinking efforts a catalog entry may offer for a Claude model (BEDROCK_REASONING_EFFORTS in apps/bedrock-bridge.ts):
 # a request's reasoning_effort that its profile offers goes to Bedrock as Claude's output_config.effort. Claude Opus 5.5
@@ -84,8 +92,9 @@ CLAUDE_MODEL = re.compile(r"(?:(?:global|us|eu|apac|jp|au|ca)\.)?anthropic\.")
 # (THINKS_SILENTLY) waits it only in a call that asks for its thinking summarized: asked otherwise it sends nothing until
 # its thinking ends, which can take its whole 64,000-token limit, 11 minutes or more, so a silent call may still be
 # working. A call that offers tools keeps the idle limit whatever the model: Bedrock holds a tool call's input back until
-# the model has written it. Claude Fable 5.2 has no limit here: none of its calls was measured, and its family's documented
-# turns on hard tasks run many minutes.
+# the model has written it. Claude Fable 5.2 has no limit here: it sends nothing while it thinks whatever it is asked
+# (THINKS_SILENTLY: 114.3 s before the first byte of a 400-line file at high effort, 2026-11-11), so a silent call of
+# it may still be working.
 QUICK_FIRST_BYTE_SECONDS = {"anthropic.claude-opus-4-8": 3 * 60, "anthropic.claude-opus-5-5": 3 * 60}
 # An inference profile's prefix on a Converse model ID (as bedrock_catalog.PROFILE_PREFIX).
 PROFILE_PREFIX = re.compile(r"(?:global|us|eu|apac|jp|au|ca)\.")

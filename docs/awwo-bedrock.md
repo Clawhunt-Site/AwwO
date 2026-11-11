@@ -1,6 +1,6 @@
 # AwwO 通过 Amazon Bedrock 提供模型
 
-状态：生产启用中。2026-10-03 开放 23 个区域内模型，2026-10-04 再开放 19 个经跨区域推理配置文件调用的模型（Claude 8 个、Grok 2 个、Kimi K3、DeepSeek R1、Pixtral Large、Llama 3 个、Nova 3 个），内置目录 `builtin` 共 42 个，三个 worker 都提供；2026-10-07 下架 Fable 5 与 5.1 后为 40 个（目录 48 项），Opus 5.5 改回 global 推理配置文件（见文末）；2026-11-11 目录加入 Claude Fable 5.2，未核验、未开放（目录 49 项，`builtin` 仍是 40 个，见「2026-11-11：Fable 5.2 进目录（未开放）」）。凭证来自 AwwO 专用的 EC2 实例角色，只允许目录里的这些模型；实例凭证只对三个 worker 开放。Claude Sonnet 5.5 与 7 个 GPT 尚未开放：AWS Marketplace 以 `INVALID_PAYMENT_INSTRUMENT` 拒绝订阅，账号补上有效付款方式后才能订阅并验收（见文末 2026-10-04 记录）。
+状态：生产启用中。2026-10-03 开放 23 个区域内模型，2026-10-04 再开放 19 个经跨区域推理配置文件调用的模型（Claude 8 个、Grok 2 个、Kimi K3、DeepSeek R1、Pixtral Large、Llama 3 个、Nova 3 个），内置目录 `builtin` 共 42 个，三个 worker 都提供；2026-10-07 下架 Fable 5 与 5.1 后为 40 个（目录 48 项），Opus 5.5 改回 global 推理配置文件（见文末）；2026-11-11 目录加入 Claude Fable 5.2，当天经生产探测核验，仍未开放（目录 49 项，已核验 41 个；价格和白名单未配，带这份目录的 worker 发布之前先看「2026-11-11：Fable 5.2 进目录（未开放）」）。凭证来自 AwwO 专用的 EC2 实例角色，只允许目录里的这些模型；实例凭证只对三个 worker 开放。Claude Sonnet 5.5 与 7 个 GPT 尚未开放：AWS Marketplace 以 `INVALID_PAYMENT_INSTRUMENT` 拒绝订阅，账号补上有效付款方式后才能订阅并验收（见文末 2026-10-04 记录）。
 
 运营方在自己的 AWS 账号里调用 Bedrock，AwwO 的模型架子因此可以列出 Claude、GPT、Grok、Kimi、DeepSeek、Qwen、GLM、MiniMax、Mistral、Llama、Nova、Gemma、Nemotron 等约 50 个热门模型。LLM Gate 保持不变：Bedrock 上没有的模型（例如 Gemini）继续由 Gate 提供，个人连接仍只允许 Gate。
 
@@ -46,12 +46,12 @@ flowchart LR
 | `name` / `vendor` | 显示名与厂商；网页按显示名归入品牌组 |
 | `target` | Converse `modelId`：只通过推理配置文件提供的模型用 `global.`/`us.` 配置文件，否则用区域内模型 ID |
 | `fallbackTarget` | 可选，目前只有 Claude：同一模型的另一个推理配置文件（`global.` ↔ `us.`）。目标在输出任何内容之前因容量或额度拒绝调用时，桥用它重发一次（见下文 2026-10-19） |
-| `reasoningEfforts` / `defaultReasoningEffort` | 可选，只给 Claude：节点可以选的思考强度（`low`、`medium`、`high` 中的若干档，桥把选中的一档作为 Claude 的 `output_config.effort` 发出），以及不选时模型自己的强度（只显示，从不发送）。已开放的模型里只有 Claude Opus 5.5：`low`/`medium`/`high`，默认 `medium`（见下文 2026-10-26）；未开放的 Claude Fable 5.2 也列了这三档、默认 `high`，取自 Fable 系列的文档，尚未探测（见下文 2026-11-11） |
+| `reasoningEfforts` / `defaultReasoningEffort` | 可选，只给 Claude：节点可以选的思考强度（`low`、`medium`、`high` 中的若干档，桥把选中的一档作为 Claude 的 `output_config.effort` 发出），以及不选时模型自己的强度（只显示，从不发送）。已开放的模型里只有 Claude Opus 5.5：`low`/`medium`/`high`，默认 `medium`（见下文 2026-10-26）；未开放的 Claude Fable 5.2 也列了这三档，2026-11-11 的生产探测里三档都被接受，默认 `high`（见下文 2026-11-11） |
 | `contextWindow` / `maxTokens` | AwwO 的保守预算（worker 把 contextWindow 当字节预算），不是厂商上限 |
 | `input` | `text`，可含 `image`（仅展示；桥目前只发文本） |
 | `tools` | 观察到流式工具调用或文档写明 ConverseStream 支持工具；没有工具能力的模型只放 Pi。Pixtral Large 与 Llama 只在非流式 Converse 接受工具（ConverseStream 回答 “This model doesn't support tool use in streaming mode”），所以放 Pi |
 | `runtime` | 默认归属：有工具能力的放 `openai-agents`（含项目执行），其余放 `pi`，每个模型默认只出现一次 |
-| `verified` | 经 AwwO worker 在本账号真实调用成功的日期；空值表示尚未开放（目前 9 个：Marketplace 订阅被拒的 8 个，以及 2026-11-11 加入、还没有任何真实调用的 Claude Fable 5.2），`builtin` 模式不提供这些模型 |
+| `verified` | 经 AwwO worker 在本账号真实调用成功的日期；空值表示尚未开放（目前 8 个，都是 Marketplace 订阅被拒的），`builtin` 模式不提供这些模型。Claude Fable 5.2 于 2026-11-11 核验，价格和白名单还没有配，仍未开放（见下文 2026-11-11） |
 
 目录顶层的 `regions` 记录这些条目核对过的区域（目前只有 `us-east-1`）：模型 ID 和推理配置文件因区域而异，`AWWO_BEDROCK_REGION` 不在其中时内置目录直接拒绝启动，其他区域请先核对，再用 `*_MODELS_JSON` 写明确的档案。目录在每个 worker 启动时严格校验，格式错误直接拒绝启动。模型会下线或改名：修改目录前先只读核对账号可见的模型（不产生推理费用）：
 
@@ -236,24 +236,31 @@ AWS 顾问要求上线前逐一确认已开放模型的数据政策。以下来�
 
 ## 2026-11-11：Fable 5.2 进目录（未开放）
 
-- **起因**：业主 2026-11-11「在awwo的模型列表中是上线fable5.2」。目录第一项加入 `bedrock.claude-fable-5-2`（Claude Fable 5.2），`verified` 为空：还没有任何一次经生产 worker 的真实 ConverseStream 调用应答，所以 `builtin` 模式不提供它（目录 49 项，已核验仍是 40 个）。只有 `builtin-all`，或在 `AWWO_BEDROCK_MODELS` 里点名，worker 才会提供它：下面的步骤走完之前，任何 worker 都不要用 `builtin-all`，也不要点名它。
+- **起因**：业主 2026-11-11「在awwo的模型列表中是上线fable5.2」。目录第一项加入 `bedrock.claude-fable-5-2`（Claude Fable 5.2），加入时 `verified` 为空。当天 12:03–12:15Z 的生产探测通过后，`verified` 写为 `2026-11-11`（目录 49 项，已核验 41 个）。它仍未开放：价格和白名单（下面第 5、6 步）没有配。**注意**：`builtin` 模式提供所有已核验的条目，所以带这份目录的 OpenAI Agents worker（JS、Python）一旦发布，只要它的 `AWWO_BEDROCK_MODELS` 为空，就会把它列进自己的模型列表（Pi 不会：它默认归属 `openai-agents`）。第 5、6 步走完之前，不要发布这样的 worker，或者让它的 `AWWO_BEDROCK_MODELS` 只点名别的模型；任何 worker 也不要点名它。
 - **2026-11-11 从 AWS 读到的**：us-east-1 有两个 ACTIVE 的推理配置文件，`global.anthropic.claude-fable-5-2`（目录的 `target`）与 `us.anthropic.claude-fable-5-2`（`fallbackTarget`）。Bedrock 标价（global、标准档，每百万 token）：输入 $8、输出 $40，缓存读取 $0.20，缓存写入 $10（5 分钟）/ $16（1 小时）。
 - **账号留存设置**：us-east-1 控制面的留存模式于 2026-11-11 01:33:18Z 设为 `provider_data_share`（us-east-2 仍是 `none`；us-west-2 与 mantle 端点的设置本节没有记录）。10-07 14:51Z 起它是 `none`，需要留存的模型会被 Bedrock 直接拒绝；改回 `provider_data_share` 之后，需要留存的模型才可能应答。代价：生产的 Bedrock 调用都从 us-east-1 发起，「设置为 `none`，所以能应答的模型都不留存」这条账号级的证明对它不再成立；其余 40 个模型的默认行为仍按上文 AWS 文档，但不再由这项设置兜底。
 - **留存与审阅：已确认（2026-11-11，ClawHunt 的隐私条款会话读 AWS 一手页面）**：AWS 的滥用检测页、数据留存页和 Fable 5.2 的模型卡都点名了 5.2，和 5 / 5.1 一样：全部请求留存最长 30 天，分类器标记的内容可能由 AWS 员工查看；不给 Anthropic，不用于训练；要求账号留存模式为 `aws_review`（或旧名 `provider_data_share`，AWS 说两者处理相同）。`provider_data_share` 不会让允许 `none` 的其他模型被留存或审阅（数据留存页「Mixed-model projects」）。
-- **行为还没有探测**：它的思考方式、强度档位、流式工具调用都没有探测过。目录和桥先按 Fable 系列的文档（Fable 5.1）与 Opus 5.5 的做法写，探测时逐项确认：
-  - 思考始终开启（关闭或给预算是 400），默认不返回思考文字。所以两个桥的 `SUMMARIZED_THINKING_MODELS`、Python 桥的 `THINKS_SILENTLY` 都加入 `anthropic.claude-fable-5-2`，请求带 `thinking: {type: "adaptive", display: "summarized"}`，和 Opus 5.5 一样。
-  - 强度经 `output_config.effort` 发出。目录列 `low`/`medium`/`high`（文档里还有 `xhigh`、`max`，桥不发），默认 `high`（只显示，不发送）。
-  - 强制 `tool_choice`（any / 指定工具）按文档是 400。
-  - Python 桥的 `QUICK_FIRST_BYTE_SECONDS` **没有**加它：没有测过它的任何调用，所以它的调用不论带不带摘要，都等流的 15 分钟空闲上限，不会在 3 分钟被切断。
+- **探测结果（2026-11-11 12:03–12:15Z）**：从生产主机、用 worker 自己的 AWS 身份、经这棵树的 `bedrock_bridge.py` 发真实的 ConverseStream 调用。测到的：
+  - 两个推理配置文件都应答。`low`/`medium`/`high` 都被接受（`output_config.effort`）。
+  - 流式工具调用可用，工具参数分 3–5 段到达。历史里带一轮工具调用可用。`parallel_tool_calls: false` 可用。
+  - 强制 `tool_choice`（指定工具）被 Bedrock 拒绝：HTTP 400 `ValidationException`。`any` 没有探测，按文档也是 400。
+  - 它静默思考，而且**不流出思考摘要**。带 `thinking: {type: "adaptive", display: "summarized"}` 和不带这个字段一样：思考结束之前 Bedrock 什么都不发，连 `messageStart` 都没有；之后是一个文字为空串的 `reasoningContent` 增量，一个 `reasoningContent` 签名增量（2,524–36,964 个字符），然后是回答。不带这个字段的那次调用同样应答（首字节 9.4 s）。
+  - 回答的文字边写边流：一个 16,746 字符的文件是 971 个文字增量，历时 47 s；一个列表是 438 个增量，22 s。
+  - 首字节之前的静默：简短的推理题在每一档强度下都是 10.4–13.6 s（答案只是一个数，输出 700–970 token）；约 400 行的文件、`high` 强度是 114.3 s（共输出 18,866 token）；普通列表、`low` 强度是 2.6 s。
+- **据此的做法**：
+  - 两个桥的 `SUMMARIZED_THINKING_MODELS` 去掉了 `anthropic.claude-fable-5-2`，桥不给它发 `thinking` 字段（代码原先写明探测必须看到摘要流出，它才留在这个集合里；探测没有看到）。请求里的强度照旧经 `output_config.effort` 发出。
+  - Python 桥的 `THINKS_SILENTLY` 保留它，`QUICK_FIRST_BYTE_SECONDS` 仍然**没有**加它：它的调用带不带工具，都等流的 15 分钟空闲上限，不会在 3 分钟被切断。
+  - **警告**：迁到现在的主机以后，完全静默超过约 6 分钟的流没有送达过（Python 桥 `THINKS_SILENTLY` 的注释）。Fable 5.2 的一次调用如果思考超过这个时间，回答就丢了，调用在 15 分钟空闲上限处失败。大的节点应当点名更低的强度。
+  - 目录列 `low`/`medium`/`high`（文档里还有 `xhigh`、`max`，桥不发，没有探测），默认 `high`（只显示，不发送；取自 Fable 系列的文档）。
   - `maxTokens` 64,000（与 Opus 5.5 同样的理由：先思考再回答，文档上限 128K），`contextWindow` 200,000，没有 `proseBytesPerToken`（没有测过，按字节规则）。Pi 的 `AWWO_PI_BEDROCK_THINKING_MODELS` 不能点名它：列了强度的模型不接受思考预算。
 - **只能由用户自己选（2026-11-11 起在代码里）**：Claude Fable 模型按 id 归入 DeepSeek 那条规则（`tenant_models.go` 的 `userChosenModel`，前缀 `claude-fable-`）：只有工作区里的人自己选了才会用到，AwwO 的规划、助手路由、默认模型、图片切换和后台调用都不会选它；AwwO 云端的中转既不列出也不调用它（`relay_limits.go`）。画布助手的方案新加的节点会沿用人给助手选的模型（DeepSeek 自 10-23 起就是这样），条款要写到这一点，或者在开放前改成新节点不沿用。
 - **开放之前，按顺序**：
   1. 隐私条款先写明 Fable 5.2 和它的留存、审阅方式（条款第 08 条的 Claude Fable 段，等业主批准后上线）。
-  2. worker 的 IAM 策略加入 Fable 5.2 的资源，也就是 10-07 删去的 6 个 Fable 资源的后继：两个推理配置文件，以及 `ListInferenceProfiles` 报告的它们各自路由到的基础模型 ARN。
-  3. 经生产 worker 做真实探测：两个配置文件各自应答；思考摘要在流里出现（单独调用、带强度、带工具、历史里有工具轮次）；`low`/`medium`/`high` 都被接受；流式工具调用可用。有一项不符就先改目录和上面的行为表，再往下走。
-  4. 探测通过，把日期写进目录的 `verified`。
-  5. `AWWO_MODEL_PRICING_JSON` 给两个运行时都写上它的价格（上面的标价）。
-  6. 白名单：`AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 与已有工作区的 `allowed_models`。
+  2. **已完成（2026-11-11 11:56Z）**：worker 的 IAM 用户附加了一个新的托管策略 `awwo-tokyo-runtime-bedrock-fable-5-2`。两个推理配置文件只允许从主机的地址调用；基础模型（「任意区域」、us-east-1、us-east-2、us-west-2）只允许经本账号的这两个配置文件调用。已有的策略一项没改。
+  3. **已完成（2026-11-11 12:03–12:15Z）**：上面的生产探测。两个配置文件各自应答，`low`/`medium`/`high` 都被接受，流式工具调用可用；思考摘要没有在流里出现，目录的说明、两个桥和上面的做法已按测到的改。
+  4. **已完成**：目录的 `verified` 写为 `2026-11-11`。
+  5. 未做：`AWWO_MODEL_PRICING_JSON` 给两个运行时都写上它的价格（上面的标价）。
+  6. 未做：白名单，`AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 与已有工作区的 `allowed_models`。
 
 ## 2026-10-18：Python worker 单次运行时限 25 分钟
 

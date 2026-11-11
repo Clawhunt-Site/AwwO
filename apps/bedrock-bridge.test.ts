@@ -854,11 +854,10 @@ test('the fetch sends cache checkpoints only when the operator turned the cache 
 });
 
 test('Claude Opus 5.5 is asked for its thinking as a summary, on every profile, only in a request of the Python worker\'s shape', () => {
-  // Claude Fable 5.2 beside it since 2026-11-11, by its family's documented behaviour (in the catalog, not offered).
-  assert.deepEqual([...SUMMARIZED_THINKING_MODELS], ['anthropic.claude-opus-5-5', 'anthropic.claude-fable-5-2']);
+  // Claude Opus 5.5 alone: Claude Fable 5.2 streamed no summary when the production probe asked for one (2026-11-11).
+  assert.deepEqual([...SUMMARIZED_THINKING_MODELS], ['anthropic.claude-opus-5-5']);
   const user = { role: 'user', content: [{ text: 'Hello' }] };
-  for (const model of [MODEL, 'us.anthropic.claude-opus-5-5', 'eu.anthropic.claude-opus-5-5', 'anthropic.claude-opus-5-5',
-    'global.anthropic.claude-fable-5-2', 'us.anthropic.claude-fable-5-2', 'anthropic.claude-fable-5-2']) {
+  for (const model of [MODEL, 'us.anthropic.claude-opus-5-5', 'eu.anthropic.claude-opus-5-5', 'anthropic.claude-opus-5-5']) {
     const plain = toConverseInput(request({ model }), model);
     assert.deepEqual(withSummarizedThinking(plain), { modelId: model, messages: [user], system: [{ text: 'Be brief.' }],
       inferenceConfig: { maxTokens: 512 }, additionalModelRequestFields: { thinking: { type: 'adaptive', display: 'summarized' } } }, model);
@@ -880,16 +879,19 @@ test('Claude Opus 5.5 is asked for its thinking as a summary, on every profile, 
     const command = toConverseInput(request({ model }), model);
     assert.equal(withSummarizedThinking(command), command, model);
   }
-  // Claude Fable 5.2 keeps the same exceptions (a forced tool choice is a 400 for its family too), and its effort stays
-  // beside the summary.
-  const FABLE = 'global.anthropic.claude-fable-5-2';
-  for (const [label, body] of [['tool history', request({ model: FABLE, tools: TIME_TOOL, messages: TOOL_LOOP })],
-    ['required tool', request({ model: FABLE, tools: TIME_TOOL, tool_choice: 'required' })]] as const) {
-    const command = toConverseInput(body, FABLE);
-    assert.equal(withSummarizedThinking(command), command, `Fable 5.2: ${label}`);
+  // Claude Fable 5.2 is sent no thinking field on any profile, whatever the request: alone, with tools, with a tool
+  // loop's history; an effort it is asked at goes alone.
+  for (const FABLE of ['global.anthropic.claude-fable-5-2', 'us.anthropic.claude-fable-5-2', 'anthropic.claude-fable-5-2']) {
+    for (const [label, body] of [['alone', request({ model: FABLE })], ['tools', request({ model: FABLE, tools: TIME_TOOL })],
+      ['tool history', request({ model: FABLE, tools: TIME_TOOL, messages: TOOL_LOOP })]] as const) {
+      const command = toConverseInput(body, FABLE);
+      assert.equal(withSummarizedThinking(command), command, `${FABLE}: ${label}`);
+      assert.equal(command.additionalModelRequestFields, undefined, `${FABLE}: ${label}`);
+    }
+    const effort = toConverseInput(request({ model: FABLE, reasoning_effort: 'high' }), FABLE, ['low', 'medium', 'high']);
+    assert.equal(withSummarizedThinking(effort), effort, `${FABLE}: effort`);
+    assert.deepEqual(effort.additionalModelRequestFields, { output_config: { effort: 'high' } });
   }
-  assert.deepEqual(withSummarizedThinking(toConverseInput(request({ model: FABLE, reasoning_effort: 'high' }), FABLE, ['low', 'medium', 'high'])).additionalModelRequestFields,
-    { output_config: { effort: 'high' }, ...SUMMARY });
   const budgeted = withClaudeThinking(toConverseInput(request({ max_tokens: 8000 }), MODEL), 2048);
   assert.equal(withSummarizedThinking(budgeted), budgeted);
   assert.equal(withSummarizedThinking({ messages: [] }).additionalModelRequestFields, undefined, 'a command without a model ID');

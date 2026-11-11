@@ -165,11 +165,11 @@ test('Claude Opus 5.5 gets 64,000 output tokens per call, room to answer after i
   assert.equal(error, undefined);
   assert.equal(events.at(-1).type, 'completed');
   assert.deepEqual(bedrock.sent[0].input.inferenceConfig, { maxTokens: 64000 });
-  // Opus 5.5 was measured to need it. Claude Fable 5.2 (in the catalog since 2026-11-11, not offered: no real call has
-  // answered) has it because its family always thinks first too, by its documentation and not by a measurement.
+  // Opus 5.5 was measured to need it. Claude Fable 5.2 always thinks first too: in its production probe of 2026-11-11 a
+  // one-number answer cost 700-970 output tokens and a file of about 400 lines 18,866.
   const roomy = readBedrockCatalog().filter(entry => entry.maxTokens > 32_768);
   assert.equal(roomy.map(entry => entry.id).join(), 'bedrock.claude-fable-5-2,bedrock.claude-opus-5-5', 'only the models that always think first');
-  assert.equal(roomy.filter(entry => entry.verified).map(entry => entry.id).join(), 'bedrock.claude-opus-5-5', 'only the model measured to need it is offered');
+  assert.equal(roomy.filter(entry => entry.verified).map(entry => entry.id).join(), 'bedrock.claude-fable-5-2,bedrock.claude-opus-5-5', 'both answered real calls');
 });
 
 test('the real AWS SDK gives a Bedrock stream the bridge\'s idle limit, not its own 300 s', { timeout: 15_000 }, async () => {
