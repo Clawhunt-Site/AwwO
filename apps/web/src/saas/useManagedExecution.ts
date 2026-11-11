@@ -661,7 +661,7 @@ export function useManagedExecution(tenantId: string, canvasId: string, { readOn
     // Effort belongs to one model: choosing another starts again from the model's default. A choice the reader makes is
     // kept for this workspace and becomes the model of the components a plan adds.
     chooseModel: key => { if (key !== modelKeyRef.current) setEffort(''); chooseKey(key); setStaleLabel(''); setChosenByReader(Boolean(key)); storeModel(modelStoreKey, key); },
-    // A model the workspace's plan does not include (requiresUpgrade, e.g. Claude Opus 5.5 without Pro or Max) is never
+    // A model the workspace's plan does not include (requiresUpgrade, e.g. Claude Opus 5.5 without Pro, Max or Ultra) is never
     // put on them: they would only be refused when they run.
     ...(chosenByReader && choiceModel && !staleLabel && choiceModel.requiresUpgrade !== true ? { componentModel: { runtime: choiceModel.runtime, model: choiceModel.id } } : {}),
     effort: chosenEffort, setEffort, knowledgeCount,

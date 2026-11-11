@@ -126,7 +126,7 @@ function SectionPage({ identity, section, engines, onProfile }: { identity: Iden
   switch (section) {
     case 'security': return <AccountSecurity personalCredentialsRequired={identity.personalCredentialsRequired === true} identity={identity} />;
     case 'plans': return <>
-      <SettingsIntro title={t('用量与计费', 'Usage and billing')} intro={t('免费试用期间，免费版每天有一定的次数（Claude、GPT 等高级模型由全站共享一份每日免费名额）；试用结束后，要有 Pro 或 Max 才能继续规划和运行。Pro 和 Max 每月给一笔点数，用于这些高级模型和图片视频生成，默认模型的次数也更多。', 'During the free trial the free plan has a number of calls a day (premium models such as Claude and GPT share one daily number of free calls across the service); after the trial, planning and running need Pro or Max. Pro and Max add credits every month for those premium models and for image and video generation, and more calls on the default model.')} />
+      <SettingsIntro title={t('用量与计费', 'Usage and billing')} intro={t('免费试用期间，免费版每天有一定的次数（Claude、GPT 等高级模型由全站共享一份每日免费名额）；试用结束后，要有 Pro、Max 或 Ultra 才能继续规划和运行。Pro、Max 和 Ultra 每月给一笔点数，用于这些高级模型和图片视频生成，默认模型的次数也更多。', 'During the free trial the free plan has a number of calls a day (premium models such as Claude and GPT share one daily number of free calls across the service); after the trial, planning and running need Pro, Max or Ultra. Pro, Max and Ultra add credits every month for those premium models and for image and video generation, and more calls on the default model.')} />
       <PlansUsage identity={identity} />
       <PlansPage identity={identity} />
     </>;

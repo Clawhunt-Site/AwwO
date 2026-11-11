@@ -71,8 +71,8 @@ export function officialPriceNotice(market: { officialPrice?: number; officialPr
   // In the trial banner's form: the price starts the moment the trial ends, and a page showing both names one moment
   // once (11月12日 24:00), not as 24:00 there and 00:00 the next day here.
   const when = momentText(market.officialPriceFrom, locale, { end: true });
-  return t(`${when} 起，AwwO 官方 Agent 每次调用 ${price} 点（模型费另算），需要工作区所有者有 Pro / Max 套餐。`,
-    `From ${when}, a call to an AwwO official Agent costs ${price} ${price === 1 ? 'credit' : 'credits'} (the model is billed apart) and needs the workspace owner’s Pro or Max plan.`);
+  return t(`${when} 起，AwwO 官方 Agent 每次调用 ${price} 点（模型费另算），需要工作区所有者有 Pro / Max / Ultra 套餐。`,
+    `From ${when}, a call to an AwwO official Agent costs ${price} ${price === 1 ? 'credit' : 'credits'} (the model is billed apart) and needs the workspace owner’s Pro, Max or Ultra plan.`);
 }
 export const authorText = (agent: { official: boolean; author: { name: string } | null }, t: MarketT) =>
   agent.official ? t('AwwO 官方', 'AwwO official') : agent.author?.name || t('作者未署名', 'Unnamed author');

@@ -11,6 +11,7 @@ const identity = { user: { id: 'member-1', name: 'Ada', email: 'ada@example.test
 const catalog = [
   { id: 'pro', priceUsd: 20, credits: 2000, dailyCalls: 300, concurrentAgents: 3, workspaces: 3, mediaPerDay: 30 },
   { id: 'max', priceUsd: 100, credits: 10000, dailyCalls: 1000, concurrentAgents: 6, workspaces: 10, mediaPerDay: 100 },
+  { id: 'ultra', priceUsd: 299, credits: 29900, dailyCalls: 3000, concurrentAgents: 12, workspaces: 30, mediaPerDay: 300 },
 ];
 const free = { catalog, checkoutEnabled: true, plan: null, credits: null, stale: false };
 const pro = { ...free, plan: { id: 'pro', status: 'active', periodStart: '2026-10-05T00:00:00Z', periodEnd: '2026-11-05T00:00:00Z', cancelAtPeriodEnd: false, entitled: true }, credits: { granted: 2000, spent: 150, remaining: 1850 } };
@@ -29,14 +30,15 @@ const serve = (handler: (url: string, init: RequestInit) => Response) => {
   return calls;
 };
 
-it('shows both plans as coming soon while checkout is closed', async () => {
+it('shows the three plans as coming soon while checkout is closed', async () => {
   serve(() => response({ ...free, checkoutEnabled: false }));
   page();
   expect(await screen.findByRole('heading', { name: 'Pro' })).toBeVisible();
   expect(screen.getByText('$20')).toBeVisible();
   expect(screen.getByText('$100')).toBeVisible();
+  expect(screen.getByText('$299')).toBeVisible();
   const soon = screen.getAllByRole('button', { name: '即将开放' });
-  expect(soon).toHaveLength(2);
+  expect(soon).toHaveLength(3);
   soon.forEach(button => expect(button).toBeDisabled());
   expect(within(screen.getByRole('region', { name: 'Pro' })).getByText('2,000')).toBeVisible();
   expect(screen.getByText(/默认模型每天 1,000 次/)).toBeVisible();
@@ -45,10 +47,10 @@ it('shows both plans as coming soon while checkout is closed', async () => {
 // True during the free trial and after it (owner 2026-11-07: after the trial a workspace without a plan runs nothing):
 // the page knows no workspace, so it names no date, and Opus 5.5, open on the free plan for now, is not said to need one.
 it.each([
-  ['zh', '当前套餐', ['免费试用期间，每天有一定的调用次数', '具体数字见工作区里的「今日额度」', '免费试用结束后，规划和运行需要 Pro 或 Max，画布和成果都会保留。'], 'Get Pro', '立即开通 Pro'],
+  ['zh', '当前套餐', ['免费试用期间，每天有一定的调用次数', '具体数字见工作区里的「今日额度」', '免费试用结束后，规划和运行需要 Pro、Max 或 Ultra，画布和成果都会保留。'], 'Get Pro', '立即开通 Pro'],
   ['en', 'Current plan', ['during the free trial there is a daily number of calls', 'see Today’s allowance in a workspace for the numbers',
-    // The page's intro words it so too (SettingsCenter.tsx: "after the trial, planning and running need Pro or Max").
-    'Once the free trial ends, planning and running need Pro or Max, and your canvases and results are kept.'], '立即开通 Pro', 'Get Pro'],
+    // The page's intro words it so too (SettingsCenter.tsx: "after the trial, planning and running need Pro, Max or Ultra").
+    'Once the free trial ends, planning and running need Pro, Max or Ultra, and your canvases and results are kept.'], '立即开通 Pro', 'Get Pro'],
 ] as const)('tells a free account (%s) what the free trial gives and that running needs a plan after it', async (locale, title, lines, absent, buy) => {
   localStorage.setItem('superclaw_locale', locale);
   serve(() => response(free));
@@ -70,13 +72,21 @@ it('shows each plan as a voucher: its credits as the face value, its price on th
   expect(within(proVoucher).getByText('2,000')).toBeVisible();
   expect(within(proVoucher).getByText('$20')).toBeVisible();
   expect(within(proVoucher).getByText('日常创作')).toBeVisible();
-  expect(within(proVoucher).getByText('按月订阅 · 可随时取消 · 由 Stripe 安全支付')).toBeVisible();
+  // Monthly, and renewed by itself (owner 2026-11-11: 「包月自动续订」): said on the stub, beside the button that buys it.
+  expect(within(proVoucher).getByText('每月自动续订，可随时取消，由 Stripe 安全支付')).toBeVisible();
   // Every figure is the catalog's: Max says how many times Pro's credits it holds, from the two plans' credits.
   const maxVoucher = screen.getByRole('region', { name: 'Max' });
   expect(within(maxVoucher).getByText('10,000')).toBeVisible();
   expect(within(maxVoucher).getByText('进阶创作 · 点数是 Pro 的 5 倍')).toBeVisible();
   expect(within(maxVoucher).getByText(/默认模型每天 1,000 次/)).toBeVisible();
-  expect(screen.getByText(/选一张点数券/)).toBeVisible();
+  // Ultra, the third plan: its own figures, and what sets it apart said from them (29,900 is no whole multiple of 2,000).
+  const ultraVoucher = screen.getByRole('region', { name: 'Ultra' });
+  expect(within(ultraVoucher).getByText('29,900')).toBeVisible();
+  expect(within(ultraVoucher).getByText('$299')).toBeVisible();
+  expect(within(ultraVoucher).getByText('团队与量产 · 同时运行 12 个 Agent')).toBeVisible();
+  expect(within(ultraVoucher).getByText(/默认模型每天 3,000 次/)).toBeVisible();
+  expect(within(ultraVoucher).getByRole('button', { name: '立即开通 Ultra' })).toBeEnabled();
+  expect(screen.getByText(/选一张点数券/)).toHaveTextContent('包月订阅，每月自动续订，可随时取消');
   expect(screen.queryByText('使用中')).toBeNull();
   cleanup();
   serve(() => response(pro));
@@ -282,14 +292,21 @@ it('warns when the plan’s credits or today’s calls are used up', async () =>
   expect(await screen.findByRole('button', { name: 'Pro · 默认模型今日已用完' })).toHaveClass('is-out');
 });
 
-it('does not tell Max to upgrade, and shows a member no renewal date', async () => {
-  const max = (remaining: number) => ({ limited: false, interested: false, daily: { limit: 1000, used: 3 }, plan: { id: 'max', owner: true, credits: { granted: 10000, spent: 10000 - remaining, remaining } } });
-  serve(() => response(max(0)));
+it('offers the plan one step up once the credits are gone, and none above the largest', async () => {
+  const held = (id: string, granted: number, daily: number) => ({ limited: false, interested: false, daily: { limit: daily, used: 3 }, plan: { id, owner: true, credits: { granted, spent: granted, remaining: 0 } } });
+  serve(() => response(held('max', 10000, 1000)));
   meter();
   fireEvent.click(await screen.findByRole('button', { name: 'Max · 点数已用完' }));
-  expect(await screen.findByText(/点数在续费后重置/)).toBeVisible();
+  expect(await screen.findByText(/或在套餐页升级到 Ultra/)).toBeVisible();
   expect(screen.queryByText(/升级到 Max/)).toBeNull();
   expect(screen.getByText(/点数按套餐的计费周期发放/)).toBeVisible();
+  cleanup();
+  // Ultra is the largest: nothing to upgrade to, the credits come back at renewal.
+  serve(() => response(held('ultra', 29900, 3000)));
+  meter();
+  fireEvent.click(await screen.findByRole('button', { name: 'Ultra · 点数已用完' }));
+  expect(await screen.findByText(/点数在续费后重置/)).toBeVisible();
+  expect(screen.queryByText(/升级到/)).toBeNull();
 });
 
 it('tells a member to ask the owner, not to upgrade a plan that is not theirs', async () => {
@@ -304,5 +321,27 @@ it('links a free workspace’s allowance to the plans', async () => {
   serve(() => response({ limited: true, interested: false, daily: { limit: 30, used: 2 }, routes: { gate: { limit: 3, used: 1 } } }));
   meter();
   fireEvent.click(await screen.findByRole('button', { name: '今日额度 · 剩 28 次' }));
-  expect(await screen.findByRole('link', { name: '升级 Pro / Max' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
+  expect(await screen.findByRole('link', { name: '升级套餐' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
+});
+
+it('puts the vouchers first for an account without a plan, and its plan first for a subscriber', async () => {
+  serve(() => response(free));
+  page();
+  const before = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+  expect(before(await screen.findByRole('region', { name: 'Pro' }), screen.getByRole('region', { name: '当前套餐' }))).toBe(true);
+  // The three plans share one row.
+  expect(document.querySelectorAll('.saas-voucher-row > .saas-voucher')).toHaveLength(3);
+  cleanup();
+  serve(() => response(pro));
+  page();
+  expect(before(await screen.findByRole('region', { name: '当前套餐' }), screen.getByRole('region', { name: 'Pro' }))).toBe(true);
+});
+
+it('leaves out a plan it has no name for, rather than drawing it without one', async () => {
+  serve(() => response({ ...free, catalog: [...catalog, { id: 'mega', priceUsd: 999, credits: 99900, dailyCalls: 9000, concurrentAgents: 24, workspaces: 99, mediaPerDay: 900 }] }));
+  page();
+  expect(await screen.findByRole('region', { name: 'Ultra' })).toBeVisible();
+  expect(screen.queryByText('$999')).toBeNull();
+  expect(screen.queryByText('undefined')).toBeNull();
+  expect(document.querySelectorAll('.saas-voucher')).toHaveLength(3);
 });

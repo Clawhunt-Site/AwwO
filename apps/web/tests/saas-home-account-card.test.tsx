@@ -93,15 +93,22 @@ describe('a paid plan', () => {
     await waitFor(() => expect(calls.some(call => call.url === '/api/v1/tenants/team-c/upgrade-interest' && call.method === 'POST')).toBe(true));
   });
 
-  it('makes the bigger plan the first action when few credits are left (managing a Max one)', async () => {
+  it('makes the plan one step up the first action when few credits are left (managing the largest one)', async () => {
     const low = { granted: 2000, spent: 1800, remaining: 200 };
     card(paid({ credits: low }));
     expect(await screen.findByRole('link', { name: '升级 Max' })).toHaveClass('saas-primary');
     expect(document.querySelector('.saas-home-account-bar')).toHaveClass('is-low');
     cleanup();
+    // A low Max plan is offered Ultra, the third plan, not Max again.
     card(paid({ id: 'max', credits: { granted: 10000, spent: 9000, remaining: 1000 } }));
-    expect(await screen.findByRole('link', { name: '管理订阅' })).toHaveClass('saas-primary');
+    expect(await screen.findByRole('link', { name: '升级 Ultra' })).toHaveClass('saas-primary');
     expect(screen.queryByRole('link', { name: '升级 Max' })).toBeNull();
+    cleanup();
+    // Nothing is above Ultra: its owner manages it.
+    card(paid({ id: 'ultra', credits: { granted: 29900, spent: 27000, remaining: 2900 } }));
+    expect(await screen.findByRole('link', { name: '管理订阅' })).toHaveClass('saas-primary');
+    expect(screen.queryByRole('link', { name: /^升级/ })).toBeNull();
+    expect(screen.getByText('Ultra')).toBeVisible();
     expect(lowCredits({ granted: 2000, spent: 1700, remaining: 300 })).toBe(false);
     expect(lowCredits({ granted: 0, spent: 0, remaining: 0 })).toBe(true);
     expect(lowCredits(null)).toBe(false);
@@ -122,7 +129,7 @@ describe('the free plan', () => {
     const { card: shown, calls } = card(free({ freePlan: { until: TRIAL_END, ended: false } }));
     expect(await shown.findByText('免费试用', { selector: '.saas-home-account-badge' })).toBeVisible();
     expect(shown.getByText('试用到 11月12日 24:00 · 还剩 5 天')).toBeVisible();
-    const subscribe = shown.getByRole('link', { name: '订阅 Pro / Max' });
+    const subscribe = shown.getByRole('link', { name: '订阅套餐' });
     expect(subscribe).toHaveClass('saas-primary');
     expect(subscribe).toHaveAttribute('href', '/?tenant=team-c&account=plans');
     fireEvent.click(subscribe);
@@ -135,7 +142,7 @@ describe('the free plan', () => {
     const badge = await shown.findByText('未订阅');
     expect(badge).toHaveClass('saas-home-account-badge', 'is-ended');
     expect(shown.getByText('免费试用已结束，订阅后继续运行')).toBeVisible();
-    expect(shown.getByRole('link', { name: '订阅 Pro / Max' })).toHaveClass('saas-primary');
+    expect(shown.getByRole('link', { name: '订阅套餐' })).toHaveClass('saas-primary');
     // The meter no longer counts calls nothing can use.
     expect(shown.getByRole('button', { name: '免费试用已结束' })).toHaveClass('is-out');
     cleanup();
@@ -147,7 +154,7 @@ describe('the free plan', () => {
     const { card: shown } = card(free({ promo: { until: new Date(2026, 10, 30, 8).toISOString(), daily: 100 } }));
     expect(await shown.findByText('免费版', { selector: '.saas-home-account-badge' })).toBeVisible();
     expect(shown.getByText('限时额度到 11月30日 08:00')).toBeVisible();
-    expect(shown.getByRole('link', { name: '升级 Pro / Max' })).toHaveClass('saas-primary');
+    expect(shown.getByRole('link', { name: '升级套餐' })).toHaveClass('saas-primary');
     cleanup();
     const plain = card(free());
     expect(await plain.card.findByText('免费版', { selector: '.saas-home-account-badge' })).toBeVisible();
@@ -159,7 +166,7 @@ describe('the free plan', () => {
     for (const role of ['admin', 'member'] as const) {
       const { card: shown, calls } = card(free({ freePlan: { until: TRIAL_END, ended: false } }), { role });
       expect(await shown.findByText('试用结束后，这个工作区要所有者订阅才能继续运行。')).toBeVisible();
-      expect(shown.queryByRole('link', { name: '订阅 Pro / Max' })).toBeNull();
+      expect(shown.queryByRole('link', { name: '订阅套餐' })).toBeNull();
       const own = shown.getByRole('link', { name: '为我自己的账号订阅' });
       expect(own).not.toHaveClass('saas-primary');
       expect(own).toHaveAttribute('href', '/?tenant=team-c&account=plans');
@@ -170,14 +177,14 @@ describe('the free plan', () => {
     const ended = card(free({ freePlan: { until: TRIAL_END, ended: true } }), { role: 'member' });
     expect(await ended.card.findByText('免费试用已结束，工作区所有者订阅后继续运行')).toBeVisible();
     expect(ended.card.queryByText('试用结束后，这个工作区要所有者订阅才能继续运行。')).toBeNull();
-    expect(ended.card.queryByRole('link', { name: '订阅 Pro / Max' })).toBeNull();
+    expect(ended.card.queryByRole('link', { name: '订阅套餐' })).toBeNull();
     expect(ended.card.getByRole('link', { name: '为我自己的账号订阅' })).toBeVisible();
     expect(planView(free({ freePlan: { until: TRIAL_END, ended: false } }), 'admin')).toEqual({ standing: 'trial', until: TRIAL_END, owner: false, call: 'own' });
   });
 
   it('gives a password account the link too: the plans page explains how to buy', async () => {
     const { card: shown } = card(free({ freePlan: { until: TRIAL_END, ended: false } }), { who: { ...identity, authentication: 'local' } });
-    expect(await shown.findByRole('link', { name: '订阅 Pro / Max' })).toBeVisible();
+    expect(await shown.findByRole('link', { name: '订阅套餐' })).toBeVisible();
   });
 });
 

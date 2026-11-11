@@ -109,9 +109,9 @@ describe('a priced official Agent', () => {
     expect(card).toHaveTextContent('AwwO 官方');
     const page = await screen.findByRole('article', { name: 'Code reviewer 的详情' });
     const note = await within(page).findByRole('note');
-    expect(note).toHaveTextContent('AwwO 官方 Agent 每次成功调用扣 5 点（Agent 费归 AwwO，模型费另算）：工作区所有者有 Pro / Max 付费套餐才能用。');
+    expect(note).toHaveTextContent('AwwO 官方 Agent 每次成功调用扣 5 点（Agent 费归 AwwO，模型费另算）：工作区所有者有 Pro / Max / Ultra 付费套餐才能用。');
     expect(note).not.toHaveTextContent('作者');
-    expect(within(note).getByRole('link', { name: '查看 Pro / Max 套餐' })).toHaveAttribute('href', '/?account=plans');
+    expect(within(note).getByRole('link', { name: '查看 Pro / Max / Ultra 套餐' })).toHaveAttribute('href', '/?account=plans');
     expect(within(page).queryByRole('button', { name: '添加到画布' })).toBeNull();
     // Its price applies already (no FROM): there is nothing to announce.
     expect(notice()).toBeNull();
@@ -122,7 +122,7 @@ describe('a priced official Agent', () => {
     open('en');
     const page = await screen.findByRole('article', { name: 'Code reviewer details' });
     const note = await within(page).findByRole('note');
-    expect(note).toHaveTextContent('An AwwO official Agent takes 1 credit a successful call (the Agent fee is AwwO’s; the model is billed apart): it needs the workspace owner to have the Pro or Max plan.');
+    expect(note).toHaveTextContent('An AwwO official Agent takes 1 credit a successful call (the Agent fee is AwwO’s; the model is billed apart): it needs the workspace owner to have the Pro, Max or Ultra plan.');
     expect(note).not.toHaveTextContent(/author/i);
   });
 });
@@ -130,8 +130,8 @@ describe('a priced official Agent', () => {
 describe('an author’s paid Agent', () => {
   it('asks for the plan without promising anything of Agents with no fee, in both languages', async () => {
     const paid = agent('coder', 'Coder', { price: 3 });
-    for (const [locale, name, words, gone] of [['zh', 'Coder 的详情', '这是付费 Agent，每次成功调用扣 3 点：工作区所有者有 Pro / Max 付费套餐才能用。', /免费/],
-      ['en', 'Coder details', 'This is a paid Agent that takes 3 credits a successful call: it needs the workspace owner to have the Pro or Max plan.', /free/i]] as const) {
+    for (const [locale, name, words, gone] of [['zh', 'Coder 的详情', '这是付费 Agent，每次成功调用扣 3 点：工作区所有者有 Pro / Max / Ultra 付费套餐才能用。', /免费/],
+      ['en', 'Coder details', 'This is a paid Agent that takes 3 credits a successful call: it needs the workspace owner to have the Pro, Max or Ultra plan.', /free/i]] as const) {
       server([paid], null);
       open(locale);
       const page = await screen.findByRole('article', { name });

@@ -1,6 +1,11 @@
 import { api } from './api';
 
-export type PlanId = 'pro' | 'max';
+/** The paid plans, smallest first (owner 2026-11-11: 「价格改为三档20刀-100刀-299刀」). */
+export const PLAN_IDS = ['pro', 'max', 'ultra'] as const;
+export type PlanId = (typeof PLAN_IDS)[number];
+export const isPlanId = (value: unknown): value is PlanId => (PLAN_IDS as readonly unknown[]).includes(value);
+/** The plan one step up, or null for the largest. */
+export const nextPlan = (id: PlanId): PlanId | null => { const at = PLAN_IDS.indexOf(id); return at < 0 ? null : PLAN_IDS[at + 1] ?? null; };
 /** One row of GET /billing's catalog: what the plan gives. The charged price is Stripe's. */
 export type CatalogPlan = { id: PlanId; priceUsd: number; credits: number; dailyCalls: number; concurrentAgents: number; workspaces: number; mediaPerDay: number };
 export type AccountPlan = { id: PlanId; status: string; periodStart: string; periodEnd: string; cancelAtPeriodEnd: boolean; entitled: boolean };
@@ -33,7 +38,15 @@ export function stripePage(raw: string, host: 'checkout.stripe.com' | 'billing.s
   }
 }
 
-export const planName = (id: PlanId) => (id === 'pro' ? 'Pro' : 'Max');
+const PLAN_NAMES: Record<PlanId, string> = { pro: 'Pro', max: 'Max', ultra: 'Ultra' };
+export const planName = (id: PlanId) => PLAN_NAMES[id];
+
+/** GET /billing/catalog: the plans on offer and whether they can be bought, without asking ClawHunt about the account
+ *  (the launch notice reads it for every account once; GET /billing would ask ClawHunt each time). */
+export type PlanOffer = { catalog: CatalogPlan[]; checkoutEnabled: boolean };
+export function fetchPlanOffer(signal?: AbortSignal) {
+  return api<PlanOffer>('/billing/catalog', { signal });
+}
 
 /** Leaving AwwO for Stripe's page; one place, so tests can watch it. */
 export const billingNavigation = { go(url: string) { window.location.assign(url); } };

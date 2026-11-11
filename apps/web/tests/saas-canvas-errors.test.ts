@@ -64,7 +64,7 @@ it('translates HTTP and recovered error codes using the current locale while pre
   expect(canvasErrorMessage('Model execution failed', 'output_contract_invalid')).not.toContain('Check the runtime configuration');
 });
 it('points a free workspace at the paid plans first when its run allowance is full, and still says how to wait', () => {
-  for (const [locale, plans, wait] of [['zh', '升级 Pro / Max 付费套餐', 'UTC 0 点'], ['en', 'Upgrade to the Pro or Max plan', '00:00 UTC']] as const) {
+  for (const [locale, plans, wait] of [['zh', '升级 Pro / Max / Ultra 付费套餐', 'UTC 0 点'], ['en', 'Upgrade to the Pro, Max or Ultra plan', '00:00 UTC']] as const) {
     const text = runErrorText('quota_exceeded', locale)!;
     expect(text).toContain(plans); expect(text).toContain(wait);
     expect(text.indexOf(plans)).toBeLessThan(text.indexOf(wait));
@@ -80,7 +80,7 @@ it('points a free workspace at the default model and the paid plans when its pre
     expect(runErrorText(code, 'zh')).toContain('付费套餐');
     document.documentElement.lang = 'en';
     expect(canvasErrorMessage('Model execution failed', code)).toContain('default model');
-    expect(runErrorText(code, 'en')).toContain('Pro and Max plans');
+    expect(runErrorText(code, 'en')).toMatch(/the Pro, Max or Ultra plan|The Pro, Max and Ultra plans/);
     expect(runErrorText(code, 'en')).toContain('Plans and credits');
   }
   expect(saasErrorMessage(new SaaSApiError(429, 'media_quota_exceeded', 'x'), 'zh')).toContain('付费套餐');
@@ -103,13 +103,13 @@ it('says the free default model is full for the whole service today, and offers 
   for (const text of [zh, runErrorText('free_capacity_exceeded', 'zh')]) {
     expect(text).toContain('默认模型');
     expect(text).toContain('UTC 次日');
-    expect(text).toContain('Pro / Max 付费套餐');
+    expect(text).toContain('Pro / Max / Ultra 付费套餐');
     expect(text).toContain('套餐与点数');
   }
   for (const text of [en, runErrorText('free_capacity_exceeded', 'en')]) {
     expect(text).toContain('whole service');
     expect(text).toContain('next UTC day');
-    expect(text).toContain('Pro or Max plan');
+    expect(text).toContain('Pro, Max or Ultra plan');
     expect(text).toContain('Plans and credits');
     // There is no free model left to switch to, so the copy must not send the reader to "the default model".
     expect(text).not.toContain('Switch the node');

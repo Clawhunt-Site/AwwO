@@ -1,7 +1,7 @@
 // Invites a workspace without a paid plan to Claude Opus 5.5 where the model is chosen in the canvas (owner requests
 // 2026-10-13: 在画布里面鼓励用户支付付费享受opus5.5的模型能力, then Opus 5.5 改成只给付费用户). Opus 5.5 runs only on
-// Pro and Max, or in the operator's own workspaces: the server marks it requiresUpgrade for every other workspace and
-// refuses a call on it (plan_only_models.go). So the card says it is Pro and Max's and opens the plans; a paid or an
+// Pro, Max and Ultra, or in the operator's own workspaces: the server marks it requiresUpgrade for every other workspace and
+// refuses a call on it (plan_only_models.go). So the card says it is Pro, Max and Ultra's and opens the plans; a paid or an
 // operator workspace never sees it. Only where the server still offers it on the free allowance (AWWO_PLAN_ONLY_MODELS
 // set to "none") does the card count today's free calls and switch to it.
 import { useEffect, useState } from 'react';
@@ -52,11 +52,11 @@ export function OpusUpsell({ tenantId, usage, route, chosen, available, onChoose
   const allowance = route ? usage.routes?.[route] : undefined;
   const left = allowance && allowance.limit > 0 ? Math.max(0, allowance.limit - allowance.used) : null;
   const included = available && !ended && allowance?.limit !== 0;
-  const today = ended ? t('免费试用已结束：工作区所有者订阅 Pro / Max 后，就能按点数使用 Opus 5.5。', 'The free trial has ended: once the workspace owner subscribes to Pro or Max, Opus 5.5 runs on credits.')
-    : !included ? t('Pro / Max 专享：升级后按点数使用，不受次数限制。', 'Pro and Max only: upgrade and run it on credits, with no daily limit.')
-      : left === 0 ? t('今天的免费次数已用完；升级 Pro / Max 用点数接着用。', 'Today’s free calls are used up; Pro and Max carry on with credits.')
-        : left !== null ? t(`今天还能免费用 ${left} 次；升级 Pro / Max 用点数畅用，不受次数限制。`, `${left} free ${left === 1 ? 'call' : 'calls'} left today; Pro and Max run it on credits, past that limit.`)
-          : t('免费版每天有少量次数；升级 Pro / Max 用点数畅用。', 'The free plan has a few calls a day; Pro and Max run it on credits.');
+  const today = ended ? t('免费试用已结束：工作区所有者订阅 Pro / Max / Ultra 后，就能按点数使用 Opus 5.5。', 'The free trial has ended: once the workspace owner subscribes to Pro, Max or Ultra, Opus 5.5 runs on credits.')
+    : !included ? t('Pro / Max / Ultra 专享：升级后按点数使用，不受次数限制。', 'Pro, Max and Ultra only: upgrade and run it on credits, with no daily limit.')
+      : left === 0 ? t('今天的免费次数已用完；升级 Pro / Max / Ultra 用点数接着用。', 'Today’s free calls are used up; Pro, Max and Ultra carry on with credits.')
+        : left !== null ? t(`今天还能免费用 ${left} 次；升级 Pro / Max / Ultra 用点数畅用，不受次数限制。`, `${left} free ${left === 1 ? 'call' : 'calls'} left today; Pro, Max and Ultra run it on credits, past that limit.`)
+          : t('免费版每天有少量次数；升级 Pro / Max / Ultra 用点数畅用。', 'The free plan has a few calls a day; Pro, Max and Ultra run it on credits.');
   return <div className="saas-opus-upsell" role="note">
     <p className="saas-opus-upsell-title"><Sparkles size={14} aria-hidden="true" />{t('Claude Opus 5.5 · 这里最强的模型', 'Claude Opus 5.5 · the strongest model here')}</p>
     <p>{t('复杂网页、游戏和 3D 交给它，做得更完整。', 'Complex pages, games and 3D come out more complete.')}{' '}
@@ -64,7 +64,7 @@ export function OpusUpsell({ tenantId, usage, route, chosen, available, onChoose
     <div className="saas-opus-upsell-actions">
       {included && !chosen && left !== 0 && onChoose && <button type="button" className="saas-opus-upsell-choose" onClick={onChoose}>{t('换成 Opus 5.5', 'Switch to Opus 5.5')}</button>}
       <a className="saas-opus-upsell-upgrade" href={accountURL('plans')} target="_blank" rel="noopener noreferrer"
-        onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{t('升级 Pro / Max', 'Upgrade to Pro or Max')}</a>
+        onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{t('升级套餐', 'Upgrade plan')}</a>
     </div>
   </div>;
 }

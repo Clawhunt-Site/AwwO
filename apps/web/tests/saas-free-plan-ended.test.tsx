@@ -16,13 +16,13 @@ import { clearSaaSCanvas, configureSaaSCanvas } from '../src/saas/canvasBridge';
 import { useManagedExecution } from '../src/saas/useManagedExecution';
 
 const COPY = {
-  zh: '免费试用已结束：工作区所有者订阅 Pro 或 Max 后，就能继续规划和运行。画布和成果都还在。',
-  en: 'The free trial has ended: once the workspace owner subscribes to Pro or Max, planning and runs work again. Your canvases and results are all still here.',
+  zh: '免费试用已结束：工作区所有者订阅 Pro、Max 或 Ultra 后，就能继续规划和运行。画布和成果都还在。',
+  en: 'The free trial has ended: once the workspace owner subscribes to Pro, Max or Ultra, planning and runs work again. Your canvases and results are all still here.',
 };
 // The voucher's way to the plans, true for whoever reads it: the workspace runs again once its owner subscribes.
-const OFFER = { zh: '查看 Pro / Max 套餐', en: 'See the Pro and Max plans' };
+const OFFER = { zh: '查看 Pro / Max / Ultra 套餐', en: 'See the Pro, Max and Ultra plans' };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
-const refusal = () => new SaaSApiError(402, 'free_plan_ended', 'The free trial has ended: subscribe to Pro or Max to keep running AwwO.');
+const refusal = () => new SaaSApiError(402, 'free_plan_ended', 'The free trial has ended: subscribe to Pro, Max or Ultra to keep running AwwO.');
 
 beforeEach(() => { localStorage.clear(); localStorage.setItem('superclaw_locale', 'zh'); });
 afterEach(() => { cleanup(); clearSaaSCanvas(); vi.unstubAllGlobals(); vi.restoreAllMocks(); document.documentElement.lang = ''; });
@@ -65,7 +65,7 @@ describe('the upgrade offered for it', () => {
     vi.stubGlobal('fetch', fetcher);
     render(<SaaSPreferencesProvider><PlanUpsell tenantId="tenant-a" reason="ended" /></SaaSPreferencesProvider>);
     const note = screen.getByRole('note');
-    expect(note).toHaveTextContent(locale === 'zh' ? 'Pro / Max 按月订阅' : 'Pro and Max are monthly plans');
+    expect(note).toHaveTextContent(locale === 'zh' ? 'Pro / Max / Ultra 按月订阅' : 'Pro, Max and Ultra are monthly plans');
     // The default model is no way on once the trial is over.
     expect(note).not.toHaveTextContent(locale === 'zh' ? '默认模型照常免费' : 'the default model stays free');
     const link = within(note).getByRole('link', { name: OFFER[locale] });
@@ -152,7 +152,7 @@ describe('a model the plan does not include, chosen for direct tasks', () => {
     const note = await waitFor(() => { const found = document.querySelector<HTMLElement>('.awwo-execution-plan-needed'); expect(found).not.toBeNull(); return found!; });
     await waitFor(() => expect(calls.some(url => url.endsWith('/route-usage'))).toBe(true));
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
-    expect(note).toHaveTextContent('这个模型不在当前工作区的免费额度里，需要 Pro / Max，直接执行会被拒绝。可以先换成默认模型免费执行。');
-    expect(within(note).getByRole('link', { name: '升级 Pro / Max，继续使用高级模型' })).toBeInTheDocument();
+    expect(note).toHaveTextContent('这个模型不在当前工作区的免费额度里，需要 Pro / Max / Ultra，直接执行会被拒绝。可以先换成默认模型免费执行。');
+    expect(within(note).getByRole('link', { name: '升级 Pro / Max / Ultra，继续使用高级模型' })).toBeInTheDocument();
   });
 });

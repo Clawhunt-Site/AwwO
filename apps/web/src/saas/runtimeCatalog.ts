@@ -7,7 +7,7 @@ export type SaaSRuntimeModel = {
   /** The model's route as admission classifies it: the free default model, LLM Gate (Claude, GPT and others) or Bedrock. */
   route?: string;
   /** Set by the server when this workspace's free allowance does not include the model (a premium route closed to it
-   * with a limit of 0): a run on it is refused until the owner upgrades to Pro or Max. */
+   * with a limit of 0): a run on it is refused until the owner upgrades to Pro, Max or Ultra. */
   requiresUpgrade?: boolean;
   /** Set by the server for a model only a user may choose (the DeepSeek API's): the page never picks it by itself
    * (canvas/userChosenModels.ts). */
@@ -15,7 +15,7 @@ export type SaaSRuntimeModel = {
 };
 
 /** What a picker shows for a model: its own label, tagged when the workspace's allowance does not include it, so a
- * free user sees before choosing which models need Pro or Max. Only the shown text changes, never the selector. */
+ * free user sees before choosing which models need Pro, Max or Ultra. Only the shown text changes, never the selector. */
 export function withPlanTag(label: string, model: { requiresUpgrade?: boolean }): string {
   return model.requiresUpgrade === true ? `${label} · Pro` : label;
 }

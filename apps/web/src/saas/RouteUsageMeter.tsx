@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import { CalendarCheck, Gauge } from 'lucide-react';
 import { Popover } from '../ui/Popover';
 import { saasErrorMessage } from './api';
-import { formatCredits, planName } from './billing';
+import { formatCredits, isPlanId, nextPlan, planName } from './billing';
 import { momentText } from './freePlan';
 import { accountURL } from './PersonalAccount';
 import { useSaaSPreferences } from './preferences';
@@ -131,14 +131,14 @@ export function RouteUsageMeter({ tenantId, variant = 'header', onUsage, owner =
       </dl>
       {state.kind === 'daily-out' && <p className="saas-route-usage-out">{!lastDay
         ? t('今天的总次数已用完，所有模型都要等到 UTC 0 点后才能再运行。', 'Today’s calls are used up; no model can run again until 00:00 UTC.')
-        : owner ? t('今天的总次数已用完，免费试用今天结束，不会再重置：订阅 Pro 或 Max 后就能继续运行。', 'Today’s calls are used up, and the free trial ends today without another reset: subscribe to Pro or Max to keep running.')
-          : t('今天的总次数已用完，免费试用今天结束，不会再重置：工作区所有者订阅 Pro 或 Max 后才能继续运行。', 'Today’s calls are used up, and the free trial ends today without another reset: it runs again once the workspace owner subscribes to Pro or Max.')}</p>}
-      {premiumClosed && <p className="saas-route-usage-out">{t('标着「不含」的高级模型不在这个工作区的免费额度里，需要 Pro / Max 套餐，按点数使用。', 'Premium models marked Not included are outside this workspace’s free allowance; they need the Pro or Max plan and run on credits.')}</p>}
-      {interested && <p role="status" className="saas-route-usage-recorded">{t('已记录你的需求。现在就能升级 Pro / Max，用点数继续使用高级模型。', 'Noted. You can upgrade to Pro or Max now and keep using premium models on credits.')}</p>}
+        : owner ? t('今天的总次数已用完，免费试用今天结束，不会再重置：订阅 Pro、Max 或 Ultra 后就能继续运行。', 'Today’s calls are used up, and the free trial ends today without another reset: subscribe to Pro, Max or Ultra to keep running.')
+          : t('今天的总次数已用完，免费试用今天结束，不会再重置：工作区所有者订阅 Pro、Max 或 Ultra 后才能继续运行。', 'Today’s calls are used up, and the free trial ends today without another reset: it runs again once the workspace owner subscribes to Pro, Max or Ultra.')}</p>}
+      {premiumClosed && <p className="saas-route-usage-out">{t('标着「不含」的高级模型不在这个工作区的免费额度里，需要 Pro / Max / Ultra 套餐，按点数使用。', 'Premium models marked Not included are outside this workspace’s free allowance; they need the Pro, Max or Ultra plan and run on credits.')}</p>}
+      {interested && <p role="status" className="saas-route-usage-recorded">{t('已记录你的需求。现在就能升级 Pro / Max / Ultra，用点数继续使用高级模型。', 'Noted. You can upgrade to Pro, Max or Ultra now and keep using premium models on credits.')}</p>}
       {/* Paid plans are on sale, so upgrading is the way to more calls; a click still records the interest the
           admin panel lists, without waiting for it before the plans open. */}
       <a className={owner ? 'saas-primary' : 'saas-route-usage-own'} href={accountURL('plans')} target="_blank" rel="noopener noreferrer"
-        onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{owner ? t('升级 Pro / Max', 'Upgrade to Pro or Max') : t('为我自己的账号订阅', 'Subscribe for my own account')}</a>
+        onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{owner ? t('升级套餐', 'Upgrade plan') : t('为我自己的账号订阅', 'Subscribe for my own account')}</a>
       <button type="button" className="saas-route-usage-ask" disabled={busy} onClick={ask}>{busy ? t('正在记录…', 'Recording…') : interested ? t('我还需要更多次数', 'I still need more calls') : t('想要更多次数', 'I want more calls')}</button>
       {Boolean(error) && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
       </>}
@@ -183,12 +183,12 @@ function checkinOffer(checkin: CheckinState, locale: 'zh' | 'en'): string {
 function FreePlanNote({ view, owner }: { view: FreePlanView; owner: boolean }) {
   const { t, locale } = useSaaSPreferences();
   if (view.ended) return <p className="saas-route-usage-out">{owner
-    ? t('免费试用已结束：订阅 Pro 或 Max 后就能继续规划和运行，画布和成果都还在。', 'The free trial has ended: subscribe to Pro or Max to plan and run again. Your canvases and results are all still here.')
-    : t('免费试用已结束：工作区所有者订阅 Pro 或 Max 后，就能继续规划和运行，画布和成果都还在。', 'The free trial has ended: once the workspace owner subscribes to Pro or Max, planning and runs work again. The canvases and results are all still here.')}</p>;
+    ? t('免费试用已结束：订阅 Pro、Max 或 Ultra 后就能继续规划和运行，画布和成果都还在。', 'The free trial has ended: subscribe to Pro, Max or Ultra to plan and run again. Your canvases and results are all still here.')
+    : t('免费试用已结束：工作区所有者订阅 Pro、Max 或 Ultra 后，就能继续规划和运行，画布和成果都还在。', 'The free trial has ended: once the workspace owner subscribes to Pro, Max or Ultra, planning and runs work again. The canvases and results are all still here.')}</p>;
   const end = momentText(view.until, locale, { end: true });
   return end ? <p className="saas-route-usage-promo">{owner
-    ? t(`免费试用到 ${end} 结束，之后要订阅 Pro 或 Max 才能继续规划和运行。`, `The free trial ends on ${end}; after that, planning and running need Pro or Max.`)
-    : t(`免费试用到 ${end} 结束，之后这个工作区要所有者订阅 Pro 或 Max 才能继续规划和运行。`, `The free trial ends on ${end}; after that, this workspace plans and runs once its owner subscribes to Pro or Max.`)}</p> : null;
+    ? t(`免费试用到 ${end} 结束，之后要订阅 Pro、Max 或 Ultra 才能继续规划和运行。`, `The free trial ends on ${end}; after that, planning and running need Pro, Max or Ultra.`)
+    : t(`免费试用到 ${end} 结束，之后这个工作区要所有者订阅 Pro、Max 或 Ultra 才能继续规划和运行。`, `The free trial ends on ${end}; after that, this workspace plans and runs once its owner subscribes to Pro, Max or Ultra.`)}</p> : null;
 }
 
 /** The free trial's end when it comes before the daily calls next reset (the trial's last UTC day: 08:00 to 24:00 in
@@ -208,7 +208,7 @@ export function trialEndsBeforeReset(usage: RouteUsage, now = Date.now()): strin
 function EndedWay({ owner, tenantId }: { owner: boolean; tenantId: string }) {
   const { t } = useSaaSPreferences();
   return <a className={owner ? 'saas-primary' : 'saas-route-usage-own'} href={accountURL('plans')} target="_blank" rel="noopener noreferrer"
-    onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{owner ? t('订阅 Pro / Max', 'Subscribe to Pro or Max') : t('为我自己的账号订阅', 'Subscribe for my own account')}</a>;
+    onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{owner ? t('订阅套餐', 'Choose a plan') : t('为我自己的账号订阅', 'Subscribe for my own account')}</a>;
 }
 
 /** A promotion's limited-time allowances and when they end, in the reader's own time. Where it lasts the whole free trial
@@ -250,6 +250,8 @@ function PaidMeter({ usage, plan, open, setOpen, reload, variant }: { usage: Rou
   const { t, locale } = useSaaSPreferences();
   const anchor = useRef<HTMLButtonElement>(null);
   const name = planName(plan.id);
+  // The plan one step up, offered once this one's credits are gone; none above the largest.
+  const bigger = isPlanId(plan.id) ? nextPlan(plan.id) : null;
   const credits = plan.credits;
   const dailyOut = usage.daily.used >= usage.daily.limit;
   const empty = credits.remaining <= 0;
@@ -275,8 +277,8 @@ function PaidMeter({ usage, plan, open, setOpen, reload, variant }: { usage: Rou
         {(credits.carried ?? 0) > 0 && <div><dt>{t('上期超支（本期扣除）', 'Carried from last period')}</dt><dd>{formatCredits(credits.carried ?? 0, locale)}</dd></div>}
       </dl>
       {empty && <p className="saas-route-usage-out">{!plan.owner ? t('本期点数已用完：可以把节点换成默认模型继续；需要更多点数请联系工作区所有者。', 'This period’s credits are used up: switch nodes to the default model to keep going; ask the workspace’s owner for more.')
-        : plan.id === 'max' ? t('本期点数已用完：可以把节点换成默认模型继续，点数在续费后重置。', 'This period’s credits are used up: switch nodes to the default model to keep going. Credits reset at renewal.')
-          : t('本期点数已用完：可以把节点换成默认模型继续，或在套餐页升级到 Max。', 'This period’s credits are used up: switch nodes to the default model to keep going, or upgrade to Max on the plans page.')}</p>}
+        : !bigger ? t('本期点数已用完：可以把节点换成默认模型继续，点数在续费后重置。', 'This period’s credits are used up: switch nodes to the default model to keep going. Credits reset at renewal.')
+          : t(`本期点数已用完：可以把节点换成默认模型继续，或在套餐页升级到 ${planName(bigger)}。`, `This period’s credits are used up: switch nodes to the default model to keep going, or upgrade to ${planName(bigger)} on the plans page.`)}</p>}
       <a className="saas-route-usage-plans" href={accountURL('plans')}>{t('套餐与点数', 'Plans and credits')}</a>
     </Popover>
   </>;

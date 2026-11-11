@@ -59,7 +59,7 @@ function taskErrorText(t: T, locale: UiLocale, code: string): string {
     computer_model_failed: ['模型调用失败，任务没有完成。', 'A model call failed, so the task did not finish.'],
     computer_admission_denied: ['模型额度或权限不足，任务停在了这里。', 'The model allowance or permission ran out, so the task stopped here.'],
     computer_output_limit: ['任务的输出超过了上限。', 'The task produced more output than allowed.'],
-    quota_exceeded: ['今天的调用次数用完了，任务没有开始。升级 Pro / Max 每天的次数多得多，马上就能继续；不升级的话，等 UTC 0 点（北京时间早上 8 点）次数重置；免费试用结束后不再重置。', 'Today’s calls are used up, so the task did not start. Pro and Max have many more calls a day, so upgrading lets you continue now; otherwise the calls reset at 00:00 UTC (no reset once the free trial has ended).'],
+    quota_exceeded: ['今天的调用次数用完了，任务没有开始。升级 Pro / Max / Ultra 每天的次数多得多，马上就能继续；不升级的话，等 UTC 0 点（北京时间早上 8 点）次数重置；免费试用结束后不再重置。', 'Today’s calls are used up, so the task did not start. Pro, Max and Ultra have many more calls a day, so upgrading lets you continue now; otherwise the calls reset at 00:00 UTC (no reset once the free trial has ended).'],
   };
   const text = known[code];
   // The run errors every run shares (the paid plan's and the daily allowances') read as they do on a node.
@@ -419,8 +419,8 @@ function PlanNeededNote({ tenantId }: { tenantId: string }) {
   const allowance = useFreeAllowance(tenantId, !local);
   const ended = freePlanStanding(allowance.usage) === 'ended';
   return <div className="awwo-execution-plan-needed" role="note">
-    <p>{ended ? t(...freePlanEndedMessages) : t('这个模型不在当前工作区的免费额度里，需要 Pro / Max，直接执行会被拒绝。可以先换成默认模型免费执行。',
-      'This model is outside this workspace’s free allowance and needs Pro or Max, so a direct task on it is refused. Choose the default model to run it free.')}</p>
+    <p>{ended ? t(...freePlanEndedMessages) : t('这个模型不在当前工作区的免费额度里，需要 Pro / Max / Ultra，直接执行会被拒绝。可以先换成默认模型免费执行。',
+      'This model is outside this workspace’s free allowance and needs Pro, Max or Ultra, so a direct task on it is refused. Choose the default model to run it free.')}</p>
     <PlanUpsell tenantId={tenantId} reason={ended ? 'ended' : 'premium'} />
   </div>;
 }
@@ -464,7 +464,7 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
   }, [open]);
   const models = execution.runtime?.models ?? [];
   // The strongest model, offered with the way to it (OpusUpsell.tsx): to a workspace without a paid plan that the server
-  // says cannot run it (Pro and Max only, plan_only_models.go), and to a route-limited free one while it still runs there.
+  // says cannot run it (Pro, Max and Ultra only, plan_only_models.go), and to a route-limited free one while it still runs there.
   // The local edition sells no plan, so it never offers one.
   const opus = models.find(model => model.id === OPUS_MODEL_ID);
   const local = useLocalEdition();
@@ -480,7 +480,7 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
   if (execution.readOnly || (!models.length && !execution.choice.unavailableLabel)) return null;
   const opusKey = opus ? executionModelKey(opus.runtime, opus.id) : '';
   const canChoose = !execution.busy && !execution.pendingSubmission;
-  const sparkTitle = invite ? t(' · 升级 Pro / Max 使用 Claude Opus 5.5', ' · Upgrade to Pro or Max for Claude Opus 5.5') : '';
+  const sparkTitle = invite ? t(' · 升级 Pro / Max / Ultra 使用 Claude Opus 5.5', ' · Upgrade to Pro, Max or Ultra for Claude Opus 5.5') : '';
   return <div className="awwo-execution-setup">
     <details ref={details} className={`awwo-execution-settings${needsPlan || execution.choice.unavailableLabel ? ' is-warning' : ''}`} open={open}
       onToggle={event => { const opened = event.currentTarget.open; setOpen(opened); if (opened && invite) allowance.refresh(); }}>

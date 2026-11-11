@@ -627,7 +627,7 @@ export function AccountWorkspacePanel({
               : <span className="account-inline-note">{locale === 'zh' ? '资料由 ClawHunt 主站管理。' : 'Your profile is managed on ClawHunt.'}</span>
               : <button type="button" className="account-primary-button" disabled={profileBusy || !profileName.trim()} onClick={() => void saveProfile()}>{text.saveProfile}</button>}
           </div>
-          {externalProfile?.plansUrl ? <a className="account-profile-link" href={externalProfile.plansUrl}><Gauge size={15} aria-hidden="true" />{locale === 'zh' ? '套餐与点数：Pro / Max' : 'Plans and credits: Pro / Max'}</a> : null}
+          {externalProfile?.plansUrl ? <a className="account-profile-link" href={externalProfile.plansUrl}><Gauge size={15} aria-hidden="true" />{locale === 'zh' ? '套餐与点数：Pro / Max / Ultra' : 'Plans and credits: Pro / Max / Ultra'}</a> : null}
           {profileNotice ? <div className="account-inline-note" role="status">{profileNotice}</div> : null}
         </section>
       ) : null}

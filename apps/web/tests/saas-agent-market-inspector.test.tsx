@@ -81,7 +81,7 @@ describe('a node with a market Agent', () => {
       : url.endsWith('/route-usage') ? json({ limited: false, daily: { limit: 100, used: 0 }, interested: false }) : json({ error: { code: 'not_found', message: 'x' } }, 404)));
     open(node({ agentRef: { source: 'market', agentId: 'agent-1', version: 1 } }));
     const shown = await box();
-    await waitFor(() => expect(shown).toHaveTextContent('付费版本需要工作区所有者有 Pro / Max 套餐'));
+    await waitFor(() => expect(shown).toHaveTextContent('付费版本需要工作区所有者有 Pro / Max / Ultra 套餐'));
     expect(within(shown).queryByRole('button', { name: '更新' })).toBeNull();
     expect(within(shown).getByRole('link', { name: '查看套餐' })).toHaveAttribute('href', '/?account=plans');
     clearSaaSCanvas();

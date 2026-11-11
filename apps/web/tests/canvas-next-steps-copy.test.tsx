@@ -93,7 +93,7 @@ describe('the Next card on a copied case, on a hosted canvas', () => {
     fireEvent.click(next().getByRole('button', { name: /^Run the 5 node\(s\) left/ }));
     // Why, in the refusal's own words, which say what lifts it.
     await waitFor(() => expect(next().getByText('“concept” did not run: This workspace has used today’s image and video generations. '
-      + 'Try again after the next UTC day; for more, see the Pro and Max plans (account menu → Plans and credits).')).toBeVisible());
+      + 'Try again after the next UTC day; for more, see the Pro, Max and Ultra plans (account menu → Plans and credits).')).toBeVisible());
     expect(next().getByRole('link', { name: en('assistant.nextUpgrade') })).toBeVisible();
     // Running it again today would be refused the same way, while what it feeds spent its calls: a message about the
     // failure is answered, and nothing runs.
@@ -104,7 +104,7 @@ describe('the Next card on a copied case, on a hosted canvas', () => {
     fireEvent.click(send());
     const log = within(sidebar().getByRole('log', { name: en('assistant.conversation') }));
     await waitFor(() => expect(log.getByText('it failed, fix it')).toBeVisible());
-    expect(log.getByText(/^“concept” did not run: This workspace has used today’s image and video generations\..* Suggested next: Upgrade to Pro or Max\./)).toBeVisible();
+    expect(log.getByText(/^“concept” did not run: This workspace has used today’s image and video generations\..* Suggested next: Upgrade plan\./)).toBeVisible();
     await new Promise(resolve => setTimeout(resolve, 300));
     expect(posted).toHaveLength(1);
   });

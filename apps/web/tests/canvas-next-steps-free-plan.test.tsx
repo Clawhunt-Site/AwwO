@@ -64,9 +64,9 @@ afterEach(() => { cleanup(); clearSaaSCanvas(); resetAllSessions(); configureCan
 
 describe('the Next card after the free trial’s end', () => {
   it.each([
-    ['en', () => 'free_plan_ended', '“brief” did not run: the free trial has ended. Once the workspace owner subscribes to Pro or Max, planning and runs work again; your canvases and results are all still here.'],
+    ['en', () => 'free_plan_ended', '“brief” did not run: the free trial has ended. Once the workspace owner subscribes to Pro, Max or Ultra, planning and runs work again; your canvases and results are all still here.'],
     // A node's own Send records the refusal's copy, here in the other language from the reader's.
-    ['zh', () => runErrorText('free_plan_ended', 'en')!, '「brief」没能运行：免费试用已结束。工作区所有者订阅 Pro 或 Max 后，就能继续规划和运行，画布和成果都还在。'],
+    ['zh', () => runErrorText('free_plan_ended', 'en')!, '「brief」没能运行：免费试用已结束。工作区所有者订阅 Pro、Max 或 Ultra 后，就能继续规划和运行，画布和成果都还在。'],
   ] as const)('says the trial is over and offers the plans, never the default model (%s)', async (locale, recorded, lead) => {
     seed();
     detail = recorded();

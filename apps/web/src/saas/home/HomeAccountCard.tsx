@@ -4,7 +4,7 @@
 // the frame, whose trial banner reads the same. The local edition sells nothing: no meter there, and no plan.
 import { Settings2 } from 'lucide-react';
 import type { Identity, Tenant } from '../api';
-import { formatCredits, planName } from '../billing';
+import { formatCredits, planName, type PlanId } from '../billing';
 import { isLocalEdition } from '../edition';
 import { daysLeft, momentText } from '../freePlan';
 import { accountURL } from '../PersonalAccount';
@@ -57,18 +57,20 @@ function AccountWho({ identity, reader }: { identity: Identity; reader: boolean 
   </div>;
 }
 
-const CALL_NAMES: Record<PlanCall, readonly [string, string]> = {
-  subscribe: ['订阅 Pro / Max', 'Subscribe to Pro or Max'], upgrade: ['升级 Pro / Max', 'Upgrade to Pro or Max'],
-  resume: ['恢复续订', 'Resume subscription'], 'upgrade-max': ['升级 Max', 'Upgrade to Max'], manage: ['管理订阅', 'Manage subscription'],
+/** `upgrade-next` names the plan one step up, so it has no fixed words here. */
+const CALL_NAMES: Record<Exclude<PlanCall, 'upgrade-next'>, readonly [string, string]> = {
+  subscribe: ['订阅套餐', 'Choose a plan'], upgrade: ['升级套餐', 'Upgrade plan'],
+  resume: ['恢复续订', 'Resume subscription'], manage: ['管理订阅', 'Manage subscription'],
   own: ['为我自己的账号订阅', 'Subscribe for my own account'],
 };
 
 /** The plans page, in this tab. Every call but managing a plan says that its person would pay, without waiting for the
  *  answer before the page opens (as the meter's upgrade link does). */
-function PlanAction({ call, primary, tenantId }: { call: PlanCall; primary: boolean; tenantId: string }) {
+function PlanAction({ call, next, primary, tenantId }: { call: PlanCall; next?: PlanId | null; primary: boolean; tenantId: string }) {
   const { t } = useSaaSPreferences();
+  const words = call === 'upgrade-next' ? (next ? t(`升级 ${planName(next)}`, `Upgrade to ${planName(next)}`) : t(...CALL_NAMES.manage)) : t(...CALL_NAMES[call]);
   return <a className={primary ? 'saas-primary saas-home-account-action' : 'saas-home-account-action is-quiet'} href={accountURL('plans')}
-    onClick={() => { if (call !== 'manage') void recordUpgradeInterest(tenantId).catch(() => {}); }}>{t(...CALL_NAMES[call])}</a>;
+    onClick={() => { if (call !== 'manage') void recordUpgradeInterest(tenantId).catch(() => {}); }}>{words}</a>;
 }
 
 function PaidPlan({ view, tenantId }: { view: PaidView; tenantId: string }) {
@@ -85,7 +87,7 @@ function PaidPlan({ view, tenantId }: { view: PaidView; tenantId: string }) {
       <span className={`saas-home-account-bar${view.low ? ' is-low' : ''}`} aria-hidden="true"><span style={{ width: `${Math.round(share * 100)}%` }} /></span>
     </>}
     {view.owner && date && <p>{view.cancel ? t(`${date} 到期，不会自动续费`, `Ends on ${date}; it will not renew`) : t(`${date} 自动续费`, `Renews on ${date}`)}</p>}
-    {view.call && <PlanAction call={view.call} primary={view.primary} tenantId={tenantId} />}
+    {view.call && <PlanAction call={view.call} next={view.next} primary={view.primary} tenantId={tenantId} />}
   </div>;
 }
 

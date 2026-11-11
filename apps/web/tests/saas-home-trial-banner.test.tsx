@@ -30,7 +30,7 @@ describe('the trial banner', () => {
     const view = render(banner(free({ freePlan: { until: TRIAL_END, ended: false } }), { onDismiss }));
     const shown = screen.getByRole('status');
     // Planning is refused after the end as running is (free_plan.go): the banner says both.
-    expect(shown).toHaveTextContent('AwwO 内测即将结束：免费试用到 11月12日 24:00 结束，之后要订阅 Pro 或 Max 才能继续规划和运行。');
+    expect(shown).toHaveTextContent('AwwO 内测即将结束：免费试用到 11月12日 24:00 结束，之后要订阅 Pro、Max 或 Ultra 才能继续规划和运行。');
     const plans = screen.getByRole('link', { name: '查看套餐' });
     expect(plans).toHaveAttribute('href', '/?tenant=team-b&account=plans');
     fireEvent.click(plans);
@@ -52,8 +52,8 @@ describe('the trial banner', () => {
 
   it('keeps an ended trial on screen with subscribing first, never as an alert', () => {
     const { container } = render(banner(free({ freePlan: { until: TRIAL_END, ended: true } })));
-    expect(container).toHaveTextContent('免费试用已结束：订阅 Pro 或 Max 后就能继续规划和运行，画布和成果都还在。');
-    expect(screen.getByRole('link', { name: '订阅 Pro / Max' })).toHaveClass('saas-primary');
+    expect(container).toHaveTextContent('免费试用已结束：订阅 Pro、Max 或 Ultra 后就能继续规划和运行，画布和成果都还在。');
+    expect(screen.getByRole('link', { name: '订阅套餐' })).toHaveClass('saas-primary');
     expect(screen.queryByRole('button', { name: '关闭这条提示' })).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('status')).toBeNull();
@@ -62,16 +62,16 @@ describe('the trial banner', () => {
   it('tells anyone but the owner that the owner subscribes, and offers them nothing to buy for the workspace', () => {
     // The server opens a workspace by its owner's plan: a member's own purchase would leave this one closed.
     render(banner(free({ freePlan: { until: TRIAL_END, ended: true } }), { owner: false }));
-    expect(screen.getByText('免费试用已结束：工作区所有者订阅 Pro 或 Max 后，就能继续规划和运行，画布和成果都还在。')).toBeVisible();
+    expect(screen.getByText('免费试用已结束：工作区所有者订阅 Pro、Max 或 Ultra 后，就能继续规划和运行，画布和成果都还在。')).toBeVisible();
     expect(screen.queryByRole('link')).toBeNull();
     cleanup();
     render(banner(free({ freePlan: { until: TRIAL_END, ended: false } }), { owner: false }));
-    expect(screen.getByRole('status')).toHaveTextContent('AwwO 内测即将结束：免费试用到 11月12日 24:00 结束，之后这个工作区要所有者订阅 Pro 或 Max 才能继续规划和运行。');
+    expect(screen.getByRole('status')).toHaveTextContent('AwwO 内测即将结束：免费试用到 11月12日 24:00 结束，之后这个工作区要所有者订阅 Pro、Max 或 Ultra 才能继续规划和运行。');
     expect(screen.queryByRole('link')).toBeNull();
     cleanup();
     localStorage.setItem('superclaw_locale', 'en');
     render(banner(free({ freePlan: { until: TRIAL_END, ended: true } }), { owner: false }));
-    expect(screen.getByText('The free trial has ended: once the workspace owner subscribes to Pro or Max, planning and runs work again. The canvases and results are all still here.')).toBeVisible();
+    expect(screen.getByText('The free trial has ended: once the workspace owner subscribes to Pro, Max or Ultra, planning and runs work again. The canvases and results are all still here.')).toBeVisible();
   });
 
   it('says a promotion’s end where the API has no trial end, and the owner’s plan set to end', () => {
@@ -100,12 +100,12 @@ describe('the trial banner', () => {
   it('reads in English', () => {
     localStorage.setItem('superclaw_locale', 'en');
     render(banner(free({ freePlan: { until: TRIAL_END, ended: false } })));
-    expect(screen.getByRole('status')).toHaveTextContent('The AwwO beta is ending: the free trial ends on Nov 12, 24:00; after that, planning and running need Pro or Max.');
+    expect(screen.getByRole('status')).toHaveTextContent('The AwwO beta is ending: the free trial ends on Nov 12, 24:00; after that, planning and running need Pro, Max or Ultra.');
     expect(screen.getByRole('link', { name: 'See plans' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Dismiss this notice' })).toBeVisible();
     cleanup();
     render(banner(free({ freePlan: { until: TRIAL_END, ended: true } })));
-    expect(screen.getByRole('link', { name: 'Subscribe to Pro or Max' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Choose a plan' })).toBeVisible();
     cleanup();
     render(banner(plan({ id: 'pro' })));
     expect(screen.getByText('Your Pro plan ends on December 2 and will not renew.')).toBeVisible();

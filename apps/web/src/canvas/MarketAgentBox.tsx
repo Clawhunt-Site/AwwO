@@ -48,7 +48,7 @@ export function MarketAgentBox({ agentRef, disabled, catalogue, onApply, onPick,
     {newer && <div className="awwo-market-box-update" role="status">
       <span>{text(`有新版本 v${newer.version} · ${price(newer.price)}`, `New version v${newer.version} · ${price(newer.price)}`)}</span>
       {update?.kind === 'blocked' ? <span>{text('（锁定的模型你的工作区用不了）', '(its locked model is not available to your workspace)')}</span>
-        : paidUpdate && plan === false ? <span>{text('（付费版本需要工作区所有者有 Pro / Max 套餐）', '(a paid version needs the workspace owner’s Pro or Max plan)')}{' '}
+        : paidUpdate && plan === false ? <span>{text('（付费版本需要工作区所有者有 Pro / Max / Ultra 套餐）', '(a paid version needs the workspace owner’s Pro, Max or Ultra plan)')}{' '}
           <a href={accountURL('plans')} target="_blank" rel="noopener noreferrer">{text('查看套餐', 'See the plans')}</a></span>
         : <button type="button" className="canvas-inspector-link" disabled={disabled || !update} onClick={() => { if (update) onApply(marketChoice(newer, update)); }}>{text('更新', 'Update')}</button>}
     </div>}

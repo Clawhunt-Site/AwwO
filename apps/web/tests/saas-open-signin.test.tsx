@@ -45,7 +45,7 @@ it('offers 邀请好友 nowhere: not in the menu, the account panel or Account s
   expect(screen.queryByRole('link', { name: /邀请好友/ })).toBeNull();
   // The account panel keeps its plans link, and has no invite codes to show.
   fireEvent.click(screen.getByRole('button', { name: '账号与工作区' }));
-  expect(await screen.findByRole('link', { name: '套餐与点数：Pro / Max' })).toHaveAttribute('href', '/?account=plans');
+  expect(await screen.findByRole('link', { name: '套餐与点数：Pro / Max / Ultra' })).toHaveAttribute('href', '/?account=plans');
   expect(screen.queryByRole('link', { name: /邀请好友/ })).toBeNull();
   expect(document.body).not.toHaveTextContent('邀请码');
   cleanup();

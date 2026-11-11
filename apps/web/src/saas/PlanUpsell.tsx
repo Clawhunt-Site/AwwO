@@ -27,20 +27,20 @@ export function PlanUpsell({ tenantId, reason = 'premium' }: { tenantId: string;
   const local = useLocalEdition();
   if (local) return null;
   const copy = reason === 'ended'
-    ? [t('Pro / Max 按月订阅：点数用于 Claude、GPT 等高级模型和图片视频生成，默认模型每天另有不扣点的次数。工作区所有者订阅后，回到这里重新运行即可。',
-      'Pro and Max are monthly plans: their credits run Claude, GPT and the other premium models and make images and video, and the default model has its own calls a day, free of credits. After the workspace owner subscribes, come back and run again.'),
-    t('查看 Pro / Max 套餐', 'See the Pro and Max plans')]
+    ? [t('Pro / Max / Ultra 按月订阅：点数用于 Claude、GPT 等高级模型和图片视频生成，默认模型每天另有不扣点的次数。工作区所有者订阅后，回到这里重新运行即可。',
+      'Pro, Max and Ultra are monthly plans: their credits run Claude, GPT and the other premium models and make images and video, and the default model has its own calls a day, free of credits. After the workspace owner subscribes, come back and run again.'),
+    t('查看 Pro / Max / Ultra 套餐', 'See the Pro, Max and Ultra plans')]
     : reason === 'daily'
-      ? [t('Pro / Max 每天的调用次数多得多，能同时运行更多任务，Claude、GPT 等高级模型按点数使用，不占全站的免费名额。升级后回到这里重新运行即可。',
-        'Pro and Max have many more calls a day and more runs at once, and run premium models such as Claude and GPT on credits, outside the service-wide free calls. After upgrading, come back and run again.'),
-      t('升级 Pro / Max，今天就能继续', 'Upgrade to Pro or Max to continue today')]
+      ? [t('Pro / Max / Ultra 每天的调用次数多得多，能同时运行更多任务，Claude、GPT 等高级模型按点数使用，不占全站的免费名额。升级后回到这里重新运行即可。',
+        'Pro, Max and Ultra have many more calls a day and more runs at once, and run premium models such as Claude and GPT on credits, outside the service-wide free calls. After upgrading, come back and run again.'),
+      t('升级 Pro / Max / Ultra，今天就能继续', 'Upgrade to Pro, Max or Ultra to continue today')]
       : [t('Claude、GPT、Bedrock 按点数计费，默认模型照常免费。升级后回到这里重新发送即可。',
         'Claude, GPT and Bedrock run on credits; the default model stays free. After upgrading, come back and send again.'),
-      t('升级 Pro / Max，继续使用高级模型', 'Upgrade to Pro or Max to keep using premium models')];
+      t('升级 Pro / Max / Ultra，继续使用高级模型', 'Upgrade to Pro, Max or Ultra to keep using premium models')];
   return <div className="saas-plan-upsell" role="note">
     <div className="saas-plan-upsell-ticket">
       <div className="saas-plan-upsell-body">
-        <p className="saas-plan-upsell-kicker">{t('Pro / Max 点数券', 'Pro and Max credit vouchers')}</p>
+        <p className="saas-plan-upsell-kicker">{t('Pro / Max / Ultra 点数券', 'Pro, Max and Ultra credit vouchers')}</p>
         <p>{copy[0]}</p>
       </div>
       <div className="saas-plan-upsell-stub">

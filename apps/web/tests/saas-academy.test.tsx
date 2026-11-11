@@ -211,7 +211,7 @@ function chordCopyPrice() {
   const table = /var mediaBaseCredits = map\[string\]int\{([\s\S]*?)\n\}/.exec(plans)![1];
   const constant = (name: string) => Number(new RegExp(`\\b${name}\\s*=\\s*(\\d+)`).exec(plans)![1]);
   const base = new Map([...table.matchAll(/"([a-z0-9.-]+)":\s*(\w+)/g)].map(([, model, value]) => [model, /^\d+$/.test(value) ? Number(value) : constant(value)]));
-  const plan = (id: string) => /\{Credits: (\d+),[^}]*MediaPerDay: (\d+)/.exec(new RegExp(`"${id}": (\\{[^}]*\\})`).exec(plans)![1])!.slice(1).map(Number);
+  const plan = (id: string) => /\{Credits: (\d+),[^}]*MediaPerDay: (\d+)/.exec(new RegExp(`"${id}":\\s*(\\{[^}]*\\})`).exec(plans)![1])!.slice(1).map(Number);
   const text = (value: unknown) => String(value ?? '').toLowerCase();
   const large = (value: unknown) => text(value).includes('4k') || text(value).split(/[x*: ]/).some(part => /^\d+$/.test(part) && Number(part) > 2048);
   let credits = 0, mediaNodes = 0;

@@ -72,7 +72,7 @@ it('says when the official Agents’ price starts, and stops saying it once it h
   server({ ...MARKET, officialPrice: 5, officialPriceFrom: later });
   section();
   const note = await screen.findByRole('note');
-  expect(note).toHaveTextContent(/起，AwwO 官方 Agent 每次调用 5 点（模型费另算），需要工作区所有者有 Pro \/ Max 套餐。$/);
+  expect(note).toHaveTextContent(/起，AwwO 官方 Agent 每次调用 5 点（模型费另算），需要工作区所有者有 Pro \/ Max \/ Ultra 套餐。$/);
   cleanup();
   server({ ...MARKET, officialPrice: 5, officialPriceFrom: new Date(Date.now() - 60_000).toISOString() });
   section();

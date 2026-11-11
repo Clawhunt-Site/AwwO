@@ -4,6 +4,11 @@
  * colours are mixed toward the theme's ink, which keeps them AA on the tinted paper. */
 .saas-vouchers {
   container-type: inline-size;
+}
+/* The row the vouchers sit in. Where the page is wide enough for the three plans side by side, each is an upright
+   ticket (its stub below, as on a phone), all of one height, so the plans read across: name, credits, what it gives,
+   price. In between, they stack as wide tickets. */
+.saas-voucher-row {
   display: grid;
   gap: 20px;
 }
@@ -25,6 +30,10 @@
 .saas-voucher-max {
   --voucher-tone: var(--saas-warning-dot);
   --voucher-tone-2: var(--saas-bio-lilac, var(--saas-accent));
+}
+.saas-voucher-ultra {
+  --voucher-tone: var(--saas-bio-lilac, var(--saas-accent));
+  --voucher-tone-2: var(--saas-signal, var(--saas-accent));
 }
 .saas-voucher:hover {
   transform: translateY(-2px);
@@ -229,9 +238,18 @@
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--saas-success) 60%, var(--saas-border));
 }
 
-/* Narrow: the stub goes under the body, along a straight perforation; no notches (their place would move with the
-   stub's text). */
-@container (max-width: 560px) {
+/* Side by side from 900px: as many columns as plans fit at 260px or more (three; two where a server lists two). */
+@container (min-width: 900px) {
+  .saas-voucher-row { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); row-gap: 0; }
+  /* Each ticket's body and stub sit on the row's own two lines (subgrid), so the perforations run level across the
+     plans however long each one's words are. */
+  .saas-voucher { display: grid; grid-row: span 2; grid-template-rows: subgrid; }
+  .saas-voucher-ticket { grid-row: span 2; grid-template-rows: subgrid; }
+  .saas-voucher-stub { align-content: start; }
+}
+/* An upright ticket, on a narrow page and in the side-by-side row: the stub goes under the body, along a straight
+   perforation; no notches (their place would move with the stub's text). */
+@container (max-width: 560px) or (min-width: 900px) {
   .saas-voucher-ticket {
     grid-template-columns: minmax(0, 1fr);
     -webkit-mask: none;

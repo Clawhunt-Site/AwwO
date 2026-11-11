@@ -386,7 +386,7 @@ it('offers no plan in the local edition', () => {
   expect(screen.queryByRole('note')).toBeNull();
   cleanup();
   render(<SaaSPreferencesProvider><PlanUpsell tenantId="team-a" /></SaaSPreferencesProvider>);
-  expect(screen.getByRole('note')).toHaveTextContent('Pro / Max');
+  expect(screen.getByRole('note')).toHaveTextContent('Pro / Max / Ultra');
 });
 
 it('never requires the tutorial in the local edition', () => {

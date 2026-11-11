@@ -103,8 +103,8 @@ describe('the canvas assistant’s tasks', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/computer-runtime') ? premium : url.endsWith('/computer-runs') ? { items: [] } : detail)));
     render(view());
     expect(await screen.findByTitle('画布助手用：Claude Opus 5 · Pro')).toBeInTheDocument();
-    expect(screen.getByText(/这个模型不在当前工作区的免费额度里，需要 Pro \/ Max/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '升级 Pro / Max，继续使用高级模型' })).toHaveAttribute('target', '_blank');
+    expect(screen.getByText(/这个模型不在当前工作区的免费额度里，需要 Pro \/ Max \/ Ultra/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '升级 Pro / Max / Ultra，继续使用高级模型' })).toHaveAttribute('target', '_blank');
     fireEvent.change(screen.getByLabelText('画布助手的模型'), { target: { value: executionModelKey('openai-agents', 'qwen3.8-27b-p6') } });
     expect(await screen.findByTitle('画布助手用：默认模型')).toBeInTheDocument();
     expect(screen.queryByText(/这个模型不在当前工作区的免费额度里/)).toBeNull();
@@ -188,7 +188,7 @@ describe('the canvas assistant’s tasks', () => {
     // The reader had picked a premium model for direct tasks.
     fireEvent.change(screen.getByLabelText('画布助手的模型'), { target: { value: executionModelKey('pi', 'claude-opus-5') } });
     expect(await screen.findByText(/高级模型（Claude、GPT、Bedrock）免费次数已经用完/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '升级 Pro / Max，继续使用高级模型' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
+    expect(screen.getByRole('link', { name: '升级 Pro / Max / Ultra，继续使用高级模型' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
     fireEvent.click(screen.getByRole('button', { name: '改用默认模型 qwen3.8-27b-p6（免费）' }));
     expect(await screen.findByText('直接执行已改用 qwen3.8-27b-p6，重新发送这条请求即可免费继续。')).toBeInTheDocument();
     expect(screen.getByTitle('画布助手用：qwen3.8-27b-p6')).toBeInTheDocument();
@@ -201,8 +201,8 @@ describe('the canvas assistant’s tasks', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/computer-runtime') ? runtime
       : url.endsWith('/computer-runs') ? { items: [{ ...summary, status: 'failed' }] } : refused)));
     render(view());
-    expect(await screen.findByText(/今天的调用次数用完了，任务没有开始。升级 Pro \/ Max/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '升级 Pro / Max，今天就能继续' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
+    expect(await screen.findByText(/今天的调用次数用完了，任务没有开始。升级 Pro \/ Max \/ Ultra/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '升级 Pro / Max / Ultra，今天就能继续' })).toHaveAttribute('href', expect.stringContaining('account=plans'));
     // The default model is counted too, so switching to it would not help.
     expect(screen.queryByRole('button', { name: /改用默认模型/ })).toBeNull();
   });

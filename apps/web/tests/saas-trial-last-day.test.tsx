@@ -41,7 +41,7 @@ describe('the trial’s last day', () => {
     meter(base());
     fireEvent.click(await screen.findByRole('button', { name: '今日次数已用完' }));
     expect(await screen.findByText('今天是免费试用的最后一天：今天的次数不会再重置，试用 11月12日 24:00 结束。默认模型不单独限次，只占总次数。')).toBeVisible();
-    expect(screen.getByText('今天的总次数已用完，免费试用今天结束，不会再重置：订阅 Pro 或 Max 后就能继续运行。')).toBeVisible();
+    expect(screen.getByText('今天的总次数已用完，免费试用今天结束，不会再重置：订阅 Pro、Max 或 Ultra 后就能继续运行。')).toBeVisible();
     expect(document.body).not.toHaveTextContent('UTC 0 点重置');
     expect(document.body).not.toHaveTextContent('等到 UTC 0 点后');
   });
@@ -49,13 +49,13 @@ describe('the trial’s last day', () => {
   it('tells anyone else that the owner subscribes, and reads in English', async () => {
     meter(base(), false);
     fireEvent.click(await screen.findByRole('button', { name: '今日次数已用完' }));
-    expect(await screen.findByText('今天的总次数已用完，免费试用今天结束，不会再重置：工作区所有者订阅 Pro 或 Max 后才能继续运行。')).toBeVisible();
+    expect(await screen.findByText('今天的总次数已用完，免费试用今天结束，不会再重置：工作区所有者订阅 Pro、Max 或 Ultra 后才能继续运行。')).toBeVisible();
     cleanup();
     localStorage.setItem('superclaw_locale', 'en');
     meter(base());
     fireEvent.click(await screen.findByRole('button', { name: 'No calls left today' }));
     expect(await screen.findByText(/^Today is the free trial’s last day: today’s calls will not reset, as the trial ends on Nov 12, 24:00\./)).toBeVisible();
-    expect(screen.getByText('Today’s calls are used up, and the free trial ends today without another reset: subscribe to Pro or Max to keep running.')).toBeVisible();
+    expect(screen.getByText('Today’s calls are used up, and the free trial ends today without another reset: subscribe to Pro, Max or Ultra to keep running.')).toBeVisible();
     expect(document.body).not.toHaveTextContent('Resets at 00:00 UTC');
   });
 
@@ -74,7 +74,7 @@ describe('a promotion during the trial', () => {
     expect(await screen.findByText('试用期间每天 100 次调用、5 次图片 / 视频生成，下面的数字已经算上。')).toBeVisible();
     expect(document.body).not.toHaveTextContent('限时放开');
     // The trial's end is said once, by its own note.
-    expect(screen.getByText('免费试用到 11月12日 24:00 结束，之后要订阅 Pro 或 Max 才能继续规划和运行。')).toBeVisible();
+    expect(screen.getByText('免费试用到 11月12日 24:00 结束，之后要订阅 Pro、Max 或 Ultra 才能继续规划和运行。')).toBeVisible();
   });
 
   it('ending before the trial keeps its own date', async () => {

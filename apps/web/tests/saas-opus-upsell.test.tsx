@@ -8,7 +8,7 @@ import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { executionModelKey, useManagedExecution } from '../src/saas/useManagedExecution';
 
 // In the canvas, where the canvas assistant's model is chosen, a workspace without a paid plan is invited to Claude Opus
-// 5.5 (owner requests 2026-10-13). It is Pro and Max only: the server marks it requiresUpgrade for such a workspace
+// 5.5 (owner requests 2026-10-13). It is Pro, Max and Ultra only: the server marks it requiresUpgrade for such a workspace
 // (plan_only_models.go), so the option is locked and the card leads to the plans. Where the server still offers it on
 // the free allowance (no requiresUpgrade), the card counts today's free calls and switches to it.
 const qwen = { id: 'qwen3.8-27b-p6', label: 'qwen3.8-27b-p6', runtime: 'pi', route: 'free' };
@@ -48,22 +48,22 @@ describe('the Opus 5.5 invitation in the canvas assistant’s model menu', () =>
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it.each([['a route-limited free workspace', free()], ['a free workspace without route limits', legacy]])(
-    'shows %s that Opus 5.5 is Pro and Max only, locks it, and opens the plans', async (_name, usage) => {
+    'shows %s that Opus 5.5 is Pro, Max and Ultra only, locks it, and opens the plans', async (_name, usage) => {
       const calls = server(usage);
       view();
       await waitFor(() => expect(invitation()).not.toBeNull());
       // The chip carries a spark, and its tooltip says why.
       expect(chip().querySelector('.awwo-execution-spark')).not.toBeNull();
-      expect(chip()).toHaveAttribute('title', expect.stringContaining('升级 Pro / Max 使用 Claude Opus 5.5'));
+      expect(chip()).toHaveAttribute('title', expect.stringContaining('升级 Pro / Max / Ultra 使用 Claude Opus 5.5'));
       const note = within(invitation()!);
-      expect(note.getByText('Pro / Max 专享：升级后按点数使用，不受次数限制。')).toBeInTheDocument();
+      expect(note.getByText('Pro / Max / Ultra 专享：升级后按点数使用，不受次数限制。')).toBeInTheDocument();
       expect(note.queryByRole('button', { name: '换成 Opus 5.5' })).toBeNull();
       // Tagged and locked in the picker; the default model stays chosen.
       expect(option(OPUS_MODEL_ID)).toBeDisabled();
       expect(option(OPUS_MODEL_ID)).toHaveTextContent('Claude Opus 5.5 · Pro');
       expect(option(qwen.id)).toBeEnabled();
       expect(screen.getByTestId('choice')).toHaveTextContent(executionModelKey('pi', qwen.id));
-      const upgrade = note.getByRole('link', { name: '升级 Pro / Max' });
+      const upgrade = note.getByRole('link', { name: '升级套餐' });
       expect(upgrade).toHaveAttribute('href', accountURL('plans'));
       expect(upgrade).toHaveAttribute('target', '_blank');
       upgrade.addEventListener('click', event => event.preventDefault());
@@ -89,7 +89,7 @@ describe('the Opus 5.5 invitation in the canvas assistant’s model menu', () =>
     view();
     await waitFor(() => expect(invitation()).not.toBeNull());
     const note = within(invitation()!);
-    expect(note.getByText('今天还能免费用 15 次；升级 Pro / Max 用点数畅用，不受次数限制。')).toBeInTheDocument();
+    expect(note.getByText('今天还能免费用 15 次；升级 Pro / Max / Ultra 用点数畅用，不受次数限制。')).toBeInTheDocument();
     expect(option(OPUS_MODEL_ID)).toBeEnabled();
     fireEvent.click(note.getByRole('button', { name: '换成 Opus 5.5' }));
     expect(screen.getByTestId('choice')).toHaveTextContent(executionModelKey('pi', OPUS_MODEL_ID));
@@ -102,9 +102,9 @@ describe('the Opus 5.5 invitation in the canvas assistant’s model menu', () =>
     server(free(20), [qwen, opusFree]);
     view();
     await waitFor(() => expect(invitation()).not.toBeNull());
-    expect(within(invitation()!).getByText('今天的免费次数已用完；升级 Pro / Max 用点数接着用。')).toBeInTheDocument();
+    expect(within(invitation()!).getByText('今天的免费次数已用完；升级 Pro / Max / Ultra 用点数接着用。')).toBeInTheDocument();
     expect(within(invitation()!).queryByRole('button', { name: '换成 Opus 5.5' })).toBeNull();
-    expect(within(invitation()!).getByRole('link', { name: '升级 Pro / Max' })).toBeInTheDocument();
+    expect(within(invitation()!).getByRole('link', { name: '升级套餐' })).toBeInTheDocument();
   });
 
   it('never offers free calls left once the workspace’s free trial is over, only the plans', async () => {
@@ -113,17 +113,17 @@ describe('the Opus 5.5 invitation in the canvas assistant’s model menu', () =>
     view();
     await waitFor(() => expect(invitation()).not.toBeNull());
     const note = within(invitation()!);
-    expect(note.getByText('免费试用已结束：工作区所有者订阅 Pro / Max 后，就能按点数使用 Opus 5.5。')).toBeInTheDocument();
+    expect(note.getByText('免费试用已结束：工作区所有者订阅 Pro / Max / Ultra 后，就能按点数使用 Opus 5.5。')).toBeInTheDocument();
     expect(invitation()).not.toHaveTextContent(/今天还能免费用|今天的免费次数/);
     expect(note.queryByRole('button', { name: '换成 Opus 5.5' })).toBeNull();
-    expect(note.getByRole('link', { name: '升级 Pro / Max' })).toHaveAttribute('href', accountURL('plans'));
+    expect(note.getByRole('link', { name: '升级套餐' })).toHaveAttribute('href', accountURL('plans'));
   });
 
   it('counts today’s free calls as before while the free trial runs', async () => {
     server({ ...free(), freePlan: { until: '2026-11-12T16:00:00Z', ended: false } }, [qwen, opusFree]);
     view();
     await waitFor(() => expect(invitation()).not.toBeNull());
-    expect(within(invitation()!).getByText('今天还能免费用 15 次；升级 Pro / Max 用点数畅用，不受次数限制。')).toBeInTheDocument();
+    expect(within(invitation()!).getByText('今天还能免费用 15 次；升级 Pro / Max / Ultra 用点数畅用，不受次数限制。')).toBeInTheDocument();
     expect(within(invitation()!).getByRole('button', { name: '换成 Opus 5.5' })).toBeInTheDocument();
   });
 
@@ -131,7 +131,7 @@ describe('the Opus 5.5 invitation in the canvas assistant’s model menu', () =>
     localStorage.setItem('superclaw_locale', 'en');
     server({ ...free(), freePlan: { until: '2026-11-12T16:00:00Z', ended: true } }, [qwen, opusFree]);
     view();
-    const note = await screen.findByText('The free trial has ended: once the workspace owner subscribes to Pro or Max, Opus 5.5 runs on credits.');
+    const note = await screen.findByText('The free trial has ended: once the workspace owner subscribes to Pro, Max or Ultra, Opus 5.5 runs on credits.');
     expect(note.closest('[role="note"]')).not.toHaveTextContent(/free calls? left|used up/);
     expect(screen.queryByRole('button', { name: 'Switch to Opus 5.5' })).toBeNull();
   });

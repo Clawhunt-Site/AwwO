@@ -105,24 +105,24 @@ export const runtimeUnavailableMessages: [string, string] = [
  *  the service's limit, not this workspace's, and the paid plans are outside it, so the copy says so and offers
  *  only what works: the next UTC day or a plan. */
 export const freeCapacityMessages: [string, string] = [
-  '今天全站免费使用默认模型的名额已满。免费调用在 UTC 次日恢复；想现在继续，可以升级到 Pro / Max 付费套餐（账号菜单 → 套餐与点数），套餐不受这个名额限制。',
-  'The free default model is at its daily capacity for the whole service today. Free calls come back after the next UTC day; to keep going now, upgrade to the Pro or Max plan (account menu → Plans and credits), which this limit does not apply to.',
+  '今天全站免费使用默认模型的名额已满。免费调用在 UTC 次日恢复；想现在继续，可以升级到 Pro / Max / Ultra 付费套餐（账号菜单 → 套餐与点数），套餐不受这个名额限制。',
+  'The free default model is at its daily capacity for the whole service today. Free calls come back after the next UTC day; to keep going now, upgrade to the Pro, Max or Ultra plan (account menu → Plans and credits), which this limit does not apply to.',
 ];
 
 /** The workspace's own run allowance is full (quota_exceeded): today's calls are used up, or as many runs as it may
  *  have at once are going. Admission refuses it only without a plan, and the paid plans have more of both, so the copy
  *  leads with them; waiting is the free way on. */
 export const quotaExceededMessages: [string, string] = [
-  '工作区运行额度已满：今天的调用次数用完了，或同时运行的任务到了上限。升级 Pro / Max 付费套餐，每天的次数多得多、能同时运行更多任务，马上就能继续（账号菜单 → 套餐与点数）；不升级的话，等进行中的任务结束，或等 UTC 0 点（北京时间早上 8 点）次数重置；免费试用结束后不再重置。',
-  'The workspace run quota has been reached: today’s calls are used up, or too many runs are going at once. Upgrade to the Pro or Max plan for many more calls a day and more runs at once, and continue right away (account menu → Plans and credits); otherwise wait for active runs to finish, or for the calls to reset at 00:00 UTC (no reset once the free trial has ended).',
+  '工作区运行额度已满：今天的调用次数用完了，或同时运行的任务到了上限。升级 Pro / Max / Ultra 付费套餐，每天的次数多得多、能同时运行更多任务，马上就能继续（账号菜单 → 套餐与点数）；不升级的话，等进行中的任务结束，或等 UTC 0 点（北京时间早上 8 点）次数重置；免费试用结束后不再重置。',
+  'The workspace run quota has been reached: today’s calls are used up, or too many runs are going at once. Upgrade to the Pro, Max or Ultra plan for many more calls a day and more runs at once, and continue right away (account menu → Plans and credits); otherwise wait for active runs to finish, or for the calls to reset at 00:00 UTC (no reset once the free trial has ended).',
 ];
 
 /** The free trial is over for this workspace (free_plan_ended, AWWO_FREE_PLAN_UNTIL): nothing that calls a model or makes
  *  media starts until its owner subscribes, and nothing was charged or counted for the refusal. Only a plan lifts it, so
  *  the copy names the plans and no other way on; what the workspace holds stays (owner 2026-11-07). */
 export const freePlanEndedMessages: [string, string] = [
-  '免费试用已结束：工作区所有者订阅 Pro 或 Max 后，就能继续规划和运行。画布和成果都还在。',
-  'The free trial has ended: once the workspace owner subscribes to Pro or Max, planning and runs work again. Your canvases and results are all still here.',
+  '免费试用已结束：工作区所有者订阅 Pro、Max 或 Ultra 后，就能继续规划和运行。画布和成果都还在。',
+  'The free trial has ended: once the workspace owner subscribes to Pro, Max or Ultra, planning and runs work again. Your canvases and results are all still here.',
 ];
 
 /** Translate known application failures; retain unknown service details rather than invent a cause. */
@@ -231,10 +231,10 @@ function serviceCodes(): Record<string, [string, string]> {
     media_storage_full: ['媒体存储空间不足，暂停新的图像与视频生成；请联系管理员。', 'Media storage is full, so new image and video generations are paused. Contact an administrator.'],
     media_storage_unavailable: ['暂时无法保存生成的媒体，请联系管理员。', 'Generated media cannot be stored right now. Contact an administrator.'],
     media_capacity_exceeded: ['今日平台的图像与视频生成额度已用完，请在 UTC 次日重试。', 'Today’s image and video generations for the service are used up. Try again after the next UTC day.'],
-    model3d_quota_exceeded: ['本工作区今天的免费 3D 模型生成次数已用完，请在 UTC 次日重试；Pro / Max 付费套餐可以用点数继续生成（账号菜单 → 套餐与点数）。', 'This workspace has used today’s free 3D model generations. Try again after the next UTC day; the Pro and Max plans keep generating on credits (account menu → Plans and credits).'],
-    model3d_capacity_exceeded: ['今天全站的免费 3D 模型生成名额已用完，请在 UTC 次日重试；Pro / Max 付费套餐不受这个名额限制。', 'Today’s free 3D model generations for the whole service are used up. Try again after the next UTC day; the Pro and Max plans are not limited by it.'],
-    model3d_motion_plan_required: ['给 3D 模型绑定骨骼、加动作需要 Pro / Max 付费套餐（账号菜单 → 套餐与点数）；不加骨骼的 3D 模型仍可免费生成。', 'Rigging and animating a 3D model needs the Pro or Max plan (account menu → Plans and credits); a 3D model without a skeleton can still be made for free.'],
-    media_quota_exceeded: ['本工作区今日的图像与视频生成次数已用完，请在 UTC 次日重试；需要更多次数可以看看 Pro / Max 付费套餐（账号菜单 → 套餐与点数）。', 'This workspace has used today’s image and video generations. Try again after the next UTC day; for more, see the Pro and Max plans (account menu → Plans and credits).'],
+    model3d_quota_exceeded: ['本工作区今天的免费 3D 模型生成次数已用完，请在 UTC 次日重试；Pro / Max / Ultra 付费套餐可以用点数继续生成（账号菜单 → 套餐与点数）。', 'This workspace has used today’s free 3D model generations. Try again after the next UTC day; the Pro, Max and Ultra plans keep generating on credits (account menu → Plans and credits).'],
+    model3d_capacity_exceeded: ['今天全站的免费 3D 模型生成名额已用完，请在 UTC 次日重试；Pro / Max / Ultra 付费套餐不受这个名额限制。', 'Today’s free 3D model generations for the whole service are used up. Try again after the next UTC day; the Pro, Max and Ultra plans are not limited by it.'],
+    model3d_motion_plan_required: ['给 3D 模型绑定骨骼、加动作需要 Pro / Max / Ultra 付费套餐（账号菜单 → 套餐与点数）；不加骨骼的 3D 模型仍可免费生成。', 'Rigging and animating a 3D model needs the Pro, Max or Ultra plan (account menu → Plans and credits); a 3D model without a skeleton can still be made for free.'],
+    media_quota_exceeded: ['本工作区今日的图像与视频生成次数已用完，请在 UTC 次日重试；需要更多次数可以看看 Pro / Max / Ultra 付费套餐（账号菜单 → 套餐与点数）。', 'This workspace has used today’s image and video generations. Try again after the next UTC day; for more, see the Pro, Max and Ultra plans (account menu → Plans and credits).'],
     plan_required: ['这个工作区是在付费套餐下额外创建的，套餐恢复后才能运行；其他工作区不受影响。', 'This workspace was created on a paid plan beyond the free limit and runs again once the plan is back; other workspaces are not affected.'],
     free_plan_ended: freePlanEndedMessages,
     model_unpriced: ['这个模型还不能按点数计费，请换用其他模型。', 'This model cannot be billed in credits yet. Choose another model.'],
@@ -330,7 +330,7 @@ function serviceCodes(): Record<string, [string, string]> {
     market_agent_model_unavailable: ['这个 Agent 的作者锁定了模型，而你的工作区用不了这个模型，所以没有运行。请换一个 Agent，或在节点上选「不用 Agent」。', 'This Agent’s author locked its model, and your workspace cannot use that model, so it did not run. Choose another Agent, or choose “No Agent” on the node.'],
     market_agent_version_changed: ['这个 Agent 现在上架的是另一个版本，价格可能不同。请在节点上重新选一次这个 Agent。', 'This Agent lists another version now, which may cost differently. Choose the Agent again on the node.'],
     market_agent_role_required: ['这是作者发布的付费 Agent：它的价格从工作区所有者的点数里付给作者，只有工作区的所有者和管理员能运行它。', 'This is a paid Agent from an author: its price is paid to the author out of the workspace owner’s credits, so only the workspace’s owner or an administrator can run it.'],
-    market_agent_plan_required: ['这是付费 Agent：工作区所有者有 Pro / Max 付费套餐才能使用，每次运行完成从套餐点数里扣它的价格（账号菜单 → 套餐与点数）。', 'This is a paid Agent: it needs the workspace owner to have the Pro or Max plan, and each completed call takes its price from the plan’s credits (account menu → Plans and credits).'],
+    market_agent_plan_required: ['这是付费 Agent：工作区所有者有 Pro / Max / Ultra 付费套餐才能使用，每次运行完成从套餐点数里扣它的价格（账号菜单 → 套餐与点数）。', 'This is a paid Agent: it needs the workspace owner to have the Pro, Max or Ultra plan, and each completed call takes its price from the plan’s credits (account menu → Plans and credits).'],
     market_name_reserved: ['名称和署名不能用 AwwO、ClawHunt、阿呜的名字，署名也不能自称官方。', 'A name or author name may not use the name of AwwO, ClawHunt or 阿呜, and an author name may not claim to be official.'],
     canvas_reload_required: ['AwwO 已经更新，这个页面的版本不能再保存这张画布。没同步的修改都保留在这台设备上：重新加载页面后可以恢复或导出。', 'AwwO was updated, and this page’s version can no longer save this canvas. Your unsynced changes are kept on this device: reload the page to recover or export them.'],
     market_draft_invalid: ['Agent 的内容不符合要求，请按标出的地方修改后再保存。', 'Some of the Agent’s fields do not meet the requirements. Fix the marked ones and save again.'],

@@ -17,10 +17,10 @@ import { authorText, categoryName, creditsText, dateText, numberText, percentTex
 function planNote(detail: Detail, t: MarketT): string {
   const credits = `${detail.price} ${detail.price === 1 ? 'credit' : 'credits'}`;
   return detail.official
-    ? t(`AwwO 官方 Agent 每次成功调用扣 ${detail.price} 点（Agent 费归 AwwO，模型费另算）：工作区所有者有 Pro / Max 付费套餐才能用。`,
-      `An AwwO official Agent takes ${credits} a successful call (the Agent fee is AwwO’s; the model is billed apart): it needs the workspace owner to have the Pro or Max plan.`)
-    : t(`这是付费 Agent，每次成功调用扣 ${detail.price} 点：工作区所有者有 Pro / Max 付费套餐才能用。`,
-      `This is a paid Agent that takes ${credits} a successful call: it needs the workspace owner to have the Pro or Max plan.`);
+    ? t(`AwwO 官方 Agent 每次成功调用扣 ${detail.price} 点（Agent 费归 AwwO，模型费另算）：工作区所有者有 Pro / Max / Ultra 付费套餐才能用。`,
+      `An AwwO official Agent takes ${credits} a successful call (the Agent fee is AwwO’s; the model is billed apart): it needs the workspace owner to have the Pro, Max or Ultra plan.`)
+    : t(`这是付费 Agent，每次成功调用扣 ${detail.price} 点：工作区所有者有 Pro / Max / Ultra 付费套餐才能用。`,
+      `This is a paid Agent that takes ${credits} a successful call: it needs the workspace owner to have the Pro, Max or Ultra plan.`);
 }
 
 export type MarketTarget =
@@ -71,7 +71,7 @@ export function MarketAgentDetailView({ detail, tenantId, target, decision, plan
       {planNeeded && <div className="awwo-market-plan" role="note">
         <p>{planNote(detail, t)}</p>
         {!localEdition && <a className="awwo-library-primary awwo-market-plan-link" href={accountURL('plans')} target="_blank" rel="noopener noreferrer"
-          onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{t('查看 Pro / Max 套餐', 'See the Pro and Max plans')}</a>}
+          onClick={() => { void recordUpgradeInterest(tenantId).catch(() => {}); }}>{t('查看 Pro / Max / Ultra 套餐', 'See the Pro, Max and Ultra plans')}</a>}
       </div>}
       {(canUse && !planNeeded) || (current && onDetach) ? <div className="awwo-library-editor-actions">
         {current && onDetach && <button type="button" disabled={busy} onClick={onDetach}>{t('不用 Agent', 'No Agent')}</button>}

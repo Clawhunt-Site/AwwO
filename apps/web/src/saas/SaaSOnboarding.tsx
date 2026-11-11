@@ -59,6 +59,28 @@ export function onboardingScene(identity: Identity, search: string, pathname: st
   return { scene: query.get('canvas') ? 'canvas' as const : 'workspace' as const, readOnly: tenant.role === 'reader' };
 }
 
+/** Whether the tutorial will stay closed on this page unless asked for: it has been finished or closed (as `seen` in
+ *  SaaSOnboarding has it), or this browser cannot remember it and the account is not asked to see it. Read when a page
+ *  loads, by the launch notice: an account the tutorial still opens for is not handed a second dialog after it. */
+export function tutorialSettled(identity: Identity): boolean {
+  const state = tutorialState(tutorialStorageKey(identity.user.id));
+  const required = tutorialRequired(identity);
+  return state === 'completed' || state === 'skipped' || (!required && (state === 'dismissed' || !storageWorks()));
+}
+
+/** The workspace whose home the address opens, for the launch notice (LaunchNotice.tsx): the one the address names, or
+ *  the first active one; null on any other page, on a canvas, on a link to a case or an Academy video, and in the local
+ *  edition, which sells nothing. */
+export function launchNoticeTenant(identity: Identity, search: string, pathname: string): string | null {
+  if (isLocalEdition(identity) || onboardingScene(identity, search, pathname)?.scene !== 'workspace') return null;
+  const query = new URLSearchParams(search);
+  // A link to a case or to the Academy opens that dialog once the home has drawn: the notice keeps off that page.
+  if (query.has('case') || query.has('academy')) return null;
+  const requested = query.get('tenant');
+  const tenant = identity.tenants.find(item => item.id === requested) || (!requested ? identity.tenants.find(item => item.status === 'active') || identity.tenants[0] : undefined);
+  return tenant?.status === 'active' ? tenant.id : null;
+}
+
 function guideAction(action: FirstRunAction) {
   if (action === 'engines') {
     const query = new URLSearchParams(location.search);

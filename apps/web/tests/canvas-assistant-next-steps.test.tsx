@@ -28,9 +28,9 @@ describe('the assistant offers what to do next without being asked', () => {
   it('opens a link action in a new tab and still records the choice', () => {
     const recorded = vi.fn();
     render(panel({ nextSteps: { lead: '「规划」用的是免费版不含的高级模型，被拒绝了。', actions: [
-      { id: 'upgrade', label: '升级 Pro / Max', primary: true, href: '/?account=plans', onSelect: recorded },
+      { id: 'upgrade', label: '升级套餐', primary: true, href: '/?account=plans', onSelect: recorded },
     ] } }));
-    const link = screen.getByRole('link', { name: '升级 Pro / Max' });
+    const link = screen.getByRole('link', { name: '升级套餐' });
     expect(link).toHaveAttribute('href', '/?account=plans'); expect(link).toHaveAttribute('target', '_blank');
     const stay = (event: Event) => event.preventDefault(); document.addEventListener('click', stay);
     try { fireEvent.click(link); } finally { document.removeEventListener('click', stay); }

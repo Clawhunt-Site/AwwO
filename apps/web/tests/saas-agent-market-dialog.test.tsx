@@ -119,8 +119,8 @@ describe('a paid Agent', () => {
     render(<AgentMarket tenantId="team" target={{ kind: 'node', title: 'Draft' }} catalogue={catalogue} onUse={use} onClose={vi.fn()} />);
     fireEvent.click(await card('Coder'));
     const coder = await page('Coder');
-    await waitFor(() => expect(within(coder).getByRole('note')).toHaveTextContent('工作区所有者有 Pro / Max 付费套餐才能用'));
-    expect(within(coder).getByRole('link', { name: '查看 Pro / Max 套餐' })).toHaveAttribute('href', '/?account=plans');
+    await waitFor(() => expect(within(coder).getByRole('note')).toHaveTextContent('工作区所有者有 Pro / Max / Ultra 付费套餐才能用'));
+    expect(within(coder).getByRole('link', { name: '查看 Pro / Max / Ultra 套餐' })).toHaveAttribute('href', '/?account=plans');
     expect(within(coder).queryByRole('button', { name: '用在这个节点' })).toBeNull();
     expect(calls.some(call => call.url === '/api/v1/tenants/team/route-usage')).toBe(true);
     expect(use).not.toHaveBeenCalled();

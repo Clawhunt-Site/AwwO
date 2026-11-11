@@ -83,10 +83,10 @@ describe('durable team run details', () => {
       : url.endsWith('/upgrade-interest') ? json({ recorded: true, clicks: 1 })
         : json({ items: [turn({ status: 'failed', output: '', model: 'claude-opus-5', error: code })] }));
     vi.stubGlobal('fetch', fetcher); render(view({ defaultOpen: true }));
-    const upgrade = await screen.findByRole('link', { name: 'Upgrade to Pro or Max to keep using premium models' });
+    const upgrade = await screen.findByRole('link', { name: 'Upgrade to Pro, Max or Ultra to keep using premium models' });
     // A team run fails with its member's code; the offer still appears once.
-    expect(screen.getAllByRole('link', { name: /Upgrade to Pro or Max/ })).toHaveLength(1);
-    expect(screen.getAllByText(/Upgrade to the Pro and Max plans|The Pro and Max plans are not limited/).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('link', { name: /Upgrade to Pro, Max or Ultra/ })).toHaveLength(1);
+    expect(screen.getAllByText(/Upgrade to the Pro, Max or Ultra plan|The Pro, Max and Ultra plans are not limited/).length).toBeGreaterThan(0);
     expect(upgrade.getAttribute('href')).toContain('account=plans');
     expect(upgrade).toHaveAttribute('target', '_blank');
     expect(upgrade).toHaveAttribute('rel', 'noopener noreferrer');
@@ -98,10 +98,10 @@ describe('durable team run details', () => {
   it('offers the plans for a full daily allowance too, worded for more calls, and names the refusal instead of its code', async () => {
     const fetcher = vi.fn(async (url: string, _init: RequestInit = {}) => json(url === path ? { ...record('failed'), error: 'quota_exceeded' } : { items: [] }));
     vi.stubGlobal('fetch', fetcher); render(view({ defaultOpen: true }));
-    const upgrade = await screen.findByRole('link', { name: 'Upgrade to Pro or Max to continue today' });
+    const upgrade = await screen.findByRole('link', { name: 'Upgrade to Pro, Max or Ultra to continue today' });
     expect(upgrade.getAttribute('href')).toContain('account=plans');
     expect(screen.getByText(/The workspace run quota has been reached: today’s calls are used up/)).toBeInTheDocument();
-    expect(screen.getByText(/Pro and Max have many more calls a day and more runs at once, and run premium models such as Claude and GPT on credits/)).toBeInTheDocument();
+    expect(screen.getByText(/Pro, Max and Ultra have many more calls a day and more runs at once, and run premium models such as Claude and GPT on credits/)).toBeInTheDocument();
     expect(screen.queryByText('quota_exceeded')).toBeNull();
   });
 
@@ -110,21 +110,21 @@ describe('durable team run details', () => {
       ? { ...record('failed'), error: 'provider_auth_failed' } : { items: [turn({ status: 'failed', error: 'model_refused' })] }));
     vi.stubGlobal('fetch', fetcher); render(view({ defaultOpen: true }));
     await screen.findByText('The model declined this request. Adjust the task and try again.');
-    expect(screen.queryByRole('link', { name: /Upgrade to Pro or Max/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Upgrade to Pro, Max or Ultra/ })).toBeNull();
     cleanup();
     vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url === path ? record('running')
       : { items: [turn({ status: 'failed', error: 'premium_quota_exceeded' })] })));
     render(view({ defaultOpen: true }));
     await screen.findByText(/This workspace’s free premium-model calls \(Claude, GPT, Bedrock\) are used up/);
-    expect(screen.queryByRole('link', { name: /Upgrade to Pro or Max/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Upgrade to Pro, Max or Ultra/ })).toBeNull();
   });
 
   it('words the upgrade offer in Chinese for Chinese readers', async () => {
     localStorage.setItem('superclaw_locale', 'zh');
     vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url === path ? { ...record('failed'), error: 'premium_quota_exceeded' } : { items: [] })));
     render(view({ defaultOpen: true }));
-    expect(await screen.findByRole('link', { name: '升级 Pro / Max，继续使用高级模型' })).toBeVisible();
-    expect(screen.getByText(/升级 Pro \/ Max 付费套餐，就能用点数继续使用这些模型/)).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '升级 Pro / Max / Ultra，继续使用高级模型' })).toBeVisible();
+    expect(screen.getByText(/升级 Pro \/ Max \/ Ultra 付费套餐，就能用点数继续使用这些模型/)).toBeInTheDocument();
     expect(screen.getByText(/单独指定了模型的团队成员都换成默认模型/)).toBeInTheDocument();
   });
 

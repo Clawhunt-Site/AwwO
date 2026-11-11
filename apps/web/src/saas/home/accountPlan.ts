@@ -1,7 +1,7 @@
 // What the home's account card and trial banner say of a workspace's plan, from its route-usage alone: the home never
 // reads GET /billing, which asks ClawHunt for every free account it is read for. route-usage's plan is the workspace
 // owner's; its renewal date and a pending cancellation reach the owner alone, and a reader is sent no plan at all.
-import type { Credits, PlanId } from '../billing';
+import { isPlanId, nextPlan, type Credits, type PlanId } from '../billing';
 import type { RouteUsage } from '../routeUsage';
 import { freePlanStanding, trialEnd } from '../freePlan';
 import type { Tenant } from '../api';
@@ -9,11 +9,12 @@ import type { Tenant } from '../api';
 /** Less than this share of a period's credits left is low: the owner's first action becomes the bigger plan. */
 export const LOW_CREDITS = 0.15;
 
-/** The card's action: subscribe or upgrade from free, resume a plan set to end, move Pro up to Max, or manage it; for
- *  someone who is not the owner of a free workspace, a plan of their own (`own`), which opens their own workspaces only:
- *  the server opens a workspace by its owner's plan. */
-export type PlanCall = 'subscribe' | 'upgrade' | 'resume' | 'upgrade-max' | 'manage' | 'own';
-export type PaidView = { standing: 'paid'; plan: PlanId; owner: boolean; credits: Credits | null; periodEnd: string | null; cancel: boolean;
+/** The card's action: subscribe or upgrade from free, resume a plan set to end, move a plan one step up (`upgrade-next`:
+ *  Pro to Max, Max to Ultra), or manage it; for someone who is not the owner of a free workspace, a plan of their own
+ *  (`own`), which opens their own workspaces only: the server opens a workspace by its owner's plan. */
+export type PlanCall = 'subscribe' | 'upgrade' | 'resume' | 'upgrade-next' | 'manage' | 'own';
+/** `next`: the plan one step up, named by the `upgrade-next` call; null on the largest plan. */
+export type PaidView = { standing: 'paid'; plan: PlanId; next: PlanId | null; owner: boolean; credits: Credits | null; periodEnd: string | null; cancel: boolean;
   low: boolean; call: PlanCall | null; primary: boolean };
 /** `owner`: the viewer owns the workspace, the one account whose plan opens it. */
 export type FreeView = { standing: 'trial' | 'ended' | 'free'; until: string | null; owner: boolean; call: PlanCall | null };
@@ -21,7 +22,6 @@ export type PlanView = PaidView | FreeView;
 
 const isCredits = (value: unknown): value is Credits => typeof value === 'object' && value !== null
   && typeof (value as Credits).remaining === 'number' && typeof (value as Credits).granted === 'number';
-const isPlanId = (value: unknown): value is PlanId => value === 'pro' || value === 'max';
 
 /** Whether a period's credits are nearly spent (none granted counts as spent once none remain). */
 export function lowCredits(credits: Credits | null): boolean {
@@ -29,14 +29,15 @@ export function lowCredits(credits: Credits | null): boolean {
   return credits.granted > 0 ? credits.remaining / credits.granted < LOW_CREDITS : credits.remaining <= 0;
 }
 
-/** The owner's action on a paid plan: resume one set to end; with few credits left, Max for a Pro plan (managing a Max
- *  one); otherwise managing it, as a quieter link. Someone else's plan offers none. */
+/** The owner's action on a paid plan: resume one set to end; with few credits left, the plan one step up (managing the
+ *  largest one); otherwise managing it, as a quieter link. Someone else's plan offers none. */
 function paidView(plan: NonNullable<RouteUsage['plan']>): PaidView {
   const credits = isCredits(plan.credits) ? plan.credits : null;
   const owner = plan.owner === true, cancel = plan.cancelAtPeriodEnd === true, low = lowCredits(credits);
-  const call: PlanCall | null = !owner ? null : cancel ? 'resume' : low && plan.id === 'pro' ? 'upgrade-max' : 'manage';
-  return { standing: 'paid', plan: plan.id, owner, credits, periodEnd: typeof plan.periodEnd === 'string' ? plan.periodEnd : null, cancel, low,
-    call, primary: call === 'resume' || call === 'upgrade-max' || (call === 'manage' && low) };
+  const next = nextPlan(plan.id);
+  const call: PlanCall | null = !owner ? null : cancel ? 'resume' : low && next ? 'upgrade-next' : 'manage';
+  return { standing: 'paid', plan: plan.id, next, owner, credits, periodEnd: typeof plan.periodEnd === 'string' ? plan.periodEnd : null, cancel, low,
+    call, primary: call === 'resume' || call === 'upgrade-next' || (call === 'manage' && low) };
 }
 
 /** The plan block for this viewer, or null where there is none to show (an unlimited workspace, the local edition, no

@@ -42,9 +42,9 @@ describe('a refused node, as the Next card reads it', () => {
 
   it('says why in the refusal’s own words, in the reader’s language', () => {
     expect(refusalReason('media_quota_exceeded', en, 'en')).toBe('This workspace has used today’s image and video generations. Try again after the next UTC day; '
-      + 'for more, see the Pro and Max plans (account menu → Plans and credits).');
+      + 'for more, see the Pro, Max and Ultra plans (account menu → Plans and credits).');
     expect(refusalReason('credits_exhausted', en, 'en')).toBe(runErrorText('credits_exhausted', 'en'));
-    expect(refusalReason('model3d_motion_plan_required', en, 'en')).toMatch(/^Rigging and animating a 3D model needs the Pro or Max plan/);
+    expect(refusalReason('model3d_motion_plan_required', en, 'en')).toMatch(/^Rigging and animating a 3D model needs the Pro, Max or Ultra plan/);
     expect(refusalReason('edit_allowance', en, 'en')).toBe(en('edit.allowance'));
     expect(refusalReason('free_capacity_exceeded', en, 'en')).toBe(runErrorText('free_capacity_exceeded', 'en'));
     expect(refusalReason('media_quota_exceeded', zh, 'zh')).toMatch(/^本工作区今日的图像与视频生成次数已用完/);

@@ -1,0 +1,105 @@
+/* The launch notice (LaunchNotice.tsx): a native dialog on the workspace home. Its three plans are small stubs in the
+ * vouchers' tones (plan-voucher.css), so the plans page it leads to is the same thing, larger. Only the design system's
+ * tokens; no motion of its own. */
+.saas-launch {
+  position: relative;
+  width: min(520px, calc(100vw - 32px));
+  padding: 28px 28px 24px;
+  box-shadow: var(--saas-shadow-xl);
+}
+.saas-launch h2 {
+  margin: 0 40px 10px 0;
+  font-size: var(--saas-text-2xl);
+  line-height: 1.2;
+}
+.saas-launch h3 {
+  margin: 20px 0 0;
+  font-size: var(--saas-text-lg);
+  line-height: 1.3;
+}
+.saas-launch-lead {
+  color: var(--saas-text);
+}
+/* The close button outranks the dialog's pill rule for buttons: a quiet square in the corner. */
+dialog.saas-launch button.saas-launch-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: var(--saas-control);
+  min-height: var(--saas-control);
+  padding: 0;
+  border-color: transparent;
+  border-radius: var(--saas-radius-sm);
+  background: transparent;
+  color: var(--saas-muted);
+}
+dialog.saas-launch button.saas-launch-close:hover {
+  background: var(--saas-soft);
+  color: var(--saas-text);
+}
+.saas-launch-plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 10px;
+  margin: 14px 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.saas-launch-plan {
+  --launch-tone: var(--saas-bio);
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: var(--saas-radius-sm);
+  background: color-mix(in srgb, var(--launch-tone) 10%, var(--saas-card));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--launch-tone) 30%, var(--saas-border));
+}
+.saas-launch-plan-max { --launch-tone: var(--saas-warning-dot); }
+.saas-launch-plan-ultra { --launch-tone: var(--saas-bio-lilac, var(--saas-accent)); }
+.saas-launch-plan strong {
+  font: 700 var(--saas-text-md)/1.3 var(--saas-font-display);
+}
+.saas-launch-price {
+  font: 800 var(--saas-text-2xl)/1.15 var(--saas-font-display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--saas-head-track);
+}
+.saas-launch-price small {
+  color: var(--saas-muted);
+  font: 500 var(--saas-text-xs)/1 var(--saas-font);
+  letter-spacing: 0;
+}
+.saas-launch-credits {
+  color: var(--saas-muted);
+  font-size: var(--saas-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.saas-launch-terms {
+  color: var(--saas-muted);
+  font-size: var(--saas-text-sm);
+}
+.saas-launch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+.saas-launch-actions .saas-primary:focus-visible,
+.saas-launch-actions button:focus-visible,
+dialog.saas-launch button.saas-launch-close:focus-visible {
+  outline: 2px solid var(--saas-focus, var(--saas-accent));
+  outline-offset: 3px;
+}
+/* A phone: the plans as three rows, name and credits on the left, the price on the right, rather than two and one. */
+@media (max-width: 480px) {
+  .saas-launch { padding: 24px 20px 20px; }
+  .saas-launch-plans { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .saas-launch-plan { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; }
+  .saas-launch-price { grid-column: 2; grid-row: 1 / span 2; }
+  .saas-launch-credits { grid-column: 1; }
+}
+@media (forced-colors: active) {
+  .saas-launch-plan { border: 1px solid CanvasText; }
+}

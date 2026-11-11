@@ -24,8 +24,11 @@ export function PlanVoucher({ plan, smallest, current, action, fine }: {
   const name = planName(plan.id);
   const base = smallest.credits;
   const times = base > 0 && plan.credits > base && plan.credits % base === 0 ? plan.credits / base : 0;
-  const tagline = times ? t(`进阶创作 · 点数是 ${planName(smallest.id)} 的 ${times} 倍`, `For heavy making · ${times}× the credits of ${planName(smallest.id)}`)
-    : t('日常创作', 'For everyday making');
+  // What sets the plan apart, from the catalog's own figures: a whole multiple of the smallest plan's credits where it
+  // is one (Max), otherwise how many agents it runs at once (Ultra: 29,900 is no whole multiple of 2,000).
+  const tagline = plan.id === smallest.id ? t('日常创作', 'For everyday making')
+    : times ? t(`进阶创作 · 点数是 ${planName(smallest.id)} 的 ${times} 倍`, `For heavy making · ${times}× the credits of ${planName(smallest.id)}`)
+      : t(`团队与量产 · 同时运行 ${plan.concurrentAgents} 个 Agent`, `For teams and volume · ${plan.concurrentAgents} agents at once`);
   const perks = [
     t('点数用于 Claude Opus 5.5 等高级模型，以及图片和视频生成', 'Credits run Claude Opus 5.5 and the other premium models, and image and video generation'),
     t(`默认模型每天 ${formatCredits(plan.dailyCalls, locale)} 次，不扣点`, `${formatCredits(plan.dailyCalls, locale)} default-model calls a day, free of credits`),

@@ -26,9 +26,9 @@ type T = (zh: string, en: string) => string;
  *  else the sentence says the owner subscribes (and no action is offered: their own purchase would not open it). */
 function bannerText(banner: BannerView, t: T, locale: 'zh' | 'en', owner: boolean): { text: string; action: string } {
   if (banner.kind === 'ended') return { text: owner
-    ? t('免费试用已结束：订阅 Pro 或 Max 后就能继续规划和运行，画布和成果都还在。', 'The free trial has ended: subscribe to Pro or Max to plan and run again. Your canvases and results are all still here.')
-    : t('免费试用已结束：工作区所有者订阅 Pro 或 Max 后，就能继续规划和运行，画布和成果都还在。', 'The free trial has ended: once the workspace owner subscribes to Pro or Max, planning and runs work again. The canvases and results are all still here.'),
-    action: t('订阅 Pro / Max', 'Subscribe to Pro or Max') };
+    ? t('免费试用已结束：订阅 Pro、Max 或 Ultra 后就能继续规划和运行，画布和成果都还在。', 'The free trial has ended: subscribe to Pro, Max or Ultra to plan and run again. Your canvases and results are all still here.')
+    : t('免费试用已结束：工作区所有者订阅 Pro、Max 或 Ultra 后，就能继续规划和运行，画布和成果都还在。', 'The free trial has ended: once the workspace owner subscribes to Pro, Max or Ultra, planning and runs work again. The canvases and results are all still here.'),
+    action: t('订阅套餐', 'Choose a plan') };
   if (banner.kind === 'cancel') {
     const date = new Date(banner.periodEnd).toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US', { month: 'long', day: 'numeric' });
     const name = planName(banner.plan);
@@ -38,8 +38,8 @@ function bannerText(banner: BannerView, t: T, locale: 'zh' | 'en', owner: boolea
   // that starts then. After the trial's end planning is refused as running is (free_plan.go): the sentence says both.
   const end = momentText(banner.until, locale, { end: true });
   const trial = owner
-    ? t(`AwwO 内测即将结束：免费试用到 ${end} 结束，之后要订阅 Pro 或 Max 才能继续规划和运行。`, `The AwwO beta is ending: the free trial ends on ${end}; after that, planning and running need Pro or Max.`)
-    : t(`AwwO 内测即将结束：免费试用到 ${end} 结束，之后这个工作区要所有者订阅 Pro 或 Max 才能继续规划和运行。`, `The AwwO beta is ending: the free trial ends on ${end}; after that, this workspace plans and runs once its owner subscribes to Pro or Max.`);
+    ? t(`AwwO 内测即将结束：免费试用到 ${end} 结束，之后要订阅 Pro、Max 或 Ultra 才能继续规划和运行。`, `The AwwO beta is ending: the free trial ends on ${end}; after that, planning and running need Pro, Max or Ultra.`)
+    : t(`AwwO 内测即将结束：免费试用到 ${end} 结束，之后这个工作区要所有者订阅 Pro、Max 或 Ultra 才能继续规划和运行。`, `The AwwO beta is ending: the free trial ends on ${end}; after that, this workspace plans and runs once its owner subscribes to Pro, Max or Ultra.`);
   // A promotion's end alone (a workspace the trial's end does not close, e.g. one an administrator owns) is no trial's.
   return { text: banner.kind === 'trial' ? trial : t(`限时额度到 ${end} 结束。`, `The limited-time allowance ends on ${end}.`), action: t('查看套餐', 'See plans') };
 }
