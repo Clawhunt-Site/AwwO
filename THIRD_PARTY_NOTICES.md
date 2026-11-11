@@ -123,6 +123,19 @@ no text, table or figure of theirs is used: the defect kinds, the order of the c
 of their code and has a page load none of them. Both skills are written in AwwO's own words, carry an empty
 `attribution`, and share no run of four words with either post, even with word endings ignored.
 
+Read on 2026-11-11, ideas only: four single-page 3D showpieces the owner received as HTML files (a soft-body study of
+a jelly whale, a pixel-art diorama game, a first-person slice set in a container port and a frigate at sea), with no
+author's name and no license among them. What such a page is made of (one subject handled directly, a specimen panel
+and live readouts, shape, surface and sound computed with nothing loaded, a fixed-step simulation, a page that plays
+itself, passes of its own between the scene and the screen) informed five skills in `backend/internal/app/skills/`:
+`showpiece-page.md`, `soft-body-sim.md`, `render-passes.md`, `game-feel.md` and `procedural-sound.md`, and the
+showpiece canvases (`apps/web/src/saas/showpieceRules.ts`, `showpieceWorkflows.ts`). The methods the skills teach are
+published ones, described in AwwO's own words with no formula's source text: position-based dynamics with compliance
+(Macklin, Müller and Chentanez, "XPBD", 2016), surface nets (Gibson, 1998), the Beer-Lambert law, percentage-closer
+soft shadows (Fernando, 2005), ordered (Bayer) dithering, the OKLab colour space (Ottosson, 2020) and the
+Henyey-Greenstein phase function. No text, code, shader, name or picture of the four pages is used, the skills carry
+an empty `attribution`, and GATHER, the first showpiece canvas, is a subject none of them has.
+
 ## AwwO SaaS runtime dependencies
 
 The independent `apps/pi-worker` service uses `@earendil-works/pi-coding-agent`
