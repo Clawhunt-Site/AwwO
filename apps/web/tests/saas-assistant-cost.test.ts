@@ -18,3 +18,11 @@ it('keeps the general wording without a report, and says nothing where calls are
   expect(assistantCostNote(zh, true, false, { limit: 0, used: 0 })).toBe(canvasText('zh', 'assistant.costNotePlan'));
   expect(assistantCostNote(zh, false, true, { limit: 20, used: 1 })).toBeUndefined();
 });
+
+// Owner 2026-11-11: after the free trial there is no free allowance of any kind. A workspace the end holds has no
+// calls today, so the composer does not say what a message would use of them.
+it('says nothing of today’s calls once the free trial has ended for the workspace', () => {
+  expect(assistantCostNote(zh, true, true, null, true)).toBeUndefined();
+  expect(assistantCostNote(en, true, false, { limit: 20, used: 3 }, true)).toBeUndefined();
+  expect(assistantCostNote(zh, true, true, null, false)).toBe(canvasText('zh', 'assistant.costNoteUnified'));
+});

@@ -102,10 +102,14 @@ export function PlansPage({ identity }: { identity: Identity }) {
         <p>{t('订阅还没有生效：付款没有完成或续费扣款失败。请在管理订阅中完成付款或更新付款方式，付款成功后点数会自动到账。', 'The subscription is not in effect yet: its payment has not gone through. Complete it or update the payment method in Manage subscription; the credits arrive once it is paid.')}</p>
         <button type="button" disabled={busy !== null} onClick={() => go('portal')}>{busy === 'portal' ? t('正在打开…', 'Opening…') : t('管理订阅', 'Manage subscription')}</button>
       </> : <>
-        {/* True before the free trial ends and after it: the page knows no workspace, so it names no date (the
+        {/* Once the server says the free trial is over (GET /billing freePlan.ended; owner 2026-11-11: no free allowance
+            of any kind after it), the card says so and names no allowance. Before that, and from a server that does not
+            say, the words are true before the end and after it: the page knows no workspace, so it names no date (the
             workspace's own allowance, 今日额度, says when and how many). */}
-        <p>{t('免费版：免费试用期间，每天有一定的调用次数，默认模型和 Claude、GPT 等高级模型都能用，图片和视频另有次数；具体数字见工作区里的「今日额度」。免费试用结束后，规划和运行需要 Pro、Max 或 Ultra，画布和成果都会保留。',
-          'Free: during the free trial there is a daily number of calls for the default model and for premium models such as Claude and GPT, plus image and video generations; see Today’s allowance in a workspace for the numbers. Once the free trial ends, planning and running need Pro, Max or Ultra, and your canvases and results are kept.')}</p>
+        {billing.freePlan?.ended ? <p>{t('未订阅：免费试用已结束，没有免费额度。订阅 Pro、Max 或 Ultra 后才能规划和运行；画布和成果都还在，订阅后马上可以继续。',
+          'No plan: the free trial has ended, and there is no free allowance. Planning and running need Pro, Max or Ultra; your canvases and results are all still here, and you can go on as soon as you subscribe.')}</p>
+        : <p>{t('免费版：免费试用期间，每天有一定的调用次数，默认模型和 Claude、GPT 等高级模型都能用，图片和视频另有次数；具体数字见工作区里的「今日额度」。免费试用结束后，规划和运行需要 Pro、Max 或 Ultra，画布和成果都会保留。',
+          'Free: during the free trial there is a daily number of calls for the default model and for premium models such as Claude and GPT, plus image and video generations; see Today’s allowance in a workspace for the numbers. Once the free trial ends, planning and running need Pro, Max or Ultra, and your canvases and results are kept.')}</p>}
       </>}
     </section>;
   return <div className="saas-plans">

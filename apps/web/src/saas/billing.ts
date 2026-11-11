@@ -13,8 +13,12 @@ export type AccountPlan = { id: PlanId; status: string; periodStart: string; per
 // for this period (spent only after the paid credits, and lasting as long as the period, as they do). carried is
 // what an earlier period spent beyond its credits; it comes off this period's.
 export type Credits = { granted: number; gift?: number; spent: number; carried?: number; remaining: number };
-/** GET /billing: the catalog, whether checkout is open, and this account's plan with this period's credits. */
-export type Billing = { catalog: CatalogPlan[]; checkoutEnabled: boolean; plan: AccountPlan | null; credits: Credits | null; stale: boolean };
+/** GET /billing: the catalog, whether checkout is open, and this account's plan with this period's credits.
+ *  freePlan: where the deployment ends its free plan, when (UTC) and whether it has by the server's clock; the same for
+ *  every account (which workspace it holds is route-usage's to say). Absent where the free plan does not end, and
+ *  from a server older than the field. */
+export type Billing = { catalog: CatalogPlan[]; checkoutEnabled: boolean; plan: AccountPlan | null; credits: Credits | null; stale: boolean;
+  freePlan?: { until: string; ended: boolean } };
 
 export function fetchBilling(refresh = false, signal?: AbortSignal) {
   return api<Billing>(refresh ? '/billing?refresh=1' : '/billing', { signal });

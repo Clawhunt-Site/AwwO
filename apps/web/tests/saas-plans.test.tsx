@@ -66,6 +66,37 @@ it.each([
   expect(screen.queryByRole('button', { name: absent })).toBeNull();
 });
 
+// Owner 2026-11-11: 「明天暂停试用后，所有用户都必须要购买才能使用awwo，没有任何免费额度」. Once the server says the free
+// trial is over (GET /billing freePlan.ended), the card of an account without a plan says so and names no allowance,
+// no daily number and no 今日额度; while the trial runs, and from a server that does not say, it keeps the words above.
+it.each([
+  ['zh', '当前套餐', '未订阅：免费试用已结束，没有免费额度。订阅 Pro、Max 或 Ultra 后才能规划和运行；画布和成果都还在，订阅后马上可以继续。', '立即开通 Pro'],
+  ['en', 'Current plan', 'No plan: the free trial has ended, and there is no free allowance. Planning and running need Pro, Max or Ultra; your canvases and results are all still here, and you can go on as soon as you subscribe.', 'Get Pro'],
+] as const)('tells an account without a plan (%s) that the free trial is over and nothing is free, once the server says so', async (locale, title, line, buy) => {
+  localStorage.setItem('superclaw_locale', locale);
+  serve(() => response({ ...free, freePlan: { until: '2026-11-12T16:00:00Z', ended: true } }));
+  page();
+  const current = await screen.findByRole('region', { name: title });
+  expect(current).toHaveTextContent(line);
+  expect(current).not.toHaveTextContent(/免费版|每天有一定的调用次数|今日额度|during the free trial|Today’s allowance/);
+  // The vouchers stay, and are what the page leads with.
+  expect(screen.getByRole('button', { name: buy })).toBeEnabled();
+  cleanup();
+  // Before the end the server says so too, and the card keeps the trial's words.
+  serve(() => response({ ...free, freePlan: { until: '2026-11-12T16:00:00Z', ended: false } }));
+  page();
+  expect(await screen.findByRole('region', { name: title })).toHaveTextContent(/免费试用期间，每天有一定的调用次数|during the free trial there is a daily number of calls/);
+});
+
+// A subscriber's card is its plan, whatever the free trial's state.
+it('keeps a subscriber’s card on its plan after the free trial has ended', async () => {
+  serve(() => response({ ...pro, freePlan: { until: '2026-11-12T16:00:00Z', ended: true } }));
+  page();
+  const current = await screen.findByRole('region', { name: '当前套餐' });
+  expect(current).toHaveTextContent('Pro');
+  expect(current).not.toHaveTextContent(/免费试用已结束|未订阅/);
+});
+
 it('shows each plan as a voucher: its credits as the face value, its price on the stub, and the plan held stamped', async () => {
   serve(() => response(free));
   page();

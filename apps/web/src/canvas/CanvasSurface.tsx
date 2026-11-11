@@ -4289,7 +4289,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     const controller = new AbortController();
     fetchRouteUsage(cloudTenantId, controller.signal)
       .then(usage => {
-        // Once the free trial has ended nothing is free: the note keeps its general wording.
+        // Once the free trial has ended nothing is free: the composer says nothing of today's calls (assistantCostNote).
         if (controller.signal.aborted) return;
         setPlannerAllowance(usage.freePlan?.ended ? null : usage.planner ?? null);
         setFreePlanEnded(usage.freePlan?.ended === true);
@@ -5407,7 +5407,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     countPress('assistant.local_answer');
     return true;
   };
-  const costNote = assistantCostNote(t, countsCalls, Boolean(unifiedHost), plannerAllowance);
+  const costNote = assistantCostNote(t, countsCalls, Boolean(unifiedHost), plannerAllowance, freePlanEnded);
   // The planner's line only when it needs the reader: connecting, closed (with its retry), an earlier plan to check, or
   // the Jev planner, whose line says what it does. A ready planner says nothing, like a chat app (owner request 2026-10-12).
   const plannerReady = plannerProvider === 'jev' ? Boolean(jevStatus?.available) : Boolean(plannerStatus?.available);
