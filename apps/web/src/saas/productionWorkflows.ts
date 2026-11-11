@@ -5,6 +5,7 @@ import { THREE_MODULES_IMPORT_MAP } from '../canvas/previewImportMap';
 import { FLAGSHIP_WORKFLOWS } from './flagshipWorkflows';
 import { EPIC_WORKFLOWS } from './epicWorkflows';
 import { BLENDER_WORKFLOWS } from './blenderWorkflows';
+import { SHOWPIECE_WORKFLOWS } from './showpieceWorkflows';
 
 /** The canvases behind the homepage production cases (productionCatalog.ts). Each one is a real
  * workflow: `createOfficialDocument` compiles it into the canvas a member can copy, and the run
@@ -782,8 +783,12 @@ export const PUBLISHED_EPICS = ['pallward'] as const;
  * the Blender workstation. */
 export const PUBLISHED_BLENDER = ['gyroid-jewellery'] as const;
 
+/** The showpiece canvases (showpieceWorkflows.ts) published as cases, likewise each with its run record: one page whose
+ * shape, light and sound are computed, written by builders in sandbox computers and checked frame by frame. */
+export const PUBLISHED_SHOWPIECES = ['gather-glass'] as const;
+
 /** Keyed by production case id. */
 export const PRODUCTION_WORKFLOWS: Readonly<Record<string, OfficialWorkflow>> = Object.fromEntries(
   [CAR, CIRCUIT, KEEP, MARS, STUDIO, KNOWLEDGE, NEON, SHANHAI, AURORA, PIXEL, CONFIGURATOR, PAPER, AD, PORT, GLIDER, PARTY, RHYTHM,
     ...PUBLISHED_FLAGSHIPS.map(id => FLAGSHIP_WORKFLOWS[id]), ...PUBLISHED_EPICS.map(id => EPIC_WORKFLOWS[id]),
-    ...PUBLISHED_BLENDER.map(id => BLENDER_WORKFLOWS[id])].map(item => [item.id, item]));
+    ...PUBLISHED_BLENDER.map(id => BLENDER_WORKFLOWS[id]), ...PUBLISHED_SHOWPIECES.map(id => SHOWPIECE_WORKFLOWS[id])].map(item => [item.id, item]));

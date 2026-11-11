@@ -75,6 +75,17 @@ export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
     stages: [['Ring maker', 'Pendant and earrings maker'], ['Campaign photographer'], ['Collection site']],
     deliverable: 'A collection site with the three pieces in 3D and their campaign photographs',
   },
+  // The first showpiece (showpieceWorkflows.ts): one page whose shape, light and sound are computed, written by eight
+  // builders in sandbox computers against one kernel, assembled with no model, and checked frame by frame in two passes.
+  {
+    id: 'gather-glass', kind: 'interactive', recording: true, footage: 'gather-real',
+    title: 'GATHER',
+    brief: 'A material study of hot glass in one web page: a gather of molten glass on a blowpipe that you keep turning, blow into a bubble, swing long, neck with the jacks and knock off onto a shelf, simulated live as 48 rings that keep their volume, glowing by its temperature and bending the room behind it, with every sound made in code. Left alone it works a vessel by itself.',
+    stages: [['Design'], ['Look and sound direction'],
+      ['Kernel', 'Renderer and light', 'Glass simulation', 'Hot glass look', 'Bench and torch', 'Hands and script', 'Sound', 'Panel and readouts'],
+      [ASSEMBLY_ROLE], ['Test and fix'], [ASSEMBLY_ROLE], ['Look and fix'], [REVIEW]],
+    deliverable: 'A hot-glass study in the browser that you work with your hands',
+  },
   // The epic film (a recorded canvas, recordedCanvas.ts): its pictures, clips, voices and score made on one canvas, six
   // reels cut by editor agents, joined by edit nodes, which run no model, into three acts and the episode.
   {

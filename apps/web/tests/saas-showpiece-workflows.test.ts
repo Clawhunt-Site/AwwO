@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { SHOWPIECES, SHOWPIECE_WORKFLOWS } from '../src/saas/showpieceWorkflows';
 import { showpieceCheck, showpieceKernel, showpiecePage } from '../src/saas/showpieceRules';
-import { PRODUCTION_WORKFLOWS } from '../src/saas/productionWorkflows';
+import { PRODUCTION_WORKFLOWS, PUBLISHED_SHOWPIECES } from '../src/saas/productionWorkflows';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { createOfficialCopyDocument } from '../src/saas/examples/OfficialCopySetup';
 import { canonicalCanvasText } from '../src/saas/productionCanvasText';
@@ -35,10 +35,10 @@ const builders = (item: typeof GATHER) => item.nodes.filter(node => node.task.in
 const duties = (task: string) => task.slice(task.indexOf('Your duties'), task.indexOf('kernel contract (fixed'));
 const agentsOf = (document: ReturnType<typeof createOfficialDocument>) => document.nodes.filter((node): node is SessionNode => node.kind === 'session');
 
-it('is no case until a run of it is published', () => {
+it('is a case exactly when a run of it is published', () => {
   expect(Object.keys(SHOWPIECE_WORKFLOWS)).toEqual(SHOWPIECES.map(item => item.id));
   expect(Object.keys(SHOWPIECE_WORKFLOWS)).toEqual(['gather-glass', 'mossgreen-golf', 'night-freight-yard']);
-  for (const item of CANVASES) expect(PRODUCTION_WORKFLOWS[item.id], item.id).toBeUndefined();
+  for (const item of CANVASES) expect(PRODUCTION_WORKFLOWS[item.id], item.id).toBe((PUBLISHED_SHOWPIECES as readonly string[]).includes(item.id) ? item : undefined);
 });
 
 it('has a design room of two, a builder per module, the assembly, two passes with the first one\'s page between them, and a review', () => {

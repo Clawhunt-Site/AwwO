@@ -60,8 +60,8 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); localStorage.se
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('carries every agent’s recorded delivery into its copy, as the case’s, on the very canvas that ran', () => {
-  expect(CASES).toHaveLength(23);
-  expect(RECORDED).toHaveLength(17);
+  expect(CASES).toHaveLength(24);
+  expect(RECORDED).toHaveLength(18);
   for (const id of RECORDED) {
     const workflow = WORKFLOWS[id], record = records.get(id)!, copy = copyOf(id);
     // Only results are added: the tasks, contracts and wires are the pinned canvas the case ran on.

@@ -88,6 +88,15 @@
     "model": "Claude Opus 4.8",
     "runtime": "sandbox"
   },
+  "gather-glass": {
+    "completed": 15,
+    "total": 15,
+    "seconds": 2696,
+    "delivered": true,
+    "capturedOn": "2026-11-11",
+    "model": "Claude Opus 5.5",
+    "runtime": "sandbox"
+  },
   "glider-adventure": {
     "completed": 6,
     "total": 6,
