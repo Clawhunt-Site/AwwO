@@ -127,6 +127,12 @@ export const ACADEMY_VIDEOS: ReadonlyArray<AcademyVideo> = [
     changes: [{ on: '2026-10-24', text: {
       en: 'Recorded again on the live AwwO, on the whole of Episode I: its 298 nodes in six stages, 93 runs, six editors and ten edits, three acts on one canvas, and what a copy makes again and costs.',
       zh: '在线上 AwwO 重新录制，讲的是完整的第一集：298 个节点、六个阶段、93 次运行、六个剪辑智能体和十个剪辑节点、一张画布上的三幕，以及副本要重新生成什么、要花多少。' } }] },
+  { id: 'words-into-motion', section: 'flagship', caseId: 'words-into-motion', voice: 'en', recordedOn: '2026-11-11',
+    title: { en: 'Words into motion: a film made by six agents in one motion language', zh: 'Words into motion：六个 Agent 用一套动效语言做出的影片' },
+    summary: { en: 'Read how a motion brief, a film, a motion review with its findings as JSON, a fix and a second review made an 18-second film in AwwO’s motion language, play it in the case with its own sound, then copy its canvas as a draft.',
+      zh: '看 Motion brief、Film、带 JSON 发现的 Motion review、Fix 和 Second review 怎样用 AwwO 的动效语言做出一部 18 秒的影片，在案例里带原声播放它，再把画布复制成草稿。' },
+    seconds: 461, src: '/showcase/staged/academy/ab302b858ee7e427.mp4', bytes: 67608253, sha256: 'ab302b858ee7e42717b1e5350e4a8f2ba132ed58e761e0c8d69d4f6956e35b0d',
+    poster: null },
   { id: 'launch-film', section: 'flagship', caseId: 'launch-film', voice: 'en', recordedOn: '2026-11-10',
     title: { en: 'AwwO · launch film: a film written as code by nine agents', zh: 'AwwO · launch film：九个 Agent 用代码写出的发布影片' },
     summary: { en: 'Read how a Director, six builders side by side, a tester and an editor wrote an 18-second three.js film on one canvas, play it in the case with its own sound, then copy its canvas as a draft.',

@@ -10,7 +10,7 @@ narration, and quiet sound effects under the narration.
 | Section | Videos | Narration | What they show |
 | --- | --- | --- | --- |
 | Start here (`start`) | 6, about 2 min each | Chinese | One sentence and the canvas assistant writes code, makes a poster, builds a site, writes a plan with a team; then a node opened and changed with the assistant, and the settings centre |
-| Inside the flagship cases (`flagship`) | 8 | English | Open the case, see how it was made, copy its canvas as a draft, use what it delivered |
+| Inside the flagship cases (`flagship`) | 9 | English | Open the case, see how it was made, copy its canvas as a draft, use what it delivered |
 | Build a case, step by step (`build`) | 18 | English | Write the request in four parts, let the canvas assistant build the team, run the canvas, try the result; or, in the first, an advanced how-to, connect your own agents to the canvas over MCP |
 
 The library opens with what is new (2026-11-08, the owner: 「所有更新的教程页面的都应该放在最前面」): 「最新」 / **New and
@@ -20,7 +20,7 @@ Those videos stay in their own sections too, so the numbered how-tos keep their 
 only that section. It reads only the catalog, never the clock, so the latest release is always first (`academyLatest`
 in `academyCatalog.ts`). A video marked `latest: false` stays out of it, and out of the week it counts (the week runs
 from the newest of the others), while it keeps its place in its own section: since 2026-11-08 the advanced tutorial on
-connecting your own agents (below), so 「最新」 lists AwwO · launch film's video (2026-11-10), then GYROID's (2026-11-06).
+connecting your own agents (below), so 「最新」 lists Words into motion's video (2026-11-11), then AwwO · launch film's (2026-11-10), then GYROID's (2026-11-06).
 
 The first build video (`multiplayer-lockstep`, recorded 2026-11-07) walks through no homepage case: on the live AwwO, in
 the workspace kept for the cases, a person, the real Claude Code and Codex CLIs (each with its own token, over MCP) and
@@ -120,7 +120,7 @@ free plan holds until the promotion ends on 2026-10-29.
 
 ## The videos are staged, not released
 
-The files (2.11 GB) are too large for a release. Nothing removes a staged file by itself. What still plays one: the
+The files (2.18 GB) are too large for a release. Nothing removes a staged file by itself. What still plays one: the
 live catalog, a release a rollback goes to, or an AwwO Local build, whose local web server sends a video it lacks to
 this site (`stagedFallback` in `scripts/awwo-local-web.mjs`), so a local build plays the files its own catalog names.
 On 2026-10-26 the old ones were removed by hand. First went 41 that nothing named any more (1.97 GB: the first cut and
@@ -130,7 +130,7 @@ again, four draft renders of the two how-tos of 2026-10-25). Then went 23 that o
 longer plays them. Last went the six how-tos' versions from before their title cards were renumbered (103 MB), once
 AwwO Local played the renumbered ones on both platforms (Windows from 0.1.3, Mac from 0.10.1, both 2026-10-26): Windows
 0.1.2 and macOS 0.10.0 installs, and a rollback to a release from before the renumbering, no longer play those six.
-The folder holds the catalog's 32 (2.11 GB). Each is staged once on the host, outside every release, under
+The folder holds the catalog's 33 (2.18 GB). Each is staged once on the host, outside every release, under
 `/showcase/staged/academy/<first 16 hex digits of its sha256>.mp4`, checked by its sha256
 and never overwritten; the site serves it for any `/showcase/` path the live release lacks, as it serves a film case's
 film. Locally, the dev server serves them from `AWWO_STAGED_SHOWCASE/academy/` (`apps/web/scripts/staged-showcase.mjs`).
