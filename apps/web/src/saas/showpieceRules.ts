@@ -79,6 +79,11 @@ export const showpieceKernel = (piece: Showpiece) => `${piece.name} kernel contr
 - G.tests.add(no, name, fn) (fn returns or resolves true or { ok: true, detail } with what it measured, or throws why; any other result fails; 2,000 ms cap); G.tests.plant(name, swap, catches) (swap() installs the wrong variant and returns its restore; catches = test numbers); G.tests.expect([[number, owner], ...]) (the design's table); G.tests.scratch() (G.restart() with G.state at its start values, the loop paused and attract mode off); G.tests.run() -> { tests: [{ name, ok, detail }], planted: [{ name, rejected, detail }] }: it pauses the loop and drawing, scratches before every test, runs each plant only against its catches (rejected when one fails; always restored), reports an expected number nobody registered as a failed test 'not registered', then restarts the piece and resumes. Core names each test "T<n> <owner>: <name>" itself: a module passes the bare name, and a plant's name begins with its id ("P4 softness is never 0"). window.awwoSelfTest = () => G.tests.run().
 - G.module(name, init); G.boot(root) keeps root as G.root (the element the render module puts its canvas in) and runs the inits in order, each with no argument (a throw is caught, reported with console.error and toasted; the rest still run), emits ready, sets window.__ready and starts the frame loop, which pauses while the page is hidden.`;
 
+/** The names the kernel puts on G (showpieceKernel): no module may take one as its namespace. */
+export const SHOWPIECE_KERNEL_NAMES: ReadonlyArray<string> = ['on', 'emit', 'system', 'onRender', 'time', 'step', 'loop', 'SEED', 'rng', 'state',
+  'setState', 'commands', 'reset', 'restart', 'script', 'act', 'play', 'stop', 'playing', 'recording', 'touch', 'quality', 'setQuality', 'ui',
+  'readout', 'facts', 'checksum', 'fail', 'failed', 'tests', 'module', 'boot', 'root', 'lib', 'timeScale'];
+
 /** Every builder's rules: what makes modules written apart fit into one page. */
 export const showpieceRules = (piece: Showpiece, name: string, limit: number) => `Rules for every module:
 - Step size (read this first): each reply you send is one step, and a step that runs past the model's output limit is cut off and ends the whole run with nothing delivered. So before a tool call write at most two sentences, never code, a plan or a draft; write the module only through workspace_write, as parts of at most 6,000 characters, one part a step; and keep each command's output short.
@@ -151,6 +156,10 @@ export function showpiece(piece: Showpiece): OfficialWorkflow {
   // The canvas's own nodes keep their ids: a module may not take one.
   const taken = piece.modules.find(module => ['design', 'direction', 'page', 'test', 'checked', 'test2', 'review'].includes(module.id));
   if (taken) throw new Error(`Invalid showpiece module id: ${taken.id}`);
+  // A module's namespace is G.<id>, so it may not take a kernel name either: MOSSGREEN's 'play' module replaced the
+  // kernel's G.play(), the script's start, and window.renderAt threw (its production run of 2026-11-11).
+  const kernelName = piece.modules.find(module => SHOWPIECE_KERNEL_NAMES.includes(module.id));
+  if (kernelName) throw new Error(`Invalid showpiece module id: ${kernelName.id} is a kernel name`);
   const kernel = showpieceKernel(piece);
   const check = `${showpieceCheck(piece)} ${CHECK_SAYS(piece)}`;
   const builders = piece.modules.map((module, row) => builder(piece, kernel, module, row));

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { SHOWPIECES, SHOWPIECE_WORKFLOWS } from '../src/saas/showpieceWorkflows';
-import { showpieceCheck, showpieceKernel, showpiecePage } from '../src/saas/showpieceRules';
+import { SHOWPIECE_KERNEL_NAMES, showpiece, showpieceCheck, showpieceKernel, showpiecePage } from '../src/saas/showpieceRules';
 import { PRODUCTION_WORKFLOWS, PUBLISHED_SHOWPIECES } from '../src/saas/productionWorkflows';
 import { createOfficialDocument } from '../src/saas/examples/officialWorkflows';
 import { createOfficialCopyDocument } from '../src/saas/examples/OfficialCopySetup';
@@ -53,7 +53,7 @@ it('has a design room of two, a builder per module, the assembly, two passes wit
     expect([item.stack, item.fonts, item.media]).toEqual(['r186', true, undefined]);
   }
   expect(builders(GATHER).map(node => node.id)).toEqual(['core', 'render', 'glass', 'look', 'bench', 'hands', 'sound', 'panel']);
-  expect(builders(MOSSGREEN).map(node => node.id)).toEqual(['core', 'render', 'course', 'ball', 'play', 'world', 'hands', 'sound', 'panel']);
+  expect(builders(MOSSGREEN).map(node => node.id)).toEqual(['core', 'render', 'course', 'ball', 'rules', 'world', 'hands', 'sound', 'panel']);
   expect(builders(FREIGHT).map(node => node.id)).toEqual(['core', 'render', 'yard', 'train', 'walker', 'pilot', 'world', 'hands', 'sound', 'panel']);
 });
 
@@ -335,6 +335,19 @@ it('makes the free part of the stage flow one way, and keeps both passes inside 
   }
 });
 
+// MOSSGREEN's second production run (2026-11-11): its 'play' module's namespace G.play replaced the kernel's G.play(), the
+// script's start, so window.renderAt threw. A module's namespace may take no name the kernel puts on G.
+it('gives no module a namespace the kernel already uses', () => {
+  for (const item of CANVASES) {
+    const spec = piece(item.id);
+    const names = new Set([...showpieceKernel(spec).matchAll(/\bG\.([A-Za-z]+)/g)].map(match => match[1]));
+    for (const name of names) expect(SHOWPIECE_KERNEL_NAMES, `${item.id}: G.${name}`).toContain(name);
+    for (const module of spec.modules) expect(SHOWPIECE_KERNEL_NAMES, `${item.id}: ${module.id}`).not.toContain(module.id);
+  }
+  const spec = piece('mossgreen-golf');
+  expect(() => showpiece({ ...spec, modules: spec.modules.map(module => module.id === 'rules' ? { ...module, id: 'play' } : module) })).toThrow(/play is a kernel name/);
+});
+
 it('writes the canvas in English and names no product, company or other work', () => {
   for (const item of CANVASES) {
     const text = JSON.stringify(item);
@@ -357,7 +370,7 @@ it('pins the canonical canvas text, its assembly template and sandbox runtimes i
   const moss = canonicalCanvasText(createOfficialDocument(MOSSGREEN));
   expect(moss).toContain('{{in:from_course}}');
   expect(moss).toContain('"mossgreen.html"');
-  expect(createHash('sha256').update(moss).digest('hex')).toMatchInlineSnapshot(`"19120a9bbba0adab85249fbfd908f6665bd39d0fc2e3df7e1624a2a24c84b85d"`);
+  expect(createHash('sha256').update(moss).digest('hex')).toMatchInlineSnapshot(`"d51e6bcfa038fd20f3fe44c5952af5191c9b6a2ba6407245003ff3b53a1d83e5"`);
   const freight = canonicalCanvasText(createOfficialDocument(FREIGHT));
   expect(freight).toContain('{{in:from_pilot}}');
   expect(freight).toContain('"night-freight.html"');
