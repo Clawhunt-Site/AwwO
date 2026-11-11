@@ -21,6 +21,8 @@ const tenant = { id: 'workspace', name: 'Workspace', status: 'active', role: 'ow
 const reader = async (path: string) => path === '/api/agents' ? { agents: [{ name: 'pi', supports_model_selection: true, supports_node_teams: true }] } : { models: ['profile-main'] };
 let detail = 'free_plan_ended';
 let posted = 0;
+// GET /route-usage's answer; the default says nothing of the free trial's end, as a server older than it.
+let usage: unknown = { items: [] };
 const graph = (status: string) => ({ id: 'graph', operationId: loadRunJournal()?.id, status, canvasId: 'canvas', documentVersion: 9,
   nodes: ['brief', 'draft'].map(nodeId => ({ nodeId, threadId: 'default', agentId: `agent-${nodeId}`, sessionId: `session-${nodeId}`,
     ...(status === 'running' ? { state: 'waiting' } : nodeId === 'brief' ? { state: 'failed', detail } : { state: 'blocked', detail: 'Upstream did not complete' }) })) });
@@ -47,6 +49,7 @@ function open(locale: Locale) {
 
 beforeEach(() => {
   cleanup(); localStorage.clear(); configureCanvasStorage('user', 'workspace', 'canvas'); resetAllSessions(); detail = 'free_plan_ended'; posted = 0;
+  usage = { items: [] };
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: vi.fn(async (_name, _options, callback) => callback({ name: 'owned' })) } });
   configureSaaSCanvas({ tenant, canvasId: 'canvas' }); configureSaaSCanvasSave(async () => 9);
@@ -57,10 +60,39 @@ beforeEach(() => {
     if (url.includes('/graph-runs/graph')) return new Response(JSON.stringify(graph('failed')));
     if (url.endsWith('/runtime')) return new Response(JSON.stringify({ available: true, plannerAvailable: true, plannerRuntime: 'pi' }));
     if (url.endsWith('/upgrade-interest')) return new Response(JSON.stringify({ recorded: true, clicks: 1 }));
+    if (url.endsWith('/route-usage')) return new Response(JSON.stringify(usage));
     return new Response(JSON.stringify({ items: [], models: [] }));
   }));
 });
 afterEach(() => { cleanup(); clearSaaSCanvas(); resetAllSessions(); configureCanvasStorage('user', 'workspace', 'canvas'); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+// Owner 2026-11-11: after the free trial there is no free allowance of any kind. A workspace the end holds has no calls,
+// so before anything is refused the card's step names no calls (「（至少 N 次）」); while the trial runs it does.
+describe('the Next card’s step before a run, once the free trial has ended', () => {
+  const ended = { limited: true, daily: { limit: 100, used: 0 }, interested: false, freePlan: { until: '2026-11-12T16:00:00Z', ended: true } };
+  it.each(['zh', 'en'] as const)('names no calls in a workspace the end holds (%s)', async locale => {
+    seed();
+    usage = ended;
+    render(<LocaleProvider locale={locale}><CanvasSurface storageMode="cloud" runtimeReadJson={reader} /></LocaleProvider>);
+    // The board says the trial is over once route-usage answers, and the card's step is the label alone.
+    await waitFor(() => expect(document.body).toHaveTextContent(text(locale, 'canvas.freePlanEndedOwner')));
+    fireEvent.click(within(document.querySelector('.awwo-canvas-bar') as HTMLElement).getByRole('button', { name: text(locale, 'workspace.assistant'), exact: true }));
+    const sidebar = within(document.querySelector('.awwo-planner-sidebar') as HTMLElement);
+    const card = within(sidebar.getByRole('group', { name: text(locale, 'assistant.nextTitle') }));
+    expect(card.getByRole('button', { name: text(locale, 'assistant.nextRunAll'), exact: true })).toBeVisible();
+    expect(posted).toBe(0);
+  });
+
+  it('names the calls while the trial runs', async () => {
+    seed();
+    usage = { ...ended, freePlan: { until: '2026-11-12T16:00:00Z', ended: false } };
+    render(<LocaleProvider locale="zh"><CanvasSurface storageMode="cloud" runtimeReadJson={reader} /></LocaleProvider>);
+    fireEvent.click(within(document.querySelector('.awwo-canvas-bar') as HTMLElement).getByRole('button', { name: text('zh', 'workspace.assistant'), exact: true }));
+    const sidebar = within(document.querySelector('.awwo-planner-sidebar') as HTMLElement);
+    const card = within(sidebar.getByRole('group', { name: text('zh', 'assistant.nextTitle') }));
+    await waitFor(() => expect(card.getByRole('button', { name: /^运行整张画布（至少 \d+ 次）$/ })).toBeVisible());
+  });
+});
 
 describe('the Next card after the free trial’s end', () => {
   it.each([

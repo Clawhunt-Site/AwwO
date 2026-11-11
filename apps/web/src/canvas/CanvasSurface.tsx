@@ -5138,11 +5138,14 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
   // Only the hosted app counts calls, so only it says what a step costs (and that this advice cost none): at least its
   // calls, and a generation for each image, video and 3D node it runs.
   const countsCalls = Boolean(cloudScope);
-  const withCost = (label: string, { calls, generations }: { calls: number; generations?: number }) => !countsCalls ? label
+  // Once the free trial has ended for the workspace (route-usage freePlan.ended) it has no calls to count: a step says
+  // no cost, as the composer's note says none (assistantCostNote); a run it starts is refused with the plans offered.
+  const showsCost = countsCalls && !freePlanEnded;
+  const withCost = (label: string, { calls, generations }: { calls: number; generations?: number }) => !showsCost ? label
     : generations ? t(calls ? 'assistant.nextWithCost' : 'assistant.nextWithGenerations', { label, calls, generations })
     : calls ? t('assistant.nextWithCalls', { label, calls }) : label;
   // The same, as a sentence after a reply that starts a run from the conversation.
-  const runCostText = ({ calls, generations }: { calls: number; generations?: number }) => !countsCalls ? ''
+  const runCostText = ({ calls, generations }: { calls: number; generations?: number }) => !showsCost ? ''
     : generations ? t(calls ? 'assistant.runCost' : 'assistant.runGenerations', { calls, generations })
     : calls ? t('assistant.runCalls', { calls }) : '';
   const listSeparator = locale === 'zh' ? '、' : ', ';
