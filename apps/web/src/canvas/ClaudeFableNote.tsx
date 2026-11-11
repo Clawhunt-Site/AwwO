@@ -6,6 +6,7 @@
 // without one, the clause is named and not linked. The link opens on the clause itself (#s-privacy-c8, the id clause
 // 07 also links to): /legal alone opens on the Terms of Service, about 4,600 px above it.
 import { createContext, useContext, type ReactNode } from 'react';
+import { httpsSite } from './privacyPolicy';
 import { CLAUDE_FABLE_SENTENCE, PRIVACY_CLAUSE_NAME, isBedrockClaudeFableModel } from './userChosenModels';
 import './claude-fable-note.css';
 
@@ -14,8 +15,8 @@ export const PolicySite = createContext('');
 
 /** Clause 08 of the privacy policy on that site; '' unless the site is an https URL. */
 export function privacyPolicyURL(site: string | null | undefined): string {
-  const base = typeof site === 'string' ? site.trim().replace(/\/+$/, '') : '';
-  return /^https:\/\//.test(base) ? `${base}/legal#s-privacy-c8` : '';
+  const base = httpsSite(site);
+  return base ? `${base}/legal#s-privacy-c8` : '';
 }
 
 /** Clause 08 by name: a link to the policy in a new tab where there is one to open, else its name alone. */

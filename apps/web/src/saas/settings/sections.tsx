@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ExternalLink, Scale } from 'lucide-react';
+import { privacyPolicyPageURL } from '../../canvas/privacyPolicy';
 import { canvasKeyBindings, type CanvasKeyAction } from '../../canvas/useCanvasKeys';
 import { AccountWorkspacePanel } from '../../account';
 import { saasErrorMessage, type Identity } from '../api';
@@ -133,14 +134,14 @@ const LICENSES_URL = '/third-party-licenses.txt';
 export function AboutSettings({ identity }: { identity: Identity }) {
   const { t } = useSaaSPreferences();
   const version = import.meta.env.VITE_AWWO_VERSION as string | undefined;
-  const site = identity.clawhuntSiteURL ? identity.clawhuntSiteURL.replace(/\/+$/, '') : '';
+  const policy = privacyPolicyPageURL(identity.clawhuntSiteURL);
   return <>
     <SettingsIntro title={t('关于 AwwO', 'About AwwO')} intro={t('ClawHunt 孵化出品。', 'Incubated by ClawHunt.')} />
     <div className="saas-settings-stack">
       <SettingsCard title={t('版本', 'Version')}><p>{version ? `AwwO ${version}` : 'AwwO'}</p></SettingsCard>
       <SettingsCard title={t('条款与许可', 'Terms and licences')}>
         <ul className="saas-settings-links">
-          {/^https:\/\//.test(site) && <li><a href={site + '/legal'} target="_blank" rel="noopener noreferrer"><ExternalLink size={15} aria-hidden="true" />{t('隐私政策', 'Privacy policy')}</a></li>}
+          {policy && <li><a href={policy} target="_blank" rel="noopener noreferrer"><ExternalLink size={15} aria-hidden="true" />{t('隐私政策', 'Privacy policy')}</a></li>}
           <li><a href={LICENSES_URL} target="_blank" rel="noreferrer"><Scale size={15} aria-hidden="true" />{t('开源许可', 'Open-source licenses')}</a></li>
         </ul>
       </SettingsCard>

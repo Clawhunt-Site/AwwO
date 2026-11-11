@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Check, Copy, ExternalLink } from 'lucide-react';
+import { privacyPolicyPageURL } from '../../canvas/privacyPolicy';
 import { api, SaaSApiError, saasErrorMessage, type Identity } from '../api';
 import { isLocalEdition } from '../edition';
 import { copyText } from '../copyText';
@@ -135,7 +136,7 @@ export function RelaySettings({ identity }: { identity: Identity }) {
   };
   const live = keys?.items.filter(item => keyState(item) === 'live').length ?? 0;
   const full = keys ? live >= keys.limit : false;
-  const site = identity.clawhuntSiteURL ? identity.clawhuntSiteURL.replace(/\/+$/, '') : '';
+  const policy = privacyPolicyPageURL(identity.clawhuntSiteURL);
   const message = (cause: unknown) => cause instanceof UnreadableAnswer
     ? t('线上 AwwO 的回答无法识别，请稍后再试。', 'The online AwwO’s answer could not be read. Try again later.') : saasErrorMessage(cause, locale);
   return <>
@@ -171,7 +172,7 @@ export function RelaySettings({ identity }: { identity: Identity }) {
       </SettingsCard>
       <SettingsCard title={t('隐私', 'Privacy')}>
         <p>{t('本地版的每次调用会经过 AwwO 在东京的服务器转给模型。AwwO 只记录每次调用的用量（模型、用量和点数），不保存对话内容。', 'Each call AwwO Local makes goes through AwwO’s server in Tokyo to the model. AwwO records each call’s usage (model, usage and credits) and keeps none of the conversation.')}</p>
-        {/^https:\/\//.test(site) && <ul className="saas-settings-links"><li><a href={site + '/legal'} target="_blank" rel="noopener noreferrer"><ExternalLink size={15} aria-hidden="true" />{t('隐私政策', 'Privacy policy')}</a></li></ul>}
+        {policy && <ul className="saas-settings-links"><li><a href={policy} target="_blank" rel="noopener noreferrer"><ExternalLink size={15} aria-hidden="true" />{t('隐私政策', 'Privacy policy')}</a></li></ul>}
       </SettingsCard>
     </div>
   </>;
