@@ -285,7 +285,7 @@ it('opens from its button on the videos by section, filters them, plays one, and
   expect(video.autoplay).toBe(true);
   expect(window.location.search).toBe('?academy=umber-photo');
   expect(within(dialog).getByText(`${academyDuration(umber.seconds)} · English narration, English and Chinese subtitles · Recorded ${noteDay(umber.recordedOn, 'en')}`)).toBeVisible();
-  expect(within(dialog).getByText(`7 of ${ACADEMY_VIDEOS.filter(item => item.section === 'flagship').length}`)).toBeVisible();
+  expect(within(dialog).getByText(`9 of ${ACADEMY_VIDEOS.filter(item => item.section === 'flagship').length}`)).toBeVisible();
   // Up next: the three after it, within the filter.
   const upNext = within(dialog).getByRole('navigation', { name: 'Up next' });
   expect(within(upNext).getAllByRole('button').map(button => button.textContent)).toEqual(['backprop-lab', 'errand-agent', 'roost-team']
