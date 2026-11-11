@@ -285,6 +285,12 @@ func (a *App) billingView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := map[string]any{"catalog": planCatalogJSON(), "checkoutEnabled": a.cfg.BillingCheckoutEnabled && a.clawHuntEnabled(), "plan": nil, "credits": nil, "stale": stale}
+	// Where the deployment ends its free plan (free_plan.go): when, and whether it has by the API's clock, so the plans
+	// page stops describing a trial that is over. It is the deployment's fact, the same for every account; which
+	// workspace it holds is GET /route-usage's to say.
+	if !a.cfg.FreePlanUntil.IsZero() {
+		out["freePlan"] = map[string]any{"until": a.cfg.FreePlanUntil.UTC(), "ended": a.cfg.freePlanEnded(time.Now())}
+	}
 	var row activePlan
 	var entitled bool
 	err = a.db.QueryRow(ctx, "SELECT "+planColumns+","+planEntitles+" FROM user_plans p WHERE p.user_id=$1", u.ID).

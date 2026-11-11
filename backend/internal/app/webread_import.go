@@ -370,6 +370,11 @@ func (a *App) reserveWebRead(w http.ResponseWriter, r *http.Request, tid string,
 		fail(w, 409, "web_read_in_progress", "This page is still being read; try again in a moment")
 		return "", false, false
 	}
+	// A workspace the free plan's end closes reads nothing new (free_plan.go: no free allowance of any kind after it).
+	// Asked after the replay above, so an import it made before the end still answers, and before the read is counted.
+	if !a.freePlanAdmitsOwner(w, r, tx, tid) {
+		return "", false, false
+	}
 	if _, err = tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(84321012)"); err != nil {
 		a.dbError(w, err)
 		return "", false, false

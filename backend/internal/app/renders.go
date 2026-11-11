@@ -180,6 +180,12 @@ func (a *App) createRender(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, err)
 		return
 	}
+	// A workspace the free plan's end closes renders nothing new (free_plan.go: no free allowance of any kind after
+	// it). Asked after the replay above, so a render it started before the end still answers, and before anything is
+	// locked or counted.
+	if !a.freePlanAdmitsOwner(w, r, tx, tid) {
+		return
+	}
 	// The canvas row stays share-locked until the render is recorded, so a deletion either went first (not found)
 	// or waits and then sees the render as active and refuses (resources.go).
 	var canvas string

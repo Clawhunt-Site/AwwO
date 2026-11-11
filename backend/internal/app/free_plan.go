@@ -17,12 +17,19 @@ import (
 // Each admission of new work that the free daily allowance or a free cap would hold asks freePlanClosed where it reads
 // the owner's plan, in the same transaction, and refuses with 402 free_plan_ended before anything is reserved, counted
 // or started: a run (createRun, which plans, knowledge compilations, managed execution and generations go through), a
-// canvas run as a whole (createGraphRun) and each relayed call (openRelayGate). Where a plan read without its lock has
+// canvas run as a whole (createGraphRun) and each relayed call (openRelayGate). The two daily allowances that cost no
+// model call ask too (owner 2026-11-11: 「明天暂停试用后，所有用户都必须要购买才能使用awwo，没有任何免费额度」): a render as
+// video (createRender) and a web page read into the workspace's knowledge (reserveWebRead), each after its replay of an
+// operation already answered and before it counts anything, and GET /capabilities reads both daily numbers as 0 for
+// such a workspace. Where a plan read without its lock has
 // lapsed by the locked read, a new run's admission falls back to the free plan's limits (workspaceLimits.admit), which
 // ask again, so no race admits a free run past the moment. A run admitted before the moment finishes as it would have:
 // the steps of a run already admitted (its model calls, a canvas run's nodes as their turns come) are not asked again.
 // The platform's own calls about a closed workspace (the assistant's router, learning) are not made (routeClosed).
-// Reading, editing, saving, export, deletion, billing, invites and the usage meter stay open.
+// Reading, editing, saving, uploads, export, deletion, billing, invites and the usage meter stay open, and so does the
+// feedback assistant (feedback.go: how a person reports a fault, with its own small limits per caller). Jev
+// (typesafe.go) and OpenMaus bot tasks run only where the operator named the workspace or set up the connection, which
+// is the operator's own decision for that workspace, as freeing one of its route limits is.
 
 const freePlanEndedMessage = "The free trial has ended: this workspace runs again once its owner subscribes to Pro, Max or Ultra."
 
@@ -106,7 +113,8 @@ func (a *App) freePlanAdmits(w http.ResponseWriter, r *http.Request, q querier, 
 	return false
 }
 
-// freePlanAdmitsOwner is freePlanAdmits for an admission that reads no plan of its own (a canvas run's): the owner's is
+// freePlanAdmitsOwner is freePlanAdmits for an admission that reads no plan of its own (a canvas run's, a render's, a
+// web read's): the owner's is
 // read here, in q, and only once the end has come.
 func (a *App) freePlanAdmitsOwner(w http.ResponseWriter, r *http.Request, q querier, tid string) bool {
 	if !a.cfg.freePlanEnded(time.Now()) {

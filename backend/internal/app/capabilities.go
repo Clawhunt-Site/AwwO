@@ -1,6 +1,9 @@
 package app
 
-import "net/http"
+import (
+	"net/http"
+	"time"
+)
 
 // capabilities tells the web app which of the optional abilities this server offers a workspace and how much of
 // today's allowance is left, so it can show (or hide) skills, the skill registry, memory, web import and video
@@ -25,14 +28,32 @@ func (a *App) capabilities(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	editsPerDay, _, _, _ := a.editLimits()
+	// A workspace the free plan's end holds has none of the two allowances that call no model (free_plan.go): their
+	// daily numbers read 0 here, so a panel offers no read or render that would only be refused.
+	webPerDay, rendersPerDay := a.cfg.WebReadsPerDay, a.cfg.RendersPerDay
+	if a.cfg.freePlanEnded(time.Now()) {
+		plan, err := ownerPlan(r.Context(), a.db, tid, false)
+		if err != nil {
+			a.dbError(w, err)
+			return
+		}
+		held, err := freePlanHolds(r.Context(), a.db, tid, a.cfg.FreePlanUntil, plan)
+		if err != nil {
+			a.dbError(w, err)
+			return
+		}
+		if held {
+			webPerDay, rendersPerDay = 0, 0
+		}
+	}
 	writeJSON(w, 200, map[string]any{
 		"skills":        map[string]any{"enabled": true, "maxNodeSkills": maxNodeSkills, "maxNodeSkillBytes": maxNodeSkillBytes},
 		"skillRegistry": map[string]any{"enabled": a.cfg.SkillRegistryEnabled, "source": "skills.sh"},
 		"memory":        map[string]any{"enabled": true, "maxRunItems": maxMemoryRunItems, "maxRunBytes": maxMemoryRunBytes, "maxPerScope": maxMemoryPerScope},
 		// fit: POST …/knowledge/sources/web cuts a page to its share of a task's quoted knowledge, which reading the pages
 		// a message names needs; a page meeting a server without it reads none of them (and sends it no fit).
-		"webReader": map[string]any{"enabled": a.cfg.WebReaderEnabled, "perDay": a.cfg.WebReadsPerDay, "usedToday": reads, "fit": true},
-		"render": map[string]any{"enabled": a.cfg.RenderURL != "", "perDay": a.cfg.RendersPerDay, "usedToday": renders,
+		"webReader": map[string]any{"enabled": a.cfg.WebReaderEnabled, "perDay": webPerDay, "usedToday": reads, "fit": true},
+		"render": map[string]any{"enabled": a.cfg.RenderURL != "", "perDay": rendersPerDay, "usedToday": renders,
 			"limits": map[string]any{"maxSeconds": maxRenderSeconds, "maxFps": 60, "maxWidth": 1920, "maxHeight": 1920, "maxFrames": maxRenderFrames, "maxHtmlBytes": maxRenderHTMLBytes}},
 		// Edit nodes (edits.go) render on the same worker.
 		"edit": map[string]any{"enabled": a.cfg.RenderURL != "", "perDay": editsPerDay, "usedToday": edits,
