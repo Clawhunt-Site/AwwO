@@ -227,7 +227,222 @@ const GATHER: Showpiece = {
   ],
 };
 
+// MOSSGREEN: three holes of miniature golf on a floating island, drawn as pixel art. The ball rolls on each hole's height
+// by fixed substeps (a rolling ball's pull, the carpet's or the sand's drag, walls that give back 0.62 of the speed into
+// them, a cup that takes only a slow ball), and the autopilot searches its shots with that same code, then errs like a
+// hand. Tuned on a prototype: over 24 seeds the autopilot scores 5 to 12 on the par-8 course, 7.0 on average.
+const MOSSGREEN_DESIGN = `## Part A - MOSSGREEN, the design
+### A1 The piece
+A floating island in a morning sky carries three holes of miniature golf, built like a model: a moss-green carpet in timber edges, a bunker, a pond, a little windmill. The visitor drags back from the ball and lets go to putt: walls bounce it, slopes bend it, sand stops it, the pond sends it back for a stroke, the windmill's sails close its tunnel, and the cup takes the ball only when it arrives slowly. Left alone for 8 s the piece plays the round itself. It is drawn as pixel art: the world is rendered at a third of the screen's resolution, outlined, dithered and held to the 48 colours of A8. Kicker "Pocket dioramas / No. 03", title "Mossgreen", subtitle "three holes on a floating green". Caption: "Three holes of miniature golf on an island in the sky. Drag back from the ball and let go to putt; the cup only takes a ball that arrives slowly."
+### A2 Space, units and the camera
+1 unit = 1 m. Y is up; a hole's carpet lies at y = h(x, z) (A3), the island's ground at y = 0. The island's top edge lies around (0, -0.6) at radius 7.9 + 0.3 * sin(3 a) + 0.15 * sin(7 a) for the angle a; its rock tapers to a point at y = -4.5; the clubhouse stands at (3.2, 3.4); trees and stones stand outside the lanes; clouds drift below. Each lane is edged by timber walls 0.08 high and 0.06 thick, centred on its outline.
+The camera is orthographic. It looks at the centre of the hole in play (A3) from 30 units away, at yaw 45 + view.yaw degrees (view.yaw starts at 0; view.left and view.right turn it by 90; a drag turns it freely) and pitch 32 degrees (20 to 70). Its frustum's half-height is H = max(Hh, Wh * stage height / free width) / zoom, with the hole's Hh and Wh (A3), the free part of the stage (the panel's free()) and zoom (1, within 0.6 to 2.5); cam.setViewOffset centres the hole in the free part. The close view (G.state.close) has H = 1.4 / zoom and centres on the ball. Changes of hole, view and zoom ease at rate 4 a second; while recording they jump.
+### A3 The course (module course)
+| no | name | par | tee | cup | outline (closed, in order) | more walls | sand (centre, radius) | water (x0, z0, x1, z1) | h(x, z) | centre | Hh, Wh |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | The Ridge | 2 | -5.5, -3.6 | -1.1, -3.35 | (-6, -4.2) (0, -4.2) (0, -3) (-6, -3) | a block x -2.2 to -1.9, z -3.55 to -3.15 (its four sides) | none | none | 0.08 * exp(-k^2), k = ((x + 3.2) + 0.5 * (z + 3.6)) / 0.45 | -3, -3.6 | 1.9, 2.8 |
+| 2 | Dogleg | 3 | -5.5, -1 | -2.2, 2.4 | (-6, -1.6) (-1.6, -1.6) (-1.6, 3) (-2.8, 3) (-2.8, -0.4) (-6, -0.4) | none | (-3.25, -0.75), 0.32 | -2.8, 0.7, -2.3, 1.5 | 0.04 * S(-2.8, -1.6, x) * S(-0.4, 0.2, z) | -3.6, 0.7 | 2.4, 3.3 |
+| 3 | The Mill | 3 | 1.3, -0.4 | 5.9, -0.05 | (0.8, -1) (6.4, -1) (6.4, 0.2) (0.8, 0.2) | the mill's base across the lane, x 3.4 to 3.8, with a tunnel from z -0.58 to -0.22: x = 3.4 and x = 3.8 from z -1 to -0.58 and from -0.22 to 0.2; z = -0.58 and z = -0.22 from x 3.4 to 3.8 | none | none | 0.16 * S(4.2, 4.8, x) | 3.6, -0.4 | 1.8, 3 |
+S(e0, e1, v) = t * t * (3 - 2 * t) with t = clamp((v - e0) / (e1 - e0), 0, 1); grad is h's exact derivative (S's is 6 * t * (1 - t) / (e1 - e0) where 0 < t < 1, else 0). A hole's walls are segments: its outline's edges in order, then its more walls.
+The mill: four sails on a hub over the tunnel's mouth turn at 0.9 rad/s, millAngle(t) = 0.9 * t; a sail stands in the mouth, and the tunnel is blocked, while (0.9 * t) mod (PI / 2) is under 0.28 or over PI / 2 - 0.28 (36 % of the time).
+Surface at a point: 'block' inside hole 1's block or the mill's base outside its tunnel, 'water' in a water rectangle, 'sand' in a sand circle, 'carpet' elsewhere inside the outline, else 'out'.
+### A4 The ball (module ball)
+Radius r = 0.0214, drawn at y = h + r. A putt at power p (0.05 to 1) starts it at 4.2 * p m/s at angle a (radians: 0 is +X, PI / 2 is +Z). Each step runs 4 substeps of dt = 1/240 s while it rolls, each in this order:
+1. g = grad at the ball; v += -7 * g * dt (a rolling ball's pull, 5/7 of gravity).
+2. c = 3.2 in sand, else 0.55 (m/s^2); s = |v|. If s <= c * dt: v = 0, and if 7 * |g| < c the ball comes to rest and the substep ends. Otherwise v *= (s - c * dt) / s.
+3. p += v * dt.
+4. Hole 3: if this substep took x across 3.35 - r towards +X between z -0.58 and -0.22 while blocked(t): x = 3.35 - r and vx = -0.62 * vx (blade).
+5. Walls, each segment in order: q is its point closest to p; if |p - q| < r: p = q + n * r with n = (p - q) / |p - q|, and if v.n < 0, v = 0.92 * (v - (v.n) * n) - 0.62 * (v.n) * n (bounce, with the speed into the wall, at most once a substep).
+6. t += dt (the ball's clock: G.time at its substep).
+7. If |p - cup| < 0.054 and |v| < 1.3: holed, with drop = |v|. If p lies in water: water.
+Worked numbers: on flat carpet a putt at power 0.3 (1.26 m/s) rolls 1.443 m and stops after 2.29 s; struck at 1 m/s in sand it stops within 0.156 m; square onto a wall its velocity into the wall comes back at 0.62 of itself; across the cup's centre at 1 m/s it drops and at 1.6 m/s it rolls on; at rest at x = 4.5 on hole 3's ramp (slope 0.4) it rolls back, the pull of 2.8 m/s^2 beating the carpet's 0.55.
+### A5 Play and the autopilot (module play)
+A hole begins with the ball at rest on its tee and no strokes. A putt is one stroke. Water: one stroke more and the ball back at rest at its lie (where it was struck from). Holed: the hole's score is its strokes, named by strokes - par: 1 stroke is 'Hole in one', -2 'Eagle', -1 'Birdie', 0 'Par', +1 'Bogey', +2 'Double bogey', more '+n'. A sixth stroke that comes to rest outside the cup ends the hole as 'Picked up' with 6. 2 s after a hole ends the next begins; after hole 3 the round's card shows for 4 s and a new round begins at hole 1 with every stroke cleared. Setting G.state.hole starts that hole at its tee with its strokes cleared.
+The aim: on each new lie it points along the line to the cup at power 0.5; aim.left and aim.right turn it at 90 degrees a second while held, power.up and power.down change its power by 0.6 a second while held (0.05 to 1), golf.putt strikes it. A person can putt only while the ball is at rest and the autopilot is not running.
+The autopilot runs while G.playing or G.state.auto. From the moment the ball is at rest (or a hole begins) it waits 0.5 s, searches for 0.5 s (30 steps, at most 15 candidates a step, then idle), aims for 0.6 s (the aim turns to its choice the short way and the power moves to it, eased) and strikes at 1.6 s; when it stops before that, nothing is struck. Every candidate is simulated (G.ball.simulate, at most 10 s of rolling) as struck at the strike's time, so the sails are where they will be. Candidates, in order: of the 48 angles k * 7.5 degrees, those within 100 degrees of the line to the cup, each at powers 0.18, 0.36, 0.54, 0.72 and 0.9; then, around the best of those (a, p), 12 angles a + (i - 5.5) / 5.5 * 3.75 degrees (i = 0 to 11) at 6 powers p + (j - 2.5) / 2.5 * 0.09 (j = 0 to 5, kept within 0.05 and 1). A result's score, lowest best, the first of equals kept: holed, |drop - 0.6| - 10 + 0.1 * bounces; water, 50; else its distance to the cup, + 0.3 in sand, + 5 if still rolling. At the strike its hand errs: the angle by (2 * r1 - 1) * 2 degrees and the power by a factor 1 + (2 * r2 - 1) * 0.05, r1 then r2 from its own generator G.rng(G.SEED * 7 + 3).
+Worked numbers: with the default seed it plays the round in 7 strokes (2, 2 and 3) and holes out at about 32 s; over 24 seeds it scores 5 to 12, 7.0 on average (par 8), and hole 1 always ends within 16 s.
+Measures: speed (m/s); to the cup (m, from the ball to its hole's cup); stroke (strokes on this hole); score (strokes - par over the finished holes of this round).
+### A6 Verbs, keys and the panel
+| id | label | key | kind |
+|---|---|---|---|
+| golf.putt | Putt | Enter | press |
+| aim.left | Aim left | ArrowLeft | hold |
+| aim.right | Aim right | ArrowRight | hold |
+| power.up | More power | ArrowUp | hold |
+| power.down | Less power | ArrowDown | hold |
+| golf.auto | Auto play | KeyA | press (toggles G.state.auto) |
+| golf.hole1 | Hole 1 | Digit1 | press (sets G.state.hole) |
+| golf.hole2 | Hole 2 | Digit2 | press |
+| golf.hole3 | Hole 3 | Digit3 | press |
+| view.left | Turn left | KeyZ | press |
+| view.right | Turn right | KeyX | press |
+| view.close | Close view | KeyC | press (toggles G.state.close) |
+| piece.dusk | Dusk | KeyL | press (toggles G.state.dusk) |
+| piece.pause | Pause | Space | press |
+| piece.quarter | Quarter speed | KeyQ | press |
+| view.reset | Reset view | Digit0 | press |
+Pointer: pressing within 0.3 m of the ball while a putt may be taken (the point under the pointer at the ball's level) begins a putt: the shot goes from the pointer towards the ball with power min(1, pull / 1.6 m), and releasing strikes it (under 0.05 of power it is cancelled); pressing anywhere else and dragging turns the view, 0.3 degree per CSS pixel (yaw, and pitch within its limits); the wheel or a pinch zooms (by 1.1 a notch); a double click resets the view. Panel, top to bottom: the hole card (name, par, stroke), the three hole buttons, the scorecard (each hole's par and strokes, the round against par), Power (a slider 0 to 100 % that sets the aim's power), Putt, the hold verbs as buttons that work while pressed, Auto play, the view buttons and the toggles. Readouts: Speed (m/s, 2 digits), To the cup (m, 2 digits), Stroke (0 digits), Score (0 digits, shown with its sign, E for 0). Status chip: LIVE, PAUSED, SELF-PLAYING, AIMING, ROLLING, HOLED, IN THE WATER or the failure. Hint: "Drag back from the ball and let go to putt. Arrow keys aim and set the power, Enter putts; Z and X turn the island." Footnote: "1 unit is 1 m. The ball is 4.3 cm across, the cup 10.8 cm; a ball faster than 1.3 m/s rolls over the cup."
+### A7 The script (seconds, action, argument); with it running the autopilot plays (A5), so it is the attract mode, the recording and a test
+0 view.reset true | 12 view.right true | 22 state { close: true } | 28 state { close: false } | 34 state { dusk: true } | 46 view.left true | 54 state { dusk: false }
+While the script runs the view drifts: yaw = its goal + 6 * sin(G.time * 0.15) degrees.
+### A8 The look (modules render and world)
+Pixels: the world is drawn into a target of ceil(CSS width / 3) by ceil(CSS height / 3) with a depth texture, and drawn again with every material swapped for normals into a second target of that size; one full-screen pass then writes the canvas: an edge where the linear depth steps by more than 0.35 units or the normal turns (a dot under 0.8) against any of the four neighbours, drawn at 45 % of its lightness; a 4 by 4 Bayer dither of 0.035 either way in sRGB; then the nearest colour of the palette below in OKLab, through a 32 by 32 by 32 lookup table built at init; each world pixel a 3 by 3 block of CSS pixels (nearest sampling).
+Light: a key light from yaw 135 and elevation 50 degrees, sun-white, casting one shadow map; a hemisphere fill, sky to moss; toon shading in three bands (0.42, 0.72, 1). Dusk (G.state.dusk) eases uDusk to 1 at 2 a second (jumping while recording): the key to 30 % and amber, the fill violet, the sky the dusk gradient, and four lanterns and the mill's window lit (warm point lights, range 3).
+The world: the island and its rock; each hole's carpet a mesh of h on a 0.1 m grid inside its outline, in stripes of two greens 0.5 m wide; the walls; hole 1's block; the bunker; the pond; the mill (a tower, a red cap, four cream sails turned by millAngle); the clubhouse with a lantern; a flag with its number in each cup; pines, shrubs and stones; eight clouds below; the ball, its round shadow and the aim, a dotted line from the ball 0.4 + 2.6 * power long, shown while the ball waits for a putt.
+The palette (sRGB), the only colours a frame may hold: inks 0f0e17 1d1a2b 2b2840 | dusk 3d3459 5a4a7a 7d6b9e a593c2 | sky 1e3a5f 2c5d8f 3f86b8 6bb3d9 9fd6ec cdeef7 | water 1f5c5b 2e8577 4fb39a | greens 1f3d2b 2d5a35 3f7a3a 5a9a3f 7fb84a a8d65e cdeb8b | moss 4a5a2a 6b7a35 8f9b48 | woods 2e1f1a 4a2f24 6b4532 8f5f3f b07d52 d1a271 | sand e3c48a f2dfb0 fbf3dd | stone 3b3d45 565a63 7a7f88 a2a7ae c9ccd0 | reds 6e1f2a a8323b d9534a f08a6c | lights f4b942 ffd76e fff3b0 | white e8f4f0
+### A9 Budget
+At most 150 draw calls and 300,000 triangles a frame; the world at most 60 meshes (repeated things instanced); one shadow map (2,048, or 1,024 on the low tier); the canvas's pixel ratio at most 2 (1 on low, 1.5 on medium).
+### A10 Acceptance tests (number, owner, name: what must hold)
+1. core: events and verbs: listeners run in the order added and an unsubscribe stops one; a disabled command returns false; a hold verb gets run(true) then run(false).
+2. core: the clock: G.loop.step(60) moves G.time by exactly 1 s and runs systems lower order first.
+3. core: the replay: G.restart(), G.play() and 360 steps give the same G.checksum() twice, and G.touch() during attract mode emits mode { attract: false }.
+4. render: one frame draws at most 150 calls and 300,000 triangles (G.render.info()).
+5. render: passes() is world, normals, pixel, and target() is a third of the CSS size, rounded up.
+6. render: quantize gives back each of the 48 colours as itself (within 1/255) and, for mid-grey (0.5, 0.5, 0.5), one of them.
+7. course: three holes; each tee and cup is 'carpet' and at least 0.06 from every wall, and each outline closes.
+8. course: grad is h's derivative: at 20 points in each hole's outline (from G.rng(5)) it is within 0.002 of a central difference with a step of 0.001.
+9. course: blocked(0) is true and blocked(0.87) false, and over 6,000 steps the tunnel is blocked 34 to 38 % of the time.
+10. ball: on flat carpet (hole 3, from (1.3, -0.4) towards +X) a putt at power 0.3 stops after 1.443 m within 1 %.
+11. ball: struck at 1 m/s from the centre of hole 2's sand, it stops within 0.156 m (within 5 %).
+12. ball: square onto hole 1's end wall (from (-0.3, -3.6) towards +X at 2 m/s), its x velocity just after the bounce is -0.62 of what it was just before, within 1 %.
+13. ball: struck from 0.2 m before hole 3's cup straight at it at 1.1 m/s it drops; at 1.7 m/s it is past the cup and still rolling 30 substeps later.
+14. ball: at rest at (4.5, -0.4) on hole 3's ramp, after 120 steps it is below x = 4.3.
+15. play: a putt counts one stroke; a ball putted into hole 2's pond (from (-2.55, 0.3) towards +Z at power 0.3) comes back to rest at its lie with 2 strokes.
+16. play: a sixth stroke that comes to rest outside the cup ends the hole as 'Picked up' with 6.
+17. play: holing ends the hole with its strokes and its name (1 stroke on hole 1 is 'Hole in one'), and within 125 steps hole 2 begins with the ball at rest on its tee.
+18. play: with G.state.auto set, hole 1 ends (done emitted) within 1,200 steps of its start, in at most 4 strokes.
+19. play: G.play.search() from hole 1's tee returns a shot within 100 degrees of the line to the cup whose result holes or comes to rest within 0.5 m of the cup.
+20. world: at most 60 meshes; after a frame the sails' angle is G.course.millAngle(G.time) within 0.001, and each flag stands at its cup within 0.01.
+21. world: after a frame the ball's mesh is at the ball (within 0.001, at y = G.ball.y()), and the aim shows only while the ball waits for a putt.
+22. hands: ground() at the ball's screen point is within 0.05 m of the ball; shot() for a press at the ball and a release 120 px to its left gives power over 0.3 and the angle from the release's ground point towards the ball, within 3 degrees.
+23. hands: the script is in rising t and names only registered commands; ArrowLeft down then up runs aim.left true then false, but not while an input has focus.
+24. sound: G.sound.render('tock', 1) peaks between -18 and -6 dBFS, has energy in its first 30 ms and ends under a thousandth of its peak; nothing sounds before unlock.
+25. sound: 40 plays leave at most 24 voices; a muted render is silent.
+26. panel: every panel command has a button; the hole buttons set G.state.hole; after hole 1 is holed the scorecard shows its strokes.
+27. panel: while the ball rolls, G.panel.refresh() shows its speed in the Speed readout (within 0.01); pause shows PAUSED on the status chip; G.fail('x') shows the fallback with its reason.
+### A11 Planted failures (id, owner, the wrong variant, the tests that catch it)
+| P1 | core | the fixed step is 1/30 s | 2 |
+| P2 | render | the lookup table holds each cell's own colour, not the palette's | 6 |
+| P3 | course | grad's x part has the wrong sign | 8 |
+| P4 | ball | sand drags like carpet | 11 |
+| P5 | ball | the cup takes a ball at any speed | 13 |
+| P6 | play | the pond adds no stroke | 15 |
+| P7 | play | the search returns its first candidate | 19 |
+| P8 | hands | the shot goes towards the pointer, not away from it | 22 |
+| P9 | sound | the tock never releases (neither its decay nor its fade) | 24 |
+| P10 | panel | a readout keeps its first value | 27 |`;
+
+const MOSSGREEN_API = `Mossgreen API sheet (fixed; each module owns exactly its namespace and the names listed for it; every other module may call these names and nothing else):
+- core: the kernel's names, and the commands piece.pause, piece.quarter, piece.restart and test.run.
+- render: G.render = { renderer, scene, cam (an OrthographicCamera), uniforms ({ uTime, uDusk, uRes }, each { value }, one object shared with the world's materials), key (the DirectionalLight that casts the shadow), toon (the three-band gradient texture of the world's MeshToonMaterials), view ({ yaw, pitch and zoom, the goals the camera eases to; orbit(dx, dy) adds degrees; zoomBy(k) multiplies zoom; turn(n) adds n * 90 degrees to yaw; reset(); free ({ x, y, w, h } in CSS pixels: the part of the stage no panel covers) }), frame(dt), resize(), info() -> { calls, triangles } of the last frame, passes() -> the pass names in order, target() -> { w, h } of the world target, palette ([[r, g, b], ...]: A8's 48 colours in order, sRGB 0 to 1), quantize([r, g, b]) -> [r, g, b] (the colour the lookup table holds for that sRGB colour), toScreen(x, y, z) -> { x, y } (CSS pixels), ray(clientX, clientY) -> { origin, dir } (Vector3s), setQuality(tier) }.
+- course: G.course = { holes ([{ no, name, par, tee: [x, z], cup: [x, z], outline: [[x, z], ...], blocks: [[x0, z0, x1, z1], ...], sand: [{ c: [x, z], r }], water: [{ x0, z0, x1, z1 }], centre: [x, z], half: [Hh, Wh] }]: A3's rows), h(no, x, z), grad(no, x, z) -> [gx, gz], walls(no) -> [[x0, z0, x1, z1], ...] (A3's segments in order), surface(no, x, z) -> 'carpet' | 'sand' | 'water' | 'block' | 'out', millAngle(t), blocked(t) }.
+- ball: G.ball = { R (0.0214), hole (the number of the hole it is on), x, z, vx, vz, state ('rest' | 'rolling' | 'holed' | 'water'), lie ([x, z]), drop, speed(), y() (h + R), place(no, x, z) (at rest there), strike(angle, power), substep(), simulate(no, x, z, t0, angle, power, maxT) -> { state, x, z, t, drop, bounces } (on a copy, emitting nothing) }. Events bounce { speed }, blade, holed, splash.
+- play: G.play = { hole (1 to 3), stroke (strokes on this hole), card ([{ no, par, strokes, name }], one row a finished hole of this round), score() (strokes - par over them), phase ('ready' | 'rolling' | 'done' | 'card'), aim ({ angle, power }), auto() -> whether the autopilot runs, search() -> { angle, power, result } (A5's whole search at once, from where the ball is), putt(angle, power) -> false when no putt may be taken, start(no) (that hole at its tee), name(strokes, par) }. Commands golf.putt, aim.left, aim.right, power.up, power.down, golf.auto, golf.hole1, golf.hole2, golf.hole3. Events putt { power }, hole { no }, done { no, strokes, name }, round { total }.
+- world: G.world = { root, ball (the ball's Mesh), sails (the Object3D of the mill's sails; its rotation.x is the sails' angle), flags (three Object3Ds, one a cup), aim (the Object3D of the dotted aim), counts() -> { meshes } }.
+- hands: G.hands = { device ('mouse' | 'touch' | 'keys'), ground(clientX, clientY) -> { x, z } or null (where the pointer meets the ball's level), shot(x0, y0, x1, y1) -> { angle, power } or null (the putt a press at the first point and a release at the second would make), script }. Commands view.left, view.right, view.close, view.reset.
+- sound: G.sound = { ctx (null until unlocked), unlock() (safe to call again), muted, mute(on), play(name, options) -> a handle or null, bed(name, level), voices(), render(name, seconds) -> a Promise of a Float32Array (that sound alone, offline, at 48,000 Hz), names }.
+- panel: G.panel = { el, status(text), refresh(), free() -> { x, y, w, h }, fallback(reason), selftest() }. Commands piece.dusk.
+- System orders (G.system): hands 10, ball 40, play 50, sound 94. G.onRender orders: world 20, panel 30, render 100.`;
+
+const MOSSGREEN_DIRECTION = `Direction (the source of the look and the sound):
+- A model maker's care given to a tiny golf course: a slab of island in a clear morning sky, its top a bright moss-green carpet in warm timber edges, its underside rough rock with roots and moss, small white clouds below. Everything is chunky and readable: low trees, round shrubs, white-washed stones, a red-capped windmill with cream sails, a pond of clear teal, a bunker of pale gold, a little clubhouse with a lantern.
+- Pixel art: only the palette's colours, in hard 3 by 3 pixels; one-pixel ink outlines on every silhouette and crease; shading in three bands; gradients only by dither (the sky, the rock falling into shadow).
+- Light: a high morning sun from behind the camera's left shoulder, warm white, with crisp shadows; a cool sky fill. Dusk: the sky violet to amber, the sun low and amber, the lanterns and the mill's window warm, the carpet blue-green.
+- The interface: cream paper and ink, hairline rules, one moss-green accent and the flag's red; a pixel display face for the title and the numbers, a plain sans for the labels.
+- Sound: a calm outdoor morning. The putter is a hollow wooden tock; the ball rolls on carpet as a soft hiss that follows its speed, in sand as a dry rasp; a wall is a woody thock; the cup a short plastic rattle and drop; the pond a small splash; the mill creaks slowly; a light wind; a bird now and then (not at dusk). Holing out rings a short chime, three rising notes for par or better, two falling for worse. As peaks in dBFS: the tock -12, the thock -16, the rattle -14, the chime -14, the splash -16, a tick -26; the beds, the roll -24, the sand -22, the wind -30, the creak -32, the birds -28; a master gain of +6 dB into a limiter (threshold -10 dB, ratio 4).`;
+const MOSSGREEN_DIRECTION_SECTIONS = `1. Palette use: which of A8's 48 colours each material and the interface take (by hex), and the outline's ink.
+2. Materials: the carpet (its two stripes), timber, block, sand, water (its two moving tones), rock, moss, wood, stone, the mill's cap and sails, the flag: colour, the band the toon shading puts it in, and the noise each takes from a canvas texture.
+3. Light: the key's direction, colour and intensity, the fill, the shadow's darkness, the dusk values, and the lanterns' colour, range and intensity.
+4. The pixel pass's numbers: the outline's depth and normal thresholds and how dark it draws, the dither's strength, the sky's gradient as palette colours.
+5. Interface tokens: the type sizes, the panel's width, paddings, the button and slider styles, the scorecard, the cards, the status chip's colours.
+6. A synthesis recipe for every sound name: tock, roll, thock, rattle, sand, splash, creak, wind, birds, chime, each with its peak in dBFS as the direction gives it.`;
+
+const MOSSGREEN: Showpiece = {
+  id: 'mossgreen-golf',
+  title: 'MOSSGREEN pixel golf diorama',
+  name: 'MOSSGREEN',
+  global: 'Mossgreen',
+  file: 'mossgreen.html',
+  brief: 'Build MOSSGREEN, an original pixel-art diorama in one web page: three holes of miniature golf on a floating island, which a visitor plays by dragging back from the ball and letting go. Walls bounce the ball, slopes bend it, sand slows it, a pond sends it back for a stroke, a windmill\'s sails close its tunnel, and the cup takes the ball only when it arrives slowly. The course, the ball\'s rolling and every sound are made in code, with no file loaded, and the world is drawn at a third of the screen\'s resolution, outlined, dithered and held to a palette of 48 colours. Left alone it plays the round itself with an honest autopilot that searches its shots and errs like a hand, and the same seed replays any second, so the page can be recorded and checked frame by frame. Nine builders write it against one fixed kernel contract, and it tests itself: twenty-seven acceptance tests and ten planted failures run inside the page in a headless browser, a first pass fixes what fails, and a second looks at the page\'s frames and fixes what they show. Every name and word is original.',
+  lib: [
+    ['THREE', "import * as THREE from 'three';"],
+    ['Pass', "import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';"],
+    ['FullScreenQuad', ''],
+    ['mergeGeometries', "import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';"],
+  ],
+  events: 'putt { power }, bounce { speed }, blade, holed, splash, hole { no }, done { no, strokes, name }, round { total }',
+  state: 'hole (1 to 3), auto, close, dusk, quarter',
+  api: MOSSGREEN_API,
+  design: MOSSGREEN_DESIGN,
+  direction: MOSSGREEN_DIRECTION,
+  directionSections: MOSSGREEN_DIRECTION_SECTIONS,
+  fonts: 'Pixelify Sans, Manrope or JetBrains Mono',
+  style: 'html,body{margin:0;height:100%;overflow:hidden;background:#cdeef7;color:#1d1a2b;font:13px Manrope,system-ui,sans-serif}#stage{position:fixed;inset:0}#stage canvas{display:block;width:100%;height:100%;touch-action:none;image-rendering:pixelated}#boot{position:fixed;inset:0;display:grid;place-items:center;background:linear-gradient(#9fd6ec 0%,#cdeef7 58%,#7fb84a 58%,#3f7a3a 100%);font:400 72px/1 "Pixelify Sans",monospace;color:#1d1a2b}',
+  check: { frames: [1, 6, 12, 20, 30], viewport: '960x600', drawCalls: 150, triangles: 300000 },
+  look: `- the hole in play sits whole inside the part of the stage the panel leaves free, with room around it, at every frame;
+- every frame is pixel art: hard 3 by 3 blocks, ink outlines on silhouettes and creases, three-band shading, gradients only by dither, and no colour outside the palette;
+- at 1 s the ball waits on hole 1's tee with its dotted aim; later frames follow the autopilot through the holes, and by 30 s it has left hole 1;
+- the mill's sails have turned between frames, the view has turned at 12 s, and the shadows fall the same way in every frame;
+- no frame is mostly dark (pixels.dark under 0.6) or burnt out (pixels.bright under 0.05), and the course reads (lumaStdDev 14 or more);
+- the masthead, the panel, the readouts and the cards are readable and nothing overlaps.`,
+  modules: [
+    { id: 'core', title: 'Kernel', limit: 16000, duties: `${CORE_DUTIES}
+- Tests 1-3; plant P1.` },
+    { id: 'render', title: 'Pixel renderer and light', limit: 18000, art: true, duties: `- A WebGLRenderer in the boot root (no WebGL 2: G.fail('This piece needs WebGL 2.') and nothing else), created inside try and catch; the canvas's pixel ratio by the tier (A9).
+- A8's pixels: two WebGLRenderTargets of target() size with nearest filtering, the first with a DepthTexture; the scene drawn into it, then again with scene.overrideMaterial a MeshNormalMaterial into the second; then one FullScreenQuad pass of a ShaderMaterial to the canvas: the outline, the Bayer dither and the palette through a Data3DTexture lookup table of 32 by 32 by 32 RGBA8 cells, each holding the palette colour nearest in OKLab to its cell's centre, built at init; passes() lists world, normals, pixel. quantize() reads the same table: the cell of round(c * 31) on each channel.
+- The sky as a gradient behind the world, in the world pass. Light by A8 and the direction: the key (a DirectionalLight with one shadow map by the tier, PCFShadowMap), a hemisphere fill; toon, a DataTexture of three bands with nearest filtering; uDusk eased to G.state.dusk at 2 a second (jumping while recording) dims and recolours the key, the fill and the sky.
+- The camera of A2: an OrthographicCamera 30 units from its target at yaw 45 + view.yaw (plus A7's drift while G.playing) and pitch view.pitch, its frustum from the hole in play (G.course.holes[G.play.hole - 1]) and view.free, or the close view on the ball; eased, jumping while recording; cam.setViewOffset centres it in view.free.
+- toScreen and ray for the hands; uniforms.uTime follows G.time; resize() on window resize and on quality, with both targets.
+- frame(dt) at G.onRender order 100 draws one frame; info() reads renderer.info with autoReset off across its three passes.
+- Tests 4-6; plant P2.
+- Must not touch the course's numbers or the interface.` },
+    { id: 'course', title: 'Course', limit: 12000, duties: `- A3 exactly: the three holes with their outlines, blocks, sand, water, h and its exact gradient, centres and half sizes; walls(no) as segments in order (the outline's edges, then hole 1's block's four sides or the mill's base); surface(no, x, z); millAngle(t) and blocked(t).
+- The facts holes (3), par (8) and walls (the segments over the three holes).
+- Tests 7-9; plant P3.
+- Must not touch three.js or the DOM.` },
+    { id: 'ball', title: 'Ball physics', limit: 14000, duties: `- A4 exactly, as system 40 (the live ball's four substeps a step while it rolls, each at its own time) and as substep(); simulate() runs the same code on a copy of the ball, never touching it or emitting; no allocation in a substep.
+- place, strike, speed and y; the events bounce (at most once a substep, with the speed into the wall), blade, holed and splash.
+- A reset that puts the ball at rest on hole 1's tee.
+- The readouts speed and "to the cup" (G.readout.provide, as A6 words them); G.checksum of x, z, vx and vz.
+- Tests 10-14; plants P4 and P5.
+- Must not touch three.js or the DOM.` },
+    { id: 'play', title: 'Rules and autopilot', limit: 16000, duties: `- A5 exactly, as system 50: the hole, its strokes and phases, the card, the water's stroke and the lie, 'Picked up', the names, the next hole 2 s after one ends and a new round 4 s after hole 3; G.state.hole both ways (setting it starts that hole, starting a hole sets it).
+- The aim with its hold verbs aim.left, aim.right, power.up and power.down; golf.putt; golf.auto (toggles G.state.auto); golf.hole1 to golf.hole3; putt() refuses while the ball rolls or the autopilot runs.
+- The autopilot of A5: it runs while G.playing or G.state.auto; its 0.5 s wait, its search sliced at 15 candidates a step, its 0.6 s aim, its strike with the hand's error from G.rng(G.SEED * 7 + 3); search() runs the whole search at once from where the ball is (for the tests).
+- The readouts stroke and score; the fact strokes (this round's); G.checksum of the hole, the strokes and the aim.
+- A reset that begins a round at hole 1 with the autopilot's generator at its start.
+- Tests 15-19; plants P6 and P7.
+- Must not touch three.js or the DOM.` },
+    { id: 'world', title: 'Island and course models', limit: 18000, art: true, duties: `- A2's island and A8's world from the direction's materials, each texture drawn in code on a canvas: the island's top and rock; each hole's carpet a mesh of G.course.h on a 0.1 m grid inside its outline, in stripes 0.5 m wide; its timber walls (merged a hole); hole 1's block; the bunker; the pond (its two tones moving with uTime); the mill (a tower, a red cap, and a sails Object3D over the tunnel's mouth whose rotation.x is G.course.millAngle(G.time) each frame); the clubhouse and four lanterns (their lights by uDusk); a flag with its number on a pole in each cup; pines, shrubs and stones as InstancedMeshes placed from G.rng(G.SEED + 11) outside the lanes; eight clouds below drifting with G.time. Every material a MeshToonMaterial with G.render.toon; everything casts and takes the key's shadow; at most 60 meshes.
+- The ball: a sphere of G.ball.R at the ball, y = G.ball.y(), with a round shadow under it, hidden while holed; the aim: a dotted line from the ball along G.play.aim.angle, 0.4 + 2.6 * its power long, shown while the ball waits for a putt.
+- Updates at G.onRender order 20; the fact meshes.
+- Tests 20-21.
+- Must not change the course, the ball or the play.` },
+    { id: 'hands', title: 'Hands and script', limit: 14000, duties: `- Every device: keys by event.code to the commands (a hold verb down on keydown, up on keyup, repeats ignored, nothing while an input, select or textarea has focus); the pointer on the canvas; the wheel; touch with one finger as the pointer and two as a pinch. Each of these calls G.touch(), and each trusted one (event.isTrusted) G.sound.unlock() until the sound runs.
+- ground(clientX, clientY): G.render.ray against the level plane at G.ball.y(); shot(x0, y0, x1, y1): null unless the first point's ground lies within 0.3 m of the ball, else the angle from the second point's ground towards the ball and power min(1, their distance / 1.6).
+- A6's pointer: a press within 0.3 m of the ball while a putt may be taken begins a putt, the aim following the pull each step (system 10); releasing calls G.play.putt with it (cancelled under 0.05 of power); a press elsewhere and a drag turns the view (G.render.view.orbit, 0.3 degree a CSS pixel); the wheel and a pinch zoom (G.render.view.zoomBy); a double click resets the view. Cursors: grab over the ball, grabbing while pulling, move while turning.
+- The commands view.left and view.right (G.render.view.turn(-1) and turn(1)), view.close (toggles G.state.close) and view.reset.
+- G.script is A7.
+- Tests 22-23; plant P8.
+- Must not draw anything.` },
+    { id: 'sound', title: 'Sound', limit: 14000, art: true, duties: `- No AudioContext before unlock(), which the first gesture calls; then a master gain into a limiter, with buses for beds and effects; mute(on) and G.sound.muted; suspended while the page is hidden.
+- Every sound name of the direction synthesized from oscillators, one shared noise buffer (filled from G.rng) and filters, each recipe a function of (context, destination, time, options) so that play() and render() share it; envelopes always ramp; at most 24 voices, the beds counted among them, the oldest released first.
+- Beds, their levels eased: roll by G.ball.speed() while it rolls on carpet, sand while it rolls in sand, creak, wind, birds now and then from G.time (not at dusk). Effects: tock on putt (by its power), thock on bounce (by its speed) and on blade, rattle on holed and then the chime (three rising notes when the hole's score is par or better, two falling otherwise, on done), splash, and a tick on a command event a person caused (not while G.playing).
+- render(name, seconds): that sound alone in an OfflineAudioContext at 48,000 Hz, as a Float32Array; a muted render is silence.
+- Tests 24-25; plant P9.
+- Must not touch the DOM beyond its listeners.` },
+    { id: 'panel', title: 'Panel and readouts', limit: 18000, art: true, duties: `- Everything over the canvas, in G.ui.layer('panel'), from A1 and A6 and the direction's interface tokens: the masthead top left (kicker, title, subtitle, caption; it takes no pointer events), the specimen panel on the right (288 px), the readouts and the hint bottom left with the footnote, the notes drawer bottom right (a details element with four short paragraphs: the course, the rolling ball, the pixels, sound; their counts from G.facts.get()), the status chip, and a card over the stage when a hole ends (its name and the score's name, for 2 s) and when the round ends (the scorecard, for 4 s).
+- The panel built from the registries: a button for every command with panel set (a hold verb works while pressed: pointerdown runs it true, pointerup, pointercancel and pointerleave run it false), the hole buttons, the scorecard, the Power slider (it sets G.play.aim.power), toggles that show their state. Every control has a visible focus ring and a title with its key.
+- refresh() writes the readouts from G.readout.list() (called 8 times a second from G.onRender at order 30, and at once on a state event) and the hole card and scorecard from G.play; status(text) sets the chip, which follows pause, mode, the ball's state and the play's phase.
+- free() is the stage's rectangle less the panel's and the masthead's columns; on resize and at init it sets G.render.view.free and calls G.render.resize(). Under 860 px wide the page stacks: the stage keeps the top 55 % and the rest scrolls under it.
+- fallback(reason): on fail, a centred panel with the reason in place of the stage. selftest() (F9): an overlay that runs G.tests.run() and lists every test and plant, green or red, with the counts.
+- Command piece.dusk (it toggles G.state.dusk); the stylesheet inserted once at init; transitions by the motion language (140 ms for a press, 200 ms for a panel), none under reduced motion.
+- Tests 26-27; plant P10.
+- Must not touch the canvas or the simulation.` },
+  ],
+};
+
 /** Keyed by case id, like PRODUCTION_WORKFLOWS, FLAGSHIP_WORKFLOWS and EPIC_WORKFLOWS. */
-export const SHOWPIECE_WORKFLOWS: Readonly<Record<string, OfficialWorkflow>> = Object.fromEntries([GATHER].map(piece => [piece.id, showpiece(piece)]));
+export const SHOWPIECE_WORKFLOWS: Readonly<Record<string, OfficialWorkflow>> = Object.fromEntries([GATHER, MOSSGREEN].map(piece => [piece.id, showpiece(piece)]));
 /** The pieces themselves, for the tests that read a piece's check and modules. */
-export const SHOWPIECES: ReadonlyArray<Showpiece> = [GATHER];
+export const SHOWPIECES: ReadonlyArray<Showpiece> = [GATHER, MOSSGREEN];

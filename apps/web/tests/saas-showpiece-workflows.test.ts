@@ -18,6 +18,7 @@ import { THREE_MODULE_FILES } from '../src/canvas/previewModules.generated';
 // adds: a clock renderAt can replay, one script that is its attract mode, and two passes that check its frames.
 const CANVASES = Object.values(SHOWPIECE_WORKFLOWS);
 const GATHER = SHOWPIECE_WORKFLOWS['gather-glass'];
+const MOSSGREEN = SHOWPIECE_WORKFLOWS['mossgreen-golf'];
 const piece = (id: string) => SHOWPIECES.find(item => item.id === id)!;
 
 // The node prompt the API admits (128,000 bytes) and the per-task budget the flagship builders are held to.
@@ -35,7 +36,7 @@ const agentsOf = (document: ReturnType<typeof createOfficialDocument>) => docume
 
 it('is no case until a run of it is published', () => {
   expect(Object.keys(SHOWPIECE_WORKFLOWS)).toEqual(SHOWPIECES.map(item => item.id));
-  expect(Object.keys(SHOWPIECE_WORKFLOWS)).toEqual(['gather-glass']);
+  expect(Object.keys(SHOWPIECE_WORKFLOWS)).toEqual(['gather-glass', 'mossgreen-golf']);
   for (const item of CANVASES) expect(PRODUCTION_WORKFLOWS[item.id], item.id).toBeUndefined();
 });
 
@@ -51,6 +52,7 @@ it('has a design room of two, a builder per module, the assembly, two passes wit
     expect([item.stack, item.fonts, item.media]).toEqual(['r186', true, undefined]);
   }
   expect(builders(GATHER).map(node => node.id)).toEqual(['core', 'render', 'glass', 'look', 'bench', 'hands', 'sound', 'panel']);
+  expect(builders(MOSSGREEN).map(node => node.id)).toEqual(['core', 'render', 'course', 'ball', 'play', 'world', 'hands', 'sound', 'panel']);
 });
 
 it('compiles into one acyclic DAG that runs left to right, every wire compatible and every input fed exactly once', () => {
@@ -328,4 +330,8 @@ it('pins the canonical canvas text, its assembly template and sandbox runtimes i
   const plain = { ...GATHER, nodes: GATHER.nodes.map(node => ({ ...node, sandbox: undefined })) };
   expect(canonicalCanvasText(createOfficialDocument(plain))).not.toBe(text);
   expect(createHash('sha256').update(text).digest('hex')).toMatchInlineSnapshot(`"21b8acd6395ff928597fe3d795127bd26a8b95c77defa08c7403e8c9dc30affd"`);
+  const moss = canonicalCanvasText(createOfficialDocument(MOSSGREEN));
+  expect(moss).toContain('{{in:from_course}}');
+  expect(moss).toContain('"mossgreen.html"');
+  expect(createHash('sha256').update(moss).digest('hex')).toMatchInlineSnapshot(`"d83e22c0fdfb176e5fa329bc96cef3edeafe989f84eeb53eb2dc38ca0d48b6f3"`);
 });
