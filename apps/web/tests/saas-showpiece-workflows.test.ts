@@ -370,7 +370,7 @@ it('pins the canonical canvas text, its assembly template and sandbox runtimes i
   const moss = canonicalCanvasText(createOfficialDocument(MOSSGREEN));
   expect(moss).toContain('{{in:from_course}}');
   expect(moss).toContain('"mossgreen.html"');
-  expect(createHash('sha256').update(moss).digest('hex')).toMatchInlineSnapshot(`"d51e6bcfa038fd20f3fe44c5952af5191c9b6a2ba6407245003ff3b53a1d83e5"`);
+  expect(createHash('sha256').update(moss).digest('hex')).toMatchInlineSnapshot(`"55c7d3c7a204656a58cd53e7861efc711acc903fdef19f1640d8c175abea6ec6"`);
   const freight = canonicalCanvasText(createOfficialDocument(FREIGHT));
   expect(freight).toContain('{{in:from_pilot}}');
   expect(freight).toContain('"night-freight.html"');
