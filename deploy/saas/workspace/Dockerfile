@@ -46,8 +46,9 @@ RUN npm ci --prefix /opt/awwo/tools --omit=dev --ignore-scripts --no-audit --no-
     && rm -r /tmp/npm-cache \
     && node /opt/awwo/tools/keep-preview-files.mjs && rm /opt/awwo/tools/keep-preview-files.mjs /opt/awwo/tools/three-cuts.mjs
 # held-clock.mjs and virtual-time.mjs are the render worker's own (apps/render-worker), copied here and kept equal by its
-# tests: a page is checked on the clock the renderer gives it, watched as the renderer watches it.
-COPY tools/awwo-check-page.mjs tools/libraries.mjs tools/missing-ok.mjs tools/held-clock.mjs tools/virtual-time.mjs /opt/awwo/tools/
+# tests: a page is checked on the clock the renderer gives it, watched as the renderer watches it. frames.mjs is the
+# check's --frames: the page at several moments, its WebGL draws counted and its pictures on one sheet.
+COPY tools/awwo-check-page.mjs tools/libraries.mjs tools/missing-ok.mjs tools/held-clock.mjs tools/virtual-time.mjs tools/frames.mjs /opt/awwo/tools/
 # Sandbox commands run with PATH=/usr/local/bin:/usr/bin:/bin, so both commands are linked into /usr/local/bin.
 # The last line only proves the wiring (links, module resolution, the browser binary); it writes nothing.
 RUN chmod 0755 /opt/awwo/tools/awwo-check-page.mjs \

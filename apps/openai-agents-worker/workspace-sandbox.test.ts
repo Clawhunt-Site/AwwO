@@ -13,6 +13,7 @@ import { snapshotFailure } from './runner.mjs';
 import { EMPTY_WORKSPACE_SNAPSHOT } from './workspace-runtime.ts';
 import { excusable, EXCUSABLE_TYPES, globMatcher, MAX_PATH_LENGTH, parseMissingOk } from '../../deploy/saas/workspace/tools/missing-ok.mjs';
 import { libraryFile, loadLibraries } from '../../deploy/saas/workspace/tools/libraries.mjs';
+import { frameLabel, framesReasons, framesSummary, framesTotals, GL_PROBE_SCRIPT, MAX_FRAMES, parseFrames, primitives } from '../../deploy/saas/workspace/tools/frames.mjs';
 
 const config = { dockerExecutable: '/usr/bin/docker', image: 'awwo-workspace@sha256:' + 'a'.repeat(64) };
 const digest = (content: Uint8Array) => createHash('sha256').update(content).digest('hex');
@@ -118,6 +119,12 @@ test('egress and tools configuration is both-or-neither and names only known pro
     'Exit 4 (verdict "unfinished")', 'heldClock.unfinished says where it stopped', 'not a pass', '--no-held-clock', "where the command's time limit allows (120 s by default)",
     'run it once more with a larger --budget-ms (25000 by default)', 'if it still does not finish, say that the page has not been shown to render']) assert.ok(online.includes(words), words);
   assert.ok(!offline.includes('heldClock') && !sandboxAbilities(new Set(['rea']), true).join(' ').includes('heldClock'));
+  // The check's frames (deploy/saas/workspace/README.md, "Frames"): agents are told the option, what it adds to the report and
+  // the sheet to look at, in the options and the limit the checker has.
+  for (const flag of ['--frames', '--expect-motion']) assert.ok(checker.includes(`flag === '${flag}'`) && online.includes(flag), flag);
+  for (const flag of ['--max-draw-calls', '--max-triangles']) { assert.match(checker, new RegExp(`const NUMBERS = \\{[^}]*'${flag}'`), flag); assert.ok(online.includes(flag), flag); }
+  assert.ok(online.includes(`up to ${MAX_FRAMES} times in seconds`) && online.includes('frames.jpg') && online.includes('workspace_view') && checker.includes("'frames.jpg'"));
+  assert.ok(!offline.includes('--frames'));
   // Without the web a command gets 30 s (workspace-protocol.ts, the OpenMaus worker's config.ts).
   const checkOffline = sandboxAbilities(new Set(['check-page']), false).join(' ');
   assert.ok(checkOffline.includes('heldClock.failure') && checkOffline.includes("where the command's time limit allows (30 s by default)"));
@@ -157,6 +164,46 @@ test('--missing-ok patterns match paths as documented, refuse what can never mat
     ['fetch', 'x'.repeat(MAX_PATH_LENGTH + 1), false]] as const) assert.equal(excusable(type, path), expected, `${type} ${path.slice(0, 40)}`);
 });
 
+test('--frames takes up to eight rising times, counts primitives as WebGL draws them, and says what the frames show', () => {
+  assert.deepEqual(parseFrames('5,0,2.5'), [0, 2.5, 5]);
+  assert.deepEqual(parseFrames('600'), [600]);
+  assert.deepEqual(parseFrames('0,1,2,3,4,5,6,7'), [0, 1, 2, 3, 4, 5, 6, 7]);
+  for (const refused of ['', undefined, '0,-1', '1,,2', '601', '1.2345', '1e3', ' 1', '1,1.0', '0,1,2,3,4,5,6,7,8', 'x'])
+    assert.ok(parseFrames(refused) instanceof Error, JSON.stringify(refused));
+  assert.equal(MAX_FRAMES, 8);
+  // gl.POINTS 0, LINES 1, LINE_LOOP 2, LINE_STRIP 3, TRIANGLES 4, TRIANGLE_STRIP 5, TRIANGLE_FAN 6: [triangles, lines, points].
+  const cases: [number, number, number, number[]][] = [[4, 6, 1, [2, 0, 0]], [4, 7, 1, [2, 0, 0]], [4, 3, 5, [5, 0, 0]], [5, 4, 1, [2, 0, 0]], [6, 5, 2, [6, 0, 0]],
+    [5, 2, 1, [0, 0, 0]], [1, 5, 1, [0, 2, 0]], [3, 4, 1, [0, 3, 0]], [2, 4, 1, [0, 4, 0]], [0, 9, 2, [0, 0, 18]], [7, 9, 1, [0, 0, 0]], [4, -3, 1, [0, 0, 0]], [4, 3, -1, [0, 0, 0]]];
+  for (const [mode, count, instances, expected] of cases) assert.deepEqual(primitives(mode, count, instances), expected, `${mode} ${count} ${instances}`);
+  // The probe is installed before a page's code and carries its own copy of the count.
+  assert.ok(GL_PROBE_SCRIPT.includes(primitives.toString()) && GL_PROBE_SCRIPT.includes('__awwoGl'));
+  const frame = (t: number, drawCalls: number, triangles: number, changed: number | null, blank = false) => ({ t, ok: true, ms: 1, gl: { drawCalls, triangles, lines: 0, points: 0, over: 'renderAt', programs: 1, textures: 0, framebuffers: 0 },
+    pixels: { distinctColours: blank ? 1 : 40, lumaMean: 30, lumaStdDev: blank ? 0 : 20, dark: 0, bright: 0.2 }, blank, motion: changed === null ? null : { changed, meanDifference: changed * 100 } });
+  const report = (items: unknown[], more = {}) => ({ requested: [0, 1, 2], ran: true, why: '--frames', mode: 'renderAt', items, gl: { contexts: ['webgl2'], lost: 0, width: 640, height: 400 }, failure: null, unfinished: null, note: null, sheet: '/w/check/frames.jpg', ...more });
+  const moving = report([frame(0, 120, 90_000, null), frame(1, 140, 1_250_000, 0.31), frame(2, 130, 80_000, 0.02)]);
+  assert.deepEqual(framesTotals(moving), { taken: 3, still: false, maxDrawCalls: 140, maxTriangles: 1_250_000 });
+  assert.deepEqual(framesReasons(moving, { expectMotion: true, maxDrawCalls: 140, maxTriangles: 1_250_000 }), []);
+  assert.deepEqual(framesReasons(moving, { expectMotion: false, maxDrawCalls: 139, maxTriangles: 1_000_000 }),
+    ['frames: 140 draw calls at 1 s, over the 139 allowed', 'frames: 1,250,000 triangles at 1 s, over the 1,000,000 allowed']);
+  // Still: no pair of neighbours differs in more than 0.2 % of the pixels. That fails a page only where motion was asked for.
+  const still = report([frame(0, 3, 7, null), frame(1, 3, 7, 0.002), frame(2, 3, 7, 0)]);
+  assert.equal(framesTotals(still).still, true);
+  assert.deepEqual(framesReasons(still, { expectMotion: false }), []);
+  assert.deepEqual(framesReasons(still, { expectMotion: true }), ['frames: nothing moved between 0 s and 2 s (--expect-motion)']);
+  assert.deepEqual(framesReasons(report([frame(1, 3, 7, null)]), { expectMotion: true }), ['frames: --expect-motion needs two frames to compare']);
+  // A blank frame and a renderAt that threw fail the page whatever was asked; frames not taken say nothing.
+  const broken = report([frame(0, 3, 7, null), frame(1, 0, 0, 1, true), { t: 2, ok: false, ms: 1, error: 'window.renderAt(2) threw: no pose' }], { failure: 'window.renderAt(2) threw: no pose' });
+  assert.deepEqual(framesReasons(broken, { expectMotion: false }), ['frames: window.renderAt(2) threw: no pose', 'frames: blank at 1 s (a single flat colour)']);
+  assert.deepEqual(framesReasons({ requested: [], ran: false, items: [] }, { expectMotion: true }), []);
+  assert.equal(frameLabel(moving.items[1]), 't = 1 s · 140 draws · 1,250,000 triangles');
+  const lines = framesSummary(moving, (file: string) => file.replace('/w/', ''));
+  assert.equal(lines[0], '  frames: 3 of 3 taken by window.renderAt(t), moving, sheet: check/frames.jpg');
+  assert.equal(lines[2], '    t = 1 s · 140 draws · 1,250,000 triangles · luma 30 ± 20 · 20% clipped white · 31.0% changed');
+  assert.deepEqual(framesSummary({ requested: [0, 1], ran: false, why: 'the page did not load', items: [] }, String), ['  frames: not taken (the page did not load)']);
+  assert.deepEqual(framesSummary({ requested: [], ran: false, items: [] }, String), []);
+  assert.ok(framesSummary(report([frame(0, 3, 7, null)], { unfinished: 'the frame at 30 s was not reached' }), String).includes('  frames: NOT FINISHED, the frame at 30 s was not reached'));
+});
+
 test('the page check answers exactly the three.js files the preview supplies, at the version the tools pin', async () => {
   const read = (path: string) => readFile(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
   const list = JSON.parse(await read('../../deploy/saas/workspace/tools/three-preview-files.json'));
@@ -169,7 +216,7 @@ test('the page check answers exactly the three.js files the preview supplies, at
   assert.equal(JSON.parse(await read('../../deploy/saas/workspace/tools/package.json')).dependencies.three, list.version);
   const dockerfile = await read('../../deploy/saas/workspace/Dockerfile');
   assert.match(dockerfile, /npm ci [^\n]*\n[^\n]*\n\s*&& node \/opt\/awwo\/tools\/keep-preview-files\.mjs/);
-  assert.match(dockerfile, /COPY tools\/awwo-check-page\.mjs tools\/libraries\.mjs tools\/missing-ok\.mjs tools\/held-clock\.mjs tools\/virtual-time\.mjs \/opt\/awwo\/tools\//);
+  assert.match(dockerfile, /COPY tools\/awwo-check-page\.mjs tools\/libraries\.mjs tools\/missing-ok\.mjs tools\/held-clock\.mjs tools\/virtual-time\.mjs tools\/frames\.mjs \/opt\/awwo\/tools\//);
   // The check names a file from a URL as the preview's pinnedModuleFile does (apps/web/tests/canvas-preview-modules.test.ts):
   // the four addresses on the default port, the path as written, a .min.js naming the same file.
   const libraries = new Map([['three', { name: 'three', version: list.version, files: new Set(Object.keys(list.files)), root: '/x' }]]);
@@ -662,6 +709,51 @@ test('Docker smoke: rea and awwo-check-page work offline within the production c
       assert.deepEqual([short.report.verdict, short.report.exitCode, short.report.reasons, short.report.heldClock.failure], ['unfinished', 4, [], null]);
       assert.match(short.report.heldClock.unfinished, /what --budget-ms had left|not within/);
       assert.match(short.run.stdout, /UNFINISHED[\s\S]*held clock: NOT FINISHED/);
+      // --frames shows a page at the moments asked: a piece written for the renderer is brought there by renderAt(t), each
+      // frame's draws counted by the check's own probe (three calls: a quad, five instances of a triangle, a line strip),
+      // its picture measured and the pictures laid out on frames.jpg; any other page is shown t seconds after its load.
+      const drawn = await check('frames-gl', 'frames-gl', '--frames 2.5,0,1 --expect-motion --max-draw-calls 3 --max-triangles 7');
+      assert.equal(drawn.run.exitCode, 0, drawn.run.stdout);
+      assert.deepEqual([drawn.report.frames.mode, drawn.report.frames.taken, drawn.report.frames.still, drawn.report.frames.maxDrawCalls, drawn.report.frames.maxTriangles], ['renderAt', 3, false, 3, 7]);
+      assert.deepEqual(drawn.report.frames.items.map((item: any) => [item.t, item.ok, item.gl.drawCalls, item.gl.triangles, item.gl.lines, item.gl.over, item.blank]),
+        [[0, true, 3, 7, 3, 'renderAt', false], [1, true, 3, 7, 3, 'renderAt', false], [2.5, true, 3, 7, 3, 'renderAt', false]]);
+      assert.deepEqual(drawn.report.frames.gl, { contexts: ['webgl2'], lost: 0, width: 640, height: 400 });
+      assert.ok(drawn.report.frames.items[1].motion.changed > 0.01 && drawn.report.frames.items[0].motion === null);
+      assert.match(drawn.run.stdout, /frames: 3 of 3 taken by window\.renderAt\(t\), moving, sheet: checks\/frames-gl\/frames\.jpg/);
+      const sheet = await sandbox.read('checks/frames-gl/frames.jpg');
+      assert.ok(sheet.byteLength > 2000 && sheet.byteLength <= 400_000, String(sheet.byteLength));
+      // A budget the frames exceed fails the page, by the worst frame.
+      const heavy = await check('frames-heavy', 'frames-gl', '--frames 0,1 --max-triangles 6 --max-draw-calls 2');
+      assert.equal(heavy.run.exitCode, 1, heavy.run.stdout);
+      assert.deepEqual(heavy.report.reasons, ['frames: 3 draw calls at 0 s, over the 2 allowed', 'frames: 7 triangles at 0 s, over the 6 allowed']);
+      // Frames that do not differ are only said to be still, unless motion was asked for.
+      const still = await check('frames-still', 'frames-still', '--frames 0,1,2');
+      assert.deepEqual([still.run.exitCode, still.report.frames.still], [0, true]);
+      assert.match(still.run.stdout, /STILL \(nothing moved between them\)/);
+      const unmoved = await check('frames-unmoved', 'frames-still', '--frames 0,1,2 --expect-motion');
+      assert.equal(unmoved.run.exitCode, 1, unmoved.run.stdout);
+      assert.deepEqual(unmoved.report.reasons, ['frames: nothing moved between 0 s and 2 s (--expect-motion)']);
+      // A renderAt that throws fails the page, as the renderer counts it; the frames before it are kept.
+      const thrown = await check('frames-throw', 'frames-throw', '--frames 0,1,2,3');
+      assert.equal(thrown.run.exitCode, 1, thrown.run.stdout);
+      assert.deepEqual([thrown.report.frames.taken, thrown.report.frames.failure], [2, 'window.renderAt(3) threw: fixture: the rig has no pose after 2 s']);
+      // A page with no renderAt is shown on its own clock, each frame when its time has come since the load.
+      const clock = await check('frames-clock', 'frames-clock', '--frames 0.5,2 --expect-motion');
+      assert.equal(clock.run.exitCode, 0, clock.run.stdout);
+      assert.deepEqual([clock.report.frames.mode, clock.report.frames.taken, clock.report.frames.still, clock.report.frames.maxDrawCalls], ['clock', 2, false, 0]);
+      assert.ok(clock.report.frames.items.every((item: any) => item.at >= item.t && item.at < item.t + 1), JSON.stringify(clock.report.frames.items.map((item: any) => item.at)));
+      // A frame that is one flat colour fails the page, though its first screenshot was not blank.
+      const black = await check('frames-black', 'frames-black', '--frames 0.5,4');
+      assert.equal(black.run.exitCode, 1, black.run.stdout);
+      assert.deepEqual([black.report.blank, black.report.reasons], [false, ['frames: blank at 4 s (a single flat colour)']]);
+      // A frame the budget does not reach is not finished: exit 4, no pass and no failure.
+      const late = await check('frames-late', 'frames-clock', '--frames 1,30 --budget-ms 12000');
+      assert.equal(late.run.exitCode, 4, late.run.stdout);
+      assert.deepEqual([late.report.verdict, late.report.reasons, late.report.frames.taken], ['unfinished', [], 1]);
+      assert.match(late.report.frames.unfinished, /^the frame at 30 s was not reached: --budget-ms left \d+ ms of the \d+ ms to wait$/);
+      // The options that judge frames need --frames; a time is a plain number of seconds, none twice, at most eight.
+      for (const flags of ['--expect-motion', '--max-triangles 10', '--frames 0,-1', '--frames 1,1.0', '--frames 0,1,2,3,4,5,6,7,8', '--frames 1 --expect-motion=yes'])
+        assert.equal((await sandbox.exec(`awwo-check-page /inputs/check-page/frames-gl.html --out checks/frames-usage ${flags}`)).exitCode, 2, flags);
       const spoof = await check('missing-spoof', 'missing-spoof', "--missing-ok 'models/*.glb'");
       assert.equal(spoof.run.exitCode, 1, spoof.run.stdout);
       assert.equal(spoof.report.errorCount, 1, JSON.stringify(spoof.report.errors));

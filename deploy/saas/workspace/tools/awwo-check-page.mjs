@@ -10,6 +10,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { captureFrames, framesReasons, framesSummary, framesTotals, measureFrames, MAX_FRAMES, parseFrames } from './frames.mjs';
 import { HELD_CLOCK_MS, heldClockMessage, openWatch, watchHeldClock } from './held-clock.mjs';
 import { libraryFile, loadLibraries } from './libraries.mjs';
 import { excusable, globMatcher, MAX_PATTERNS, parseMissingOk } from './missing-ok.mjs';
@@ -32,17 +33,18 @@ const MAX = { errors: 50, text: 2000, name: 200, items: 200, blocked: 50, selfTe
 // than 5 s to screenshot (2026-10-18), so the probe and the screenshot get 10 and 20 s, always within the budget. The wait
 // keeps only SCREENSHOT_RESERVE_MS back for the screenshot, which seldom takes long, so the default budget still waits;
 // a page that did not load gets only that long for its screenshot, as before.
-const STEP_MS = { launch: 15_000, load: 10_000, probe: 10_000, screenshot: 20_000 };
+const STEP_MS = { launch: 15_000, load: 10_000, probe: 10_000, screenshot: 20_000, measure: 30_000 };
 const FINISH_MS = 3000, SCREENSHOT_RESERVE_MS = 5000;
 // On the held clock, as the renderer waits: window.__ready up to 10 s, then the first frame and the sound, each until it
 // settles or the page is held (HELD_CLOCK_MS, held-clock.mjs) and at most HELD_STEP_MS, always within the budget.
 const READY_MS = 10_000, HELD_STEP_MS = 15_000;
 // The window the render worker makes a page's sound in (render.mjs SOUND_VIEWPORT); a frame's is --viewport.
 const SOUND_VIEWPORT = { width: 640, height: 360 };
-const DEFAULTS = { out: 'check-out', waitMs: 1500, timeoutMs: 15_000, budgetMs: 25_000, width: 1280, height: 800, missingOk: [], heldClock: 'auto' };
-const NUMBERS = { '--wait-ms': ['waitMs', 0, 60_000], '--timeout-ms': ['timeoutMs', 100, 600_000], '--budget-ms': ['budgetMs', 5000, 900_000] };
+const DEFAULTS = { out: 'check-out', waitMs: 1500, timeoutMs: 15_000, budgetMs: 25_000, width: 1280, height: 800, missingOk: [], heldClock: 'auto', frames: null, expectMotion: false };
+const NUMBERS = { '--wait-ms': ['waitMs', 0, 60_000], '--timeout-ms': ['timeoutMs', 100, 600_000], '--budget-ms': ['budgetMs', 5000, 900_000],
+  '--max-draw-calls': ['maxDrawCalls', 1, 1_000_000], '--max-triangles': ['maxTriangles', 1, 1_000_000_000] };
 const SWITCHES = { '--held-clock': 'on', '--no-held-clock': 'off' };
-const USAGE = 'usage: awwo-check-page <page.html> [--out <dir>] [--wait-ms N] [--timeout-ms N] [--budget-ms N] [--viewport WxH] [--missing-ok GLOB]... [--held-clock | --no-held-clock]';
+const USAGE = 'usage: awwo-check-page <page.html> [--out <dir>] [--wait-ms N] [--timeout-ms N] [--budget-ms N] [--viewport WxH] [--missing-ok GLOB]... [--held-clock | --no-held-clock] [--frames T,T,... [--expect-motion] [--max-draw-calls N] [--max-triangles N]]';
 const HELP = `${USAGE}
 Serves the page and the files of its directory from a private https origin to headless Chromium (any other request is blocked
 and listed, except the three.js 0.186.1 files AwwO's preview supplies, answered from the image's copy at the jsDelivr and
@@ -58,11 +60,18 @@ again on the clock AwwO's renderer gives it, where timers and animation frames r
 its first frame and once for its sound, as the renderer opens it: window.__ready is waited for (noted when the renderer would
 render the page before it is ready), then window.renderAt(0), or window.renderAudio({ seconds: 1, sampleRate: 48000 }). The
 page fails when one of those throws, when the renderer would not find it, or when it waits ${HELD_CLOCK_MS / 1000} s on nothing the renderer can see
-but its own clock, which the renderer refuses; a wait the budget cuts short is reported as not finished. The check ends
+but its own clock, which the renderer refuses; a wait the budget cuts short is reported as not finished.
+--frames 0,2,5 (up to ${MAX_FRAMES} times in seconds) then shows the page at those moments: it is loaded once more and brought to
+each time by window.renderAt(t) where it defines it, otherwise t seconds after its load; each frame's WebGL draw calls and
+triangles are counted and its picture measured (light, clipping, what changed since the frame before), and the pictures go
+side by side into <out>/frames.jpg, a sheet to look at. A frame that is one flat colour or a renderAt that throws fails the
+page; so do, where asked, frames between which nothing moved (--expect-motion) and a frame that draws more than
+--max-draw-calls N or --max-triangles N. Frames the budget cut short are reported as not finished. The check ends
 within --budget-ms (25000). Writes <out>/report.json and <out>/screenshot.png (out: ./check-out).
-Exit 0: pass. 1: the page failed (an error, a test, a planted variant, a blank render, a failure on the held clock).
-2: usage. 3: the check could not run. 4: nothing failed, but the check on the held clock did not finish, so the page
-was not shown to render (heldClock.unfinished says where it stopped; a larger --budget-ms may let it finish).`;
+Exit 0: pass. 1: the page failed (an error, a test, a planted variant, a blank render, a failure on the held clock or in its
+frames). 2: usage. 3: the check could not run. 4: nothing failed, but the check on the held clock or the frames did not
+finish, so the page was not shown to render (heldClock.unfinished or frames.unfinished says where it stopped; a larger
+--budget-ms may let it finish).`;
 // The container is the sandbox: Chromium's own needs user namespaces or setuid, which the container drops (Playwright
 // adds --no-sandbox). WebGL runs on SwiftShader. No name resolution or proxy: a second wall behind the request router.
 const ARGS = ['--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--mute-audio',
@@ -93,6 +102,13 @@ function parseArgs(argv) {
     if (SWITCHES[flag]) {
       if (inline !== undefined) throw new UsageError(`${flag} takes no value`);
       options.heldClock = SWITCHES[flag];
+    } else if (flag === '--expect-motion') {
+      if (inline !== undefined) throw new UsageError(`${flag} takes no value`);
+      options.expectMotion = true;
+    } else if (flag === '--frames') {
+      const times = parseFrames(value());
+      if (times instanceof Error) throw new UsageError(times.message);
+      options.frames = times;
     } else if (flag === '--out') options.out = value() || '';
     else if (NUMBERS[flag]) {
       const [key, min, max] = NUMBERS[flag], raw = value() ?? '';
@@ -114,6 +130,8 @@ function parseArgs(argv) {
   if (!options.out) throw new UsageError('--out takes a directory');
   if (options.page === undefined) throw new UsageError('missing <page.html>');
   if (options.waitMs + 10_000 > options.budgetMs) throw new UsageError('--wait-ms must leave at least 10000 ms of --budget-ms for the check');
+  if (!options.frames && (options.expectMotion || options.maxDrawCalls !== undefined || options.maxTriangles !== undefined))
+    throw new UsageError('--expect-motion, --max-draw-calls and --max-triangles judge the frames --frames takes: give --frames too');
   return options;
 }
 
@@ -319,7 +337,11 @@ async function checkPage(browser, file, out, options, report) {
   // Closing the page first keeps its renderer and the measuring one from running at once (the container has 128 PIDs).
   await within(context.close(), left(2000, 0));
   if (!shot.ok) return;
-  const measured = await within(measure(browser, shot.value), left(STEP_MS.probe, 500));
+  // The measuring itself takes a tenth of a second, but the browser opens no new context while it is still taking a
+  // heavy WebGL page down: on SwiftShader and one CPU that was 13 to 14 s after GATHER's page closed (2026-11-11, at
+  // 1120x700; the measure, then bound to 10 s, timed out and the check could not run). So it gets STEP_MS.measure,
+  // always within the budget.
+  const measured = await within(measure(browser, shot.value), left(STEP_MS.measure, 500));
   if (!measured.ok) { report.measureError = `could not measure the screenshot: ${measured.timedOut ? 'timed out' : firstLine(measured.error)}`; return; }
   const { pixels, scale, written } = measured.value;
   Object.assign(report, { screenshot: path.join(out, 'screenshot.png'), screenshotScale: scale, pixels, blank: pixels.distinctColours <= 2 && pixels.lumaStdDev < 1 });
@@ -450,6 +472,27 @@ async function checkHeldClock(browser, file, options, report) {
   }
 }
 
+// The page at the moments --frames names, after every other load of it is closed (one renderer at a time): brought to
+// each time, its draws counted and its picture taken (frames.mjs), then measured in a context of their own and laid out
+// on one sheet, <out>/frames.jpg. A frame that is blank, a renderAt that throws, and what --expect-motion and the two
+// budgets ask fail the page; frames the budget cut short are reported as not finished, and fail nothing.
+async function checkFrames(browser, file, out, options, report) {
+  const frames = report.frames, started = Date.now(), deps = { left, within, firstLine };
+  if (!report.load.ok) { frames.why = 'the page did not load'; return; }
+  Object.assign(frames, { ran: true, why: '--frames' });
+  try {
+    const root = await realpath(path.dirname(file));
+    const taken = await captureFrames(browser, { url: report.url, viewport: { width: options.width, height: options.height }, times: options.frames, waitMs: options.waitMs },
+      { ...deps, route: context => routePage(context, root, null) });
+    Object.assign(frames, taken);
+    const sheet = await measureFrames(browser, frames, deps);
+    if (sheet) { frames.sheet = path.join(out, 'frames.jpg'); await writeFile(frames.sheet, sheet); }
+    Object.assign(frames, framesTotals(frames));
+  } finally {
+    frames.ms = Date.now() - started;
+  }
+}
+
 function verdict(report) {
   const test = report.selfTest;
   return [!report.load.ok && `the page did not load: ${report.load.error}`,
@@ -459,7 +502,8 @@ function verdict(report) {
     test.plantedRejected < test.plantedTotal && `self-test: ${test.plantedTotal - test.plantedRejected} of ${test.plantedTotal} planted variants were not rejected`,
     report.blank && 'blank render: the screenshot is a single flat colour',
     report.blank === null && !report.measureError && `no screenshot: ${report.screenshotError}`,
-    report.heldClock.failure && `held clock: ${report.heldClock.failure}`].filter(Boolean);
+    report.heldClock.failure && `held clock: ${report.heldClock.failure}`,
+    ...framesReasons(report.frames, report.frames.limits)].filter(Boolean);
 }
 
 function summary(report) {
@@ -479,6 +523,7 @@ function summary(report) {
     lines.push(`  held clock: ${list ? `${list} settled` : 'nothing for the renderer to wait on'} as AwwO's renderer runs the page`);
   } else if (!held.ran && (held.mode === 'on' || (held.mode === 'auto' && report.load.ok && !held.declares))) lines.push(`  held clock: not checked (${held.why})`);
   if (held.note) lines.push(`  held clock note: ${held.note}`);
+  lines.push(...framesSummary(report.frames, relative));
   if (report.libraryRequests.length) lines.push(`  libraries: ${report.libraryRequests.length + report.libraryRequestsDropped} request(s) answered from the image's copy (${Object.entries(report.libraries).map(([name, version]) => `${name} ${version}`).join(', ')})`);
   const unsupplied = report.blockedRequests.filter(request => request.reason);
   if (unsupplied.length) lines.push(`  not supplied by AwwO's preview, so blocked: ${unsupplied.length} library file(s), first ${unsupplied[0].url}`);
@@ -495,7 +540,7 @@ async function main(argv) {
   deadline = performance.timeOrigin + options.budgetMs;
   const file = path.resolve(options.page), out = path.resolve(options.out), reportFile = path.join(out, 'report.json');
   // An earlier check's outputs go first, so no stale report survives a run that cannot write one.
-  await Promise.all(['report.json', 'screenshot.png'].map(name => rm(path.join(out, name), { force: true }))).catch(() => {});
+  await Promise.all(['report.json', 'screenshot.png', 'frames.jpg'].map(name => rm(path.join(out, name), { force: true }))).catch(() => {});
   if (!(await stat(file).catch(() => null))?.isFile()) { console.error(`awwo-check-page: no such file: ${options.page}\n${USAGE}`); return EXIT.usage; }
   const report = { tool: 'awwo-check-page', schemaVersion: 1, page: file, url: null, verdict: 'error', exitCode: EXIT.error, reasons: [], errorCount: 0,
     listedOnlyCount: 0, errors: [], errorsDropped: 0, blockedRequests: [], blockedDropped: 0,
@@ -504,6 +549,9 @@ async function main(argv) {
     load: { ok: false },
     selfTest: { present: null, ok: false, passed: 0, failed: 0, plantedTotal: 0, plantedRejected: 0, items: null }, blank: null, pixels: null,
     heldClock: { mode: options.heldClock, declares: null, ran: false, why: null, steps: [], failure: null, unfinished: null, note: null },
+    frames: { requested: options.frames ?? [], limits: { expectMotion: options.expectMotion, maxDrawCalls: options.maxDrawCalls, maxTriangles: options.maxTriangles },
+      ran: false, why: options.frames ? null : 'no --frames', mode: null, items: [], gl: null, taken: 0, still: null, maxDrawCalls: 0, maxTriangles: 0, sheet: null,
+      failure: null, unfinished: null, note: null, ms: 0 },
     screenshot: null, viewport: { width: options.width, height: options.height }, timings: {}, chromium: null };
   const finish = () => {
     clearTimeout(watchdog); // set just below, before anything can finish
@@ -541,11 +589,16 @@ async function main(argv) {
       await checkHeldClock(browser, file, options, report);
       report.timings.heldClockMs = report.heldClock.ms;
     }
+    if (options.frames) {
+      await checkFrames(browser, file, out, options, report);
+      report.timings.framesMs = report.frames.ms;
+    }
     report.reasons = verdict(report);
-    if (!report.reasons.length && report.measureError) throw new Error(report.measureError);
+    const unmeasured = report.measureError ?? report.frames.measureError ?? report.frames.sheetError;
+    if (!report.reasons.length && unmeasured) throw new Error(unmeasured);
     // A check on the held clock that did not finish is not a pass: the page was not shown to render.
     Object.assign(report, report.reasons.length ? { verdict: 'fail', exitCode: EXIT.fail }
-      : report.heldClock.unfinished ? { verdict: 'unfinished', exitCode: EXIT.unfinished } : { verdict: 'pass', exitCode: EXIT.pass });
+      : report.heldClock.unfinished || report.frames.unfinished ? { verdict: 'unfinished', exitCode: EXIT.unfinished } : { verdict: 'pass', exitCode: EXIT.pass });
   } catch (error) {
     report.reasons = [`the check could not run: ${firstLine(error)}`];
   } finally {
