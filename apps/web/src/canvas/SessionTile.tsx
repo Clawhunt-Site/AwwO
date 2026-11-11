@@ -49,7 +49,7 @@ import { restoreHistory, sendMessage, statusLabel } from './sessionTransport';
 import { mediaComposerInfo, TileComposer, type ComposerStatus, type TileComposerHandle } from './TileComposer';
 import type { TypedEdit } from './messagePages';
 import type { UploadCounts } from './ComposerAttachments';
-import { TilePorts, type WiringApi } from './TilePorts';
+import { TilePorts, type PortCover, type WiringApi } from './TilePorts';
 import { TileTranscript } from './TileTranscript';
 import { MediaWiringGuide } from './MediaWiringGuide';
 import { collaborationInputSummary, htmlPreviewSummary } from './readableTranscript';
@@ -326,6 +326,9 @@ export interface SessionTileProps {
   compact?: boolean;
   /** Current viewport scale — half of the LOD input (the other half is the node's own height). */
   scale: number;
+  /** The stage's edges a panel lying over the stage covers (TilePorts' cover): a port's field label there would rest
+   *  under the panel. */
+  portCover?: PortCover;
   focused: boolean;
   selected?: boolean;
   /** This node's state in the current graph run, if any. */
@@ -437,6 +440,7 @@ export const SessionTile = memo(function SessionTile({
   geometry,
   compact = false,
   scale,
+  portCover,
   focused,
   selected = false,
   run = null,
@@ -1510,7 +1514,7 @@ export const SessionTile = memo(function SessionTile({
         // The reference guide says what the node's own model does with a picture only once the catalogue lists that
         // model; until then it speaks in general terms rather than guess.
         media={node.kind === 'session' && modelChoices?.some(choice => choice.key === modelChoiceKey(node)) ? mediaComposerInfo(node, modelChoices) : undefined}
-        scale={scale} />
+        scale={scale} cover={portCover} />
 
       {!viewOnly && onResizeNode && !compact ? (
         <button

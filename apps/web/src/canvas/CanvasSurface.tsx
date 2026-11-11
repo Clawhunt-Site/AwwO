@@ -5722,6 +5722,28 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     setStageCover(previous => previous === cover ? previous : cover);
   }, []);
   useLayoutEffect(measureStageCover, [measureStageCover, size.w, size.h, railsVersion, panelShown, simple]);
+  // How much of the stage's right edge the node's configuration panel covers where it lies over the stage (the hosted
+  // app's inspector, a child of the stage's own root; one drawn inside a node covers no edge): a port's field label there
+  // would rest under it. With the assistant's cover on the left, the ports judge their labels' room without what the
+  // panels cover (TilePorts' cover). 0 while no such panel is open.
+  const [inspectorCover, setInspectorCover] = useState(0);
+  const measureInspectorCover = useCallback(() => {
+    const root = rootRef.current;
+    const stage = root?.getBoundingClientRect();
+    const panel = root?.querySelector<HTMLElement>(':scope > .canvas-inspector');
+    const box = panel?.getBoundingClientRect();
+    // Measured without the panel's own entrance slide (`translate`, motion.css's awwo-from-right), as floatingSidebar
+    // is: this runs as the panel mounts, so a cover taken mid-slide would stay short by those pixels while it is open.
+    // Only a length in pixels is taken: a percentage would be of the panel's own size (none of its keyframes uses one).
+    const [shift = ''] = panel ? getComputedStyle(panel).translate.split(' ') : [];
+    const slide = shift.endsWith('px') ? Number.parseFloat(shift) || 0 : 0;
+    const left = box ? box.left - slide : 0;
+    const cover = stage && box && box.width > 0 && box.height > 0 && left < stage.right && box.right - slide > stage.left
+      ? Math.max(0, Math.round(stage.right - left)) : 0;
+    setInspectorCover(previous => previous === cover ? previous : cover);
+  }, []);
+  useLayoutEffect(measureInspectorCover, [measureInspectorCover, size.w, size.h, railsVersion, panelShown, simple, inspectorId]);
+  const portCover = useMemo(() => ({ left: stageCover, right: inspectorCover }), [stageCover, inspectorCover]);
   // The one icon a Tab reaches (a roving stop: one per component would make the board a long list of stops): the first
   // selected icon on screen, else the first on screen in reading order. ⌘[ and ⌘] step through the rest. On screen is
   // the stage itself (culling keeps a margin round it) less what a floating assistant covers; with none there, any icon
@@ -6034,6 +6056,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
             run={runs[node.id] ?? null}
             live={running || recovering}
             scale={view.scale}
+            portCover={portCover}
             selected={selection.includes(node.id)}
             soleSelected={selection.length === 1 && selection[0] === node.id}
             tabbable={iconTabStop === node.id}
@@ -6058,6 +6081,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
             geometry={renderNodeById.get(node.id)}
             compact={node.kind === 'session' && focusedId !== node.id}
             scale={view.scale}
+            portCover={portCover}
             focused={focusedId === node.id}
             selected={selection.includes(node.id)}
             run={runs[node.id] ?? null}

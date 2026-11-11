@@ -23,7 +23,7 @@ import { getSnapshot, subscribe } from './sessions';
 import { refuseHeldEnter } from './heldEnter';
 import { failureReason } from './surfaceMessages';
 import { mediaComposerInfo } from './TileComposer';
-import { TilePorts, type WiringApi } from './TilePorts';
+import { TilePorts, type PortCover, type WiringApi } from './TilePorts';
 import { useSimpleCanvas } from './uiMode';
 import { WorkingTimer } from './WorkingIndicator';
 import { cardPressAllowed, holdCardGesture, holdPassivePress } from './cardGesture';
@@ -85,6 +85,8 @@ export interface NodeIconTileProps {
   /** Whether a run is under way or being recovered (memberLiveState: a result an edit cleared reads as gone otherwise). */
   live: boolean;
   scale: number;
+  /** The stage's edges a panel lying over the stage covers (TilePorts' cover). */
+  portCover?: PortCover;
   selected: boolean;
   /** Selected alone: a tap on it opens it (touch has no reliable double-click). */
   soleSelected: boolean;
@@ -100,7 +102,7 @@ export interface NodeIconTileProps {
   onToggleFocus?: (nodeId: string) => void;
 }
 
-export const NodeIconTile = memo(function NodeIconTile({ node, drawn, run, live, scale, selected, soleSelected, tabbable,
+export const NodeIconTile = memo(function NodeIconTile({ node, drawn, run, live, scale, portCover, selected, soleSelected, tabbable,
   readOnly = false, interactionLocked = false, wiring, modelChoices, onMove, onSelect, onToggleFocus }: NodeIconTileProps) {
   const { t, locale } = useCanvasI18n();
   const simple = useSimpleCanvas();
@@ -387,7 +389,7 @@ export const NodeIconTile = memo(function NodeIconTile({ node, drawn, run, live,
           icon): its name already says the state and why. */}
       <span id={hintId} hidden>{t('nodeIcon.openHint')}</span>
       <div className="awwo-node-icon-ports" style={{ top: wire.y - icon.y, height: wire.h }}>
-        <TilePorts node={wire} wiring={portsWiring} media={media} scale={scale} tabbable={tabbable} />
+        <TilePorts node={wire} wiring={portsWiring} media={media} scale={scale} tabbable={tabbable} cover={portCover} />
       </div>
       {tier !== 'S' ? (
         <span className="awwo-converged-label awwo-node-icon-label" aria-hidden="true">

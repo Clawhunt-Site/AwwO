@@ -264,7 +264,15 @@ export interface TilePortsProps {
   /** False: the handles are not Tab stops (an icon's that is not the board's one stop among the icons; the keyboard
    *  reaches them after that icon's button). Omitted → they are, as a card's are. */
   tabbable?: boolean;
+  /** How much of the stage's left and right edges a panel lying over the stage covers, in screen pixels (the canvas
+   *  assistant floating over it, the node's configuration panel): a field label there would rest under the panel, so
+   *  a port that near counts as having no room beside it. Omitted → none. */
+  cover?: PortCover;
 }
+
+/** The screen pixels of the stage's left and right edges that a panel lying over the stage covers. */
+export interface PortCover { left: number; right: number }
+const NO_COVER: PortCover = { left: 0, right: 0 };
 
 type Translate = ReturnType<typeof useCanvasI18n>['t'];
 
@@ -323,23 +331,29 @@ const NO_PORTS: ReadonlySet<string> = new Set();
 
 /**
  * The ports (`side:id`) whose field label sits inside the tile: those the stage leaves no room beside, where it would
- * clip the label (an opened node fills the stage but for a 28 px margin). One observer per side watches each handle
+ * clip the label (an opened node fills the stage but for a 28 px margin). Inside, the label would cover the tile's
+ * content, so TilePorts draws it there only while its port is hovered or focused. One observer per side watches each handle
  * against the stage less the label's room on that side, so a pan, a zoom or the opening glide decides again; the
  * handle does not move when its label does, so the answer never flips back and forth. The label is drawn in the tile's
- * own pixels and the observer's margin is in screen pixels, so the margin is the room times the zoom: a new zoom gives
- * a new `watch`, React hands each handle over to it and it makes the side's observer anew, while a render at the same
- * zoom keeps them. Without IntersectionObserver every label stays outside.
+ * own pixels and the observer's margin is in screen pixels, so the margin is the room times the zoom, and on each side
+ * the width a panel lying over that edge of the stage covers (`cover`) as well: a label under the panel is no more
+ * readable than one the stage clips. A new zoom or cover gives a new `watch`, React hands each handle over to it and it
+ * makes the side's observer anew where its margin changed, while a render with the same ones keeps them. Without
+ * IntersectionObserver every label stays outside.
  */
-function useFieldLabelsInside(zoom: number): [ReadonlySet<string>, (el: HTMLButtonElement | null) => (() => void) | undefined] {
+function useFieldLabelsInside(zoom: number, cover: PortCover = NO_COVER): [ReadonlySet<string>, (el: HTMLButtonElement | null) => (() => void) | undefined] {
   const [inside, setInside] = useState(NO_PORTS);
   // Rounded up, so the margin is never short of the room.
-  const margin = Math.ceil(FIELD_LABEL_ROOM_PX * zoom);
+  const room = Math.ceil(FIELD_LABEL_ROOM_PX * zoom);
+  const inputMargin = room + Math.max(0, Math.ceil(cover.left));
+  const outputMargin = room + Math.max(0, Math.ceil(cover.right));
   const observers = useRef(new Map<string, { observer: IntersectionObserver; root: Element; margin: number }>());
   useEffect(() => () => { observers.current.forEach(({ observer }) => observer.disconnect()); observers.current.clear(); }, []);
   const watch = useCallback((el: HTMLButtonElement | null) => {
     const root = el?.closest('.canvas-root');
     if (!el || !root || typeof IntersectionObserver !== 'function') return undefined;
     const side = el.dataset.portSide === 'input' ? 'input' : 'output';
+    const margin = side === 'input' ? inputMargin : outputMargin;
     let made = observers.current.get(side);
     if (!made || made.root !== root || made.margin !== margin) {
       made?.observer.disconnect();
@@ -360,7 +374,7 @@ function useFieldLabelsInside(zoom: number): [ReadonlySet<string>, (el: HTMLButt
     const watching = made.observer;
     watching.observe(el);
     return () => watching.unobserve(el);
-  }, [margin]);
+  }, [inputMargin, outputMargin]);
   return [inside, watch];
 }
 
@@ -368,22 +382,45 @@ function useFieldLabelsInside(zoom: number): [ReadonlySet<string>, (el: HTMLButt
  * The node's typed port handles, positioned on the tile from the SAME anchor math the wires use
  * (`portAnchorWorld` minus the node origin) so a handle can never sit off the line that leaves it.
  */
-export function TilePorts({ node, wiring, media, scale = 1, tabbable = true }: TilePortsProps) {
+export function TilePorts({ node, wiring, media, scale = 1, tabbable = true, cover }: TilePortsProps) {
   const { t, locale } = useCanvasI18n();
   const interactive = wiring?.interactive ?? false;
+  // The port (`side:id`) whose label and guide are shown in full: the hovered one, else the focused one.
   const [expandedLabel, setExpandedLabel] = useState<string | null>(null);
+  // The focused port apart from the hovered one, so a pointer passing over another port and off it again gives the
+  // label back to the focused port rather than to none.
+  const focusedLabel = useRef<string | null>(null);
+  const ports = portsFor(node);
+  const portKeys = ports.map(p => `${p.side}:${p.id}`).join('\n');
+  // A port gone (deleted here or by someone else, or undone) takes its hover and focus with it: put back under the same
+  // key it must not show its label as if it were still hovered.
+  useEffect(() => {
+    const keys = new Set(portKeys.split('\n'));
+    if (focusedLabel.current && !keys.has(focusedLabel.current)) focusedLabel.current = null;
+    setExpandedLabel(current => (current && !keys.has(current) ? null : current));
+  }, [portKeys]);
+  // An inert port (a run, a read-only board, simple mode) has no hover or focus state: one that becomes inert while
+  // hovered or focused lets its label go at once.
+  useEffect(() => {
+    if (interactive) return;
+    focusedLabel.current = null;
+    setExpandedLabel(null);
+  }, [interactive]);
+  // A wire being dragged ends on a port of the other side; the pointer is captured by the port it started from, so no
+  // other port is hovered meanwhile, and their labels are drawn for as long as the drag lasts.
+  const dragSide = interactive ? wiring?.wireDrag?.side : undefined;
   const guideIds = useId();
   // Counter-scale about the port's anchor: the guide's top-left sits on the anchor (transform-origin 0 0), is moved
   // beside the port in its own pixels, then scaled by 1/scale, so on screen it is always the same size and distance.
   const zoom = Number.isFinite(scale) && scale > 0 ? scale : 1;
   const unzoom = 1 / zoom;
   const hasContract = node.kind === 'session' && Boolean(node.contract);
-  const [labelsInside, watchLabelRoom] = useFieldLabelsInside(zoom);
+  const [labelsInside, watchLabelRoom] = useFieldLabelsInside(zoom, cover);
   const mediaPorts = node.kind === 'session' && !hasContract && Boolean(mediaKindOf(node.agentKind ?? ''));
   const editPorts = node.kind === 'edit';
   return (
     <>
-      {portsFor(node).map((p) => {
+      {ports.map((p) => {
         const anchor = portAnchorWorld(node, p.id);
         if (!anchor) return null; // node does not expose this port — draw nothing, invent nothing
         const armed = wiring?.pendingPort?.nodeId === node.id && wiring?.pendingPort?.portId === p.id;
@@ -401,7 +438,17 @@ export function TilePorts({ node, wiring, media, scale = 1, tabbable = true }: T
             : mediaPorts && p.id === 'context' ? t('media.portContext')
               : mediaPorts && p.id === 'result' ? t('media.portResult') : p.id;
         const portKey = `${p.side}:${p.id}`;
-        const expanded = expandedLabel === portKey;
+        const expanded = interactive && expandedLabel === portKey;
+        // A field label the stage has no room for beside its port would sit inside the tile, over its content (the
+        // task, a message, the chat box's buttons): it is drawn there only while its port is hovered or focused, or is
+        // a dragged wire's possible end, as a tooltip would be, and not at rest. With room it rests outside, as always.
+        // An inert port (simple mode, a read-only board, a node running, being set up or held for binding) is never
+        // hovered or focused, so there a label without room is not drawn: its name and title still say its field.
+        const labelInside = labelsInside.has(portKey);
+        // Not one canConnect would refuse anyway: a port of the node the drag started on, or an input that takes one wire
+        // and has it.
+        const dragTarget = dragSide !== undefined && dragSide !== p.side && wiring?.wireDrag?.from.nodeId !== node.id
+          && !(p.side === 'input' && !p.multi && wires > 0);
         const headline = `${portLabel} · ${typeLabel}${p.multi ? ` · ${t('ports.multi')}`
           : (mediaPorts || editPorts) && p.side === 'input' ? ` · ${t('media.portSingle')}` : ''}${wires ? ` · ${t('ports.connected', { count: wires })}` : ''}`;
         // A media port that can be wired explains itself where the wiring happens. Inert ports (read-only, simple
@@ -433,20 +480,32 @@ export function TilePorts({ node, wiring, media, scale = 1, tabbable = true }: T
             disabled={!interactive}
             tabIndex={tabbable ? undefined : -1}
             onMouseEnter={() => setExpandedLabel(portKey)}
-            onMouseLeave={(event) => {
-              if (document.activeElement !== event.currentTarget) setExpandedLabel(null);
+            onMouseLeave={() => setExpandedLabel(focusedLabel.current)}
+            onFocus={() => { focusedLabel.current = portKey; setExpandedLabel(portKey); }}
+            onBlur={() => {
+              if (focusedLabel.current === portKey) focusedLabel.current = null;
+              // Only its own: a port the pointer is on keeps its label when focus leaves another.
+              setExpandedLabel(current => (current === portKey ? null : current));
             }}
-            onFocus={() => setExpandedLabel(portKey)}
-            onBlur={() => setExpandedLabel(null)}
+            onKeyDown={(e) => {
+              // Escape puts away what this port shows only on hover or focus, and only that (WCAG 1.4.13: such content can
+              // be dismissed): its guide, or a label drawn inside the tile. A label resting outside is there anyway, so a
+              // port with room, or one showing nothing, passes the key on and the canvas's Escape still unwinds.
+              if (e.key !== 'Escape' || !expanded || !(guide || (hasContract && labelInside))) return;
+              e.stopPropagation();
+              focusedLabel.current = null;
+              setExpandedLabel(null);
+            }}
             onPointerDown={(e) => wiring?.onPortPointerDown(node.id, p, e)}
             onClick={(e) => wiring?.onPortClick(node.id, p, e)}
             onDoubleClick={(e) => e.stopPropagation()}
           >
-            {hasContract ? <span className="canvas-port-field-label" aria-hidden="true" style={{
-              // Absolutely positioned beside the handle, outside the tile where the stage has room for it, else inside:
-              // no card layout or hit-target changes.
+            {hasContract && (!labelInside || expanded || dragTarget) ? <span className="canvas-port-field-label" aria-hidden="true" style={{
+              // Absolutely positioned beside the handle, outside the tile where the stage has room for it, else inside
+              // (and then only while the port is hovered, focused or a dragged wire's possible end): no card layout or
+              // hit-target changes.
               position: 'absolute', top: '50%', transform: 'translateY(-50%)',
-              ...((p.side === 'input') !== labelsInside.has(portKey) ? { right: 18 } : { left: 18 }),
+              ...((p.side === 'input') !== labelInside ? { right: 18 } : { left: 18 }),
               maxWidth: expanded ? 220 : FIELD_LABEL_MAX_PX, width: 'max-content', boxSizing: 'border-box',
               whiteSpace: expanded ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               overflowWrap: 'anywhere', pointerEvents: 'none', textAlign: 'left',
