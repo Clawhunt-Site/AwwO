@@ -46,8 +46,11 @@ export interface Showpiece {
   /** The page's markup around the modules: its style and its boot screen. */
   readonly style: string;
   readonly fonts: string;
-  /** The check's frames (seconds), viewport and budgets. */
-  readonly check: { readonly frames: ReadonlyArray<number>; readonly viewport: string; readonly drawCalls: number; readonly triangles: number };
+  /** The check's frames (seconds), viewport and budgets. `heldClock: false` leaves out the held-clock check, whose second
+   * load of the page a heavy piece cannot afford within one command (GATHER's production run, 2026-11-11: on the
+   * software renderer each heavy load and each browser context opened after one costs 13 to 14 s, and the frames never
+   * fitted in the 115 s budget); the frames still drive window.renderAt. */
+  readonly check: { readonly frames: ReadonlyArray<number>; readonly viewport: string; readonly drawCalls: number; readonly triangles: number; readonly heldClock?: false };
   /** What the second pass looks for in the frames, as lines. */
   readonly look: string;
 }
@@ -130,7 +133,7 @@ const builder = (piece: Showpiece, kernel: string, module: ShowpieceModule, row:
 
 /** The page check as both passes run it: a headless browser with every request blocked but three.js r186, the self-test,
  * and the page's frames at the piece's seconds with its draw budget. */
-export const showpieceCheck = (piece: Showpiece) => `awwo-check-page ${piece.file} --out check --viewport ${piece.check.viewport} --wait-ms 3000 --timeout-ms 40000 --budget-ms 115000 --frames ${piece.check.frames.join(',')} --expect-motion --max-draw-calls ${piece.check.drawCalls} --max-triangles ${piece.check.triangles}`;
+export const showpieceCheck = (piece: Showpiece) => `awwo-check-page ${piece.file} --out check --viewport ${piece.check.viewport} --wait-ms 3000 --timeout-ms 40000 --budget-ms 115000${piece.check.heldClock === false ? ' --no-held-clock' : ''} --frames ${piece.check.frames.join(',')} --expect-motion --max-draw-calls ${piece.check.drawCalls} --max-triangles ${piece.check.triangles}`;
 const CHECK_SAYS = (piece: Showpiece) => `(a headless browser with every request blocked but three.js 0.186.1, which it answers from its own copy; it takes a screenshot after 3 s, runs window.awwoSelfTest(), then brings the page to ${piece.check.frames.join(', ')} s by window.renderAt(t), counts each frame's draw calls and triangles and writes the frames side by side to check/frames.jpg; it writes check/report.json; a check takes a minute or two, and a command may run 120 s)`;
 
 // The two passes share their steps. The budget rules are the flagships': a pass that fixed without publishing ran out

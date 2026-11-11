@@ -240,9 +240,12 @@ it('checks the page as a piece that moves: its frames, their motion and a draw b
   for (const item of CANVASES) {
     const spec = piece(item.id);
     const command = showpieceCheck(spec);
-    expect(command).toBe(`awwo-check-page ${spec.file} --out check --viewport ${spec.check.viewport} --wait-ms 3000 --timeout-ms 40000 --budget-ms 115000 --frames ${spec.check.frames.join(',')} --expect-motion --max-draw-calls ${spec.check.drawCalls} --max-triangles ${spec.check.triangles}`);
+    expect(command).toBe(`awwo-check-page ${spec.file} --out check --viewport ${spec.check.viewport} --wait-ms 3000 --timeout-ms 40000 --budget-ms 115000${spec.check.heldClock === false ? ' --no-held-clock' : ''} --frames ${spec.check.frames.join(',')} --expect-motion --max-draw-calls ${spec.check.drawCalls} --max-triangles ${spec.check.triangles}`);
     // Within the check's own limits (deploy/saas/workspace/tools: frames.mjs, awwo-check-page.mjs) and a 120 s command.
     expect(spec.check.frames.length).toBeGreaterThanOrEqual(3);
+    // GATHER's text is the one its production run used; the two pieces after it leave out the held-clock reload, which a
+    // heavy page cannot afford within one command on the software renderer.
+    expect(spec.check.heldClock, item.id).toBe(item.id === 'gather-glass' ? undefined : false);
     expect(spec.check.frames.length).toBeLessThanOrEqual(8);
     expect([...spec.check.frames].sort((a, b) => a - b)).toEqual(spec.check.frames);
     expect(new Set(spec.check.frames).size).toBe(spec.check.frames.length);
@@ -354,9 +357,9 @@ it('pins the canonical canvas text, its assembly template and sandbox runtimes i
   const moss = canonicalCanvasText(createOfficialDocument(MOSSGREEN));
   expect(moss).toContain('{{in:from_course}}');
   expect(moss).toContain('"mossgreen.html"');
-  expect(createHash('sha256').update(moss).digest('hex')).toMatchInlineSnapshot(`"830590e1a5a66473f663834437cf12f007a356049738a8b371f4bfefc2b232a5"`);
+  expect(createHash('sha256').update(moss).digest('hex')).toMatchInlineSnapshot(`"19120a9bbba0adab85249fbfd908f6665bd39d0fc2e3df7e1624a2a24c84b85d"`);
   const freight = canonicalCanvasText(createOfficialDocument(FREIGHT));
   expect(freight).toContain('{{in:from_pilot}}');
   expect(freight).toContain('"night-freight.html"');
-  expect(createHash('sha256').update(freight).digest('hex')).toMatchInlineSnapshot(`"106e0a92854cb0c02228b1ce833e986aff117834d59a03683db51e22589ad8ec"`);
+  expect(createHash('sha256').update(freight).digest('hex')).toMatchInlineSnapshot(`"afefbbf50c7d169787a86974bf495ac93e356ea0d8dc236fbd6164e3e5650cca"`);
 });

@@ -378,17 +378,18 @@ const MOSSGREEN: Showpiece = {
   directionSections: MOSSGREEN_DIRECTION_SECTIONS,
   fonts: 'Pixelify Sans, Manrope or JetBrains Mono',
   style: 'html,body{margin:0;height:100%;overflow:hidden;background:#cdeef7;color:#1d1a2b;font:13px Manrope,system-ui,sans-serif}#stage{position:fixed;inset:0}#stage canvas{display:block;width:100%;height:100%;touch-action:none;image-rendering:pixelated}#boot{position:fixed;inset:0;display:grid;place-items:center;background:linear-gradient(#9fd6ec 0%,#cdeef7 58%,#7fb84a 58%,#3f7a3a 100%);font:400 72px/1 "Pixelify Sans",monospace;color:#1d1a2b}',
-  check: { frames: [1, 6, 12, 20, 30], viewport: '960x600', drawCalls: 150, triangles: 300000 },
+  check: { frames: [1, 8, 18, 30], viewport: '960x600', drawCalls: 150, triangles: 300000, heldClock: false },
   look: `- the hole in play sits whole inside the part of the stage the panel leaves free, with room around it, at every frame;
 - every frame is pixel art: hard 3 by 3 blocks, ink outlines on silhouettes and creases, three-band shading, gradients only by dither, and no colour outside the palette;
 - at 1 s the ball waits on hole 1's tee with its dotted aim; later frames follow the autopilot through the holes, and by 30 s it has left hole 1;
-- the mill's sails have turned between frames, the view has turned at 12 s, and the shadows fall the same way in every frame;
+- the mill's sails have turned between frames, the view has turned by 18 s, and the shadows fall the same way in every frame;
 - no frame is mostly dark (pixels.dark under 0.6) or burnt out (pixels.bright under 0.05), and the course reads (lumaStdDev 14 or more);
 - the masthead, the panel, the readouts and the cards are readable and nothing overlaps.`,
   modules: [
     { id: 'core', title: 'Kernel', limit: 16000, duties: `${CORE_DUTIES}
+- The frame loop yields to a slow device: when the last draw took over 60 ms it waits three times as long before the next one (G.loop.frame still draws at once).
 - Tests 1-3; plant P1.` },
-    { id: 'render', title: 'Pixel renderer and light', limit: 18000, art: true, duties: `- A WebGLRenderer in the boot root (no WebGL 2: G.fail('This piece needs WebGL 2.') and nothing else), created inside try and catch; the canvas's pixel ratio by the tier (A9).
+    { id: 'render', title: 'Pixel renderer and light', limit: 18000, art: true, duties: `- A WebGLRenderer in the boot root (no WebGL 2: G.fail('This piece needs WebGL 2.') and nothing else), created inside try and catch, with antialias off (the pixel pass draws its own edges); the canvas's pixel ratio by the tier (A9); on a software renderer (the renderer string WEBGL_debug_renderer_info gives names a software rasterizer, as the page check's does) with quality on auto it starts at the low tier. The page loads and draws its first frame within 3 s on a software renderer with one CPU (the page check's): no work at init longer than 50 ms.
 - A8's pixels: two WebGLRenderTargets of target() size with nearest filtering, the first with a DepthTexture; the scene drawn into it, then again with scene.overrideMaterial a MeshNormalMaterial into the second; then one FullScreenQuad pass of a ShaderMaterial to the canvas: the outline, the Bayer dither and the palette through a Data3DTexture lookup table of 32 by 32 by 32 RGBA8 cells, each holding the palette colour nearest in OKLab to its cell's centre, built at init; passes() lists world, normals, pixel. quantize() reads the same table: the cell of round(c * 31) on each channel.
 - The sky as a gradient behind the world, in the world pass. Light by A8 and the direction: the key (a DirectionalLight with one shadow map by the tier, PCFShadowMap), a hemisphere fill; toon, a DataTexture of three bands with nearest filtering; uDusk eased to G.state.dusk at 2 a second (jumping while recording) dims and recolours the key, the fill and the sky.
 - The camera of A2: an OrthographicCamera 30 units from its target at yaw 45 + view.yaw (plus A7's drift while G.playing) and pitch view.pitch, its frustum from the hole in play (G.course.holes[G.play.hole - 1]) and view.free, or the close view on the ball; eased, jumping while recording; cam.setViewOffset centres it in view.free.
@@ -604,16 +605,17 @@ const FREIGHT: Showpiece = {
   directionSections: FREIGHT_DIRECTION_SECTIONS,
   fonts: 'Oxanium, Manrope or JetBrains Mono',
   style: 'html,body{margin:0;height:100%;overflow:hidden;background:#0d1420;color:#e8e4da;font:13px Manrope,system-ui,sans-serif}#stage{position:fixed;inset:0}#stage canvas{display:block;width:100%;height:100%;touch-action:none}#boot{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 30%,#5a3a1c 0%,#1a2230 45%,#0d1420 80%);font:600 72px/1 Oxanium,system-ui,sans-serif;letter-spacing:.04em;color:#e8e4da}',
-  check: { frames: [2, 10, 30, 67, 80], viewport: '960x600', drawCalls: 250, triangles: 600000 },
+  check: { frames: [2, 30, 67, 80], viewport: '960x600', drawCalls: 250, triangles: 600000, heldClock: false },
   look: `- every frame is first person, at night in rain: the lamps' orange pools and cones, the wet ground mirroring the lights, the streaks of rain, fog in the distance;
-- at 2 s the visitor stands by the hut looking into the yard; at 10 s and 30 s the levers, the points and the signal are where the autopilot works and watches; at 67 s the headlight and the locomotive come past the signal; at 80 s the train runs slowly into its siding;
+- at 2 s the visitor stands by the hut looking into the yard; at 30 s the levers, the points and the signal are where the autopilot has worked and now watches; at 67 s the headlight and the locomotive come past the signal; at 80 s the train runs slowly into its siding;
 - the signal reads red or green from where the visitor stands, and the headlight blooms without burning out the frame;
 - no frame is mostly black (pixels.dark under 0.6: the night is a deep blue-grey and its lamps and pools must read) or burnt out (pixels.bright under 0.05), and the yard reads (lumaStdDev 10 or more);
 - the masthead, the panel, the card, the diagram and the readouts are readable and nothing overlaps.`,
   modules: [
     { id: 'core', title: 'Kernel', limit: 16000, duties: `${CORE_DUTIES}
+- The frame loop yields to a slow device: when the last draw took over 60 ms it waits three times as long before the next one (G.loop.frame still draws at once).
 - Tests 1-3; plant P1.` },
-    { id: 'render', title: 'Renderer, rain light and grade', limit: 18000, art: true, duties: `- A WebGLRenderer in the boot root (no WebGL 2: G.fail('This piece needs WebGL 2.') and nothing else), created inside try and catch; pixel ratio by the tier (A10); AgX tone mapping and the direction's exposure.
+    { id: 'render', title: 'Renderer, rain light and grade', limit: 18000, art: true, duties: `- A WebGLRenderer in the boot root (no WebGL 2: G.fail('This piece needs WebGL 2.') and nothing else), created inside try and catch, with antialias off (the bloom and the output smooth the edges); pixel ratio by the tier (A10); on a software renderer (the renderer string WEBGL_debug_renderer_info gives names a software rasterizer, as the page check's does) with quality on auto it starts at the low tier; AgX tone mapping and the direction's exposure. Any environment from a PMREM of RoomEnvironment at size 64 (a larger one costs seconds on a software renderer), and the page loads and draws its first frame within 3 s on a software renderer with one CPU (the page check's).
 - The camera of A2 at G.walker.eye(), looking along G.walker.view(), each frame; its field of view by the free part of the stage (G.render.free, which the panel sets).
 - The ground of A9: a Reflector at half the drawing size (a quarter on medium, none on low) given a shader that mixes the mirror into the direction's wet ballast and asphalt by a puddle mask drawn in code; on low a plain glossy ground.
 - The light by the direction: the lamps (G.world places their meshes; render owns the light objects of the lantern and the environment's strength), fog of the direction's colour and density, the lantern (a SpotLight at the eye along the view, on while G.state.lantern).
