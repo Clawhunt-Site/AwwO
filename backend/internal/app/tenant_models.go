@@ -35,6 +35,19 @@ const maxAllowedModels = 64
 // model is selected for it, by the user or by the canvas assistant at the user's request.
 const userChosenProvider = "deepseek"
 
+// userChosenModelPrefix names the other models only a user may choose, by their own id whatever their provider:
+// Anthropic's Claude Fable models (bedrock.claude-fable-5-2 since 2026-11-11). Amazon Bedrock keeps every Claude Fable
+// request for up to 30 days and AWS staff may read what its systems flag, so clause 08's Claude Fable paragraph promises
+// that a request goes to one only when someone in the workspace selected it, and that AwwO never moves a request to one
+// by itself. Keyed on the id, a later Fable entry is held to the same rule before anyone has looked at it.
+const userChosenModelPrefix = "claude-fable-"
+
+// userChosenModel reports whether a model id names a model only a user may choose by its id alone (a catalog id, with
+// or without the bedrock. prefix the Bedrock catalog gives it).
+func userChosenModel(id string) bool {
+	return strings.HasPrefix(strings.TrimPrefix(id, "bedrock."), userChosenModelPrefix)
+}
+
 var errModelNotAllowed = errors.New("model_not_allowed")
 var errMalformedAllowlist = errors.New("workspace model allowlist is malformed")
 
@@ -126,10 +139,14 @@ func (h piHealth) defaultModel() string {
 	return ""
 }
 
-// userChosenOnly reports whether a model of this catalog runs only where someone chose it (userChosenProvider). The
-// worker's own default may be missing from the Pi worker's list, or listed without a provider (probeRuntime accepts
-// both), so its provider is then the catalog's own.
+// userChosenOnly reports whether a model of this catalog runs only where someone chose it: a Claude Fable model by
+// its id (userChosenModel), or the DeepSeek API's by its provider (userChosenProvider). The worker's own default may be
+// missing from the Pi worker's list, or listed without a provider (probeRuntime accepts both), so its provider is then
+// the catalog's own.
 func (h piHealth) userChosenOnly(model string) bool {
+	if userChosenModel(model) {
+		return true
+	}
 	provider := h.modelProvider(model)
 	if provider == "" && model != "" && model == h.Model {
 		provider = h.Provider

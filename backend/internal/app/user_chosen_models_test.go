@@ -492,3 +492,39 @@ func TestPostgresARunWithoutAModelNeverLandsOnADeepSeekDefault(t *testing.T) {
 		t.Fatal("an empty selection ran on", model, reached.Load())
 	}
 }
+
+// Anthropic's Claude Fable models are held to the DeepSeek rule by their own id, whatever their provider: clause 08's
+// Claude Fable paragraph (2026-11-11) sends a request to one only when someone in the workspace selected it.
+func TestClaudeFableModelsRunOnlyWhereSomeoneChoseThem(t *testing.T) {
+	for id, want := range map[string]bool{"bedrock.claude-fable-5-2": true, "bedrock.claude-fable-6": true, "claude-fable-5": true,
+		"bedrock.claude-opus-5-5": false, "bedrock.claude-fable": false, "fable-5-2": false, "bedrock.xclaude-fable-5": false, "": false} {
+		if got := userChosenModel(id); got != want {
+			t.Fatalf("userChosenModel(%q) = %v, want %v", id, got, want)
+		}
+	}
+	fable := piModel{ID: "bedrock.claude-fable-5-2", Provider: "bedrock"}
+	house := piModel{ID: "house", Provider: "llmgate"}
+	h := piHealth{Model: "house", Provider: "llmgate", Models: []piModel{fable, house}}
+	if !h.userChosenOnly(fable.ID) || h.userChosenOnly(house.ID) {
+		t.Fatal("a Bedrock Claude Fable model is not marked as one only a user may choose")
+	}
+	// Managed execution lists a Bedrock model only from a worker that serves it through its Bedrock bridge.
+	bridged := h
+	bridged.ComputerBedrock = true
+	marked := map[string]any{}
+	for _, m := range computerModelChoices(runtimePI, bridged) {
+		marked[m["id"].(string)] = m["userChosen"]
+	}
+	if marked[fable.ID] != true || marked[house.ID] != nil {
+		t.Fatalf("the managed-execution choices marked %v", marked)
+	}
+	// Never an empty selection's default: not as the worker's own default, and not as a substitute sorted first.
+	ownDefault := piHealth{Model: fable.ID, Provider: "bedrock", Models: []piModel{fable, house}}
+	if got := ownDefault.defaultModel(); got != "" {
+		t.Fatal("a Claude Fable worker default resolved an empty selection", got)
+	}
+	allowed := []string{fable.ID, "house"}
+	if got := (modelEntitlement{allowed: &allowed, tenant: "t"}).apply(ownDefault).defaultModel(); got != "house" {
+		t.Fatal("the substitute was a Claude Fable model", got)
+	}
+}

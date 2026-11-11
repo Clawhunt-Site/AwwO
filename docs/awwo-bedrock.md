@@ -239,15 +239,16 @@ AWS 顾问要求上线前逐一确认已开放模型的数据政策。以下来�
 - **起因**：业主 2026-11-11「在awwo的模型列表中是上线fable5.2」。目录第一项加入 `bedrock.claude-fable-5-2`（Claude Fable 5.2），`verified` 为空：还没有任何一次经生产 worker 的真实 ConverseStream 调用应答，所以 `builtin` 模式不提供它（目录 49 项，已核验仍是 40 个）。只有 `builtin-all`，或在 `AWWO_BEDROCK_MODELS` 里点名，worker 才会提供它：下面的步骤走完之前，任何 worker 都不要用 `builtin-all`，也不要点名它。
 - **2026-11-11 从 AWS 读到的**：us-east-1 有两个 ACTIVE 的推理配置文件，`global.anthropic.claude-fable-5-2`（目录的 `target`）与 `us.anthropic.claude-fable-5-2`（`fallbackTarget`）。Bedrock 标价（global、标准档，每百万 token）：输入 $8、输出 $40，缓存读取 $0.20，缓存写入 $10（5 分钟）/ $16（1 小时）。
 - **账号留存设置**：us-east-1 控制面的留存模式于 2026-11-11 01:33:18Z 设为 `provider_data_share`（us-east-2 仍是 `none`；us-west-2 与 mantle 端点的设置本节没有记录）。10-07 14:51Z 起它是 `none`，需要留存的模型会被 Bedrock 直接拒绝；改回 `provider_data_share` 之后，需要留存的模型才可能应答。代价：生产的 Bedrock 调用都从 us-east-1 发起，「设置为 `none`，所以能应答的模型都不留存」这条账号级的证明对它不再成立；其余 40 个模型的默认行为仍按上文 AWS 文档，但不再由这项设置兜底。
-- **留存与审阅：没有确认**：Fable 5 / 5.1 对全部流量留存最长 30 天，并由 AWS 审阅分类器标记的内容，10-07 因此下架。Fable 5.2 是否一样**没有确认**：要读它的模型卡，或者问 AWS。确认之前按「与 5 / 5.1 相同」对待。
+- **留存与审阅：已确认（2026-11-11，ClawHunt 的隐私条款会话读 AWS 一手页面）**：AWS 的滥用检测页、数据留存页和 Fable 5.2 的模型卡都点名了 5.2，和 5 / 5.1 一样：全部请求留存最长 30 天，分类器标记的内容可能由 AWS 员工查看；不给 Anthropic，不用于训练；要求账号留存模式为 `aws_review`（或旧名 `provider_data_share`，AWS 说两者处理相同）。`provider_data_share` 不会让允许 `none` 的其他模型被留存或审阅（数据留存页「Mixed-model projects」）。
 - **行为还没有探测**：它的思考方式、强度档位、流式工具调用都没有探测过。目录和桥先按 Fable 系列的文档（Fable 5.1）与 Opus 5.5 的做法写，探测时逐项确认：
   - 思考始终开启（关闭或给预算是 400），默认不返回思考文字。所以两个桥的 `SUMMARIZED_THINKING_MODELS`、Python 桥的 `THINKS_SILENTLY` 都加入 `anthropic.claude-fable-5-2`，请求带 `thinking: {type: "adaptive", display: "summarized"}`，和 Opus 5.5 一样。
   - 强度经 `output_config.effort` 发出。目录列 `low`/`medium`/`high`（文档里还有 `xhigh`、`max`，桥不发），默认 `high`（只显示，不发送）。
   - 强制 `tool_choice`（any / 指定工具）按文档是 400。
   - Python 桥的 `QUICK_FIRST_BYTE_SECONDS` **没有**加它：没有测过它的任何调用，所以它的调用不论带不带摘要，都等流的 15 分钟空闲上限，不会在 3 分钟被切断。
   - `maxTokens` 64,000（与 Opus 5.5 同样的理由：先思考再回答，文档上限 128K），`contextWindow` 200,000，没有 `proseBytesPerToken`（没有测过，按字节规则）。Pi 的 `AWWO_PI_BEDROCK_THINKING_MODELS` 不能点名它：列了强度的模型不接受思考预算。
+- **只能由用户自己选（2026-11-11 起在代码里）**：Claude Fable 模型按 id 归入 DeepSeek 那条规则（`tenant_models.go` 的 `userChosenModel`，前缀 `claude-fable-`）：只有工作区里的人自己选了才会用到，AwwO 的规划、助手路由、默认模型、图片切换和后台调用都不会选它；AwwO 云端的中转既不列出也不调用它（`relay_limits.go`）。画布助手的方案新加的节点会沿用人给助手选的模型（DeepSeek 自 10-23 起就是这样），条款要写到这一点，或者在开放前改成新节点不沿用。
 - **开放之前，按顺序**：
-  1. 隐私条款先写明 Fable 5.2 和它的留存、审阅方式（先确认上面「留存与审阅」）。
+  1. 隐私条款先写明 Fable 5.2 和它的留存、审阅方式（条款第 08 条的 Claude Fable 段，等业主批准后上线）。
   2. worker 的 IAM 策略加入 Fable 5.2 的资源，也就是 10-07 删去的 6 个 Fable 资源的后继：两个推理配置文件，以及 `ListInferenceProfiles` 报告的它们各自路由到的基础模型 ARN。
   3. 经生产 worker 做真实探测：两个配置文件各自应答；思考摘要在流里出现（单独调用、带强度、带工具、历史里有工具轮次）；`low`/`medium`/`high` 都被接受；流式工具调用可用。有一项不符就先改目录和上面的行为表，再往下走。
   4. 探测通过，把日期写进目录的 `verified`。

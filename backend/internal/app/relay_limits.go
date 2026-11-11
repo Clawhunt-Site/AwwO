@@ -316,7 +316,9 @@ func (a *App) relayCatalog(ctx context.Context) (relayWorker, error) {
 // computerBedrock), with limits a call can be sized by, and its calls at once (maxConcurrency). Its Bedrock models
 // alone: the relay sends AwwO 本地版's calls on to Bedrock (owner 2026-10-24: 「必须要通过本地连接云端服务器再发送到
 // bedROck连接的方案来处理」), as clause 08 of ClawHunt's privacy policy says, and a Pi worker always lists its own
-// default model first, which cannot be a Bedrock one.
+// default model first, which cannot be a Bedrock one. A model only a user may choose (userChosenModel: the Claude Fable
+// models) is never among them: clause 08 says they are not available to AwwO 本地版 through AwwO 云端, so a connection
+// key can neither list nor call one, whatever the worker serves.
 func (a *App) readRelayCatalog() (relayWorker, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -345,7 +347,7 @@ func (a *App) readRelayCatalog() (relayWorker, error) {
 	}
 	seen := map[string]bool{}
 	for _, m := range health.Models {
-		if m.ID == "" || len(m.ID) > 200 || seen[m.ID] || m.Provider != "bedrock" || !health.ComputerBedrock ||
+		if m.ID == "" || len(m.ID) > 200 || seen[m.ID] || m.Provider != "bedrock" || !health.ComputerBedrock || userChosenModel(m.ID) ||
 			m.ContextWindow < 4096 || m.MaxOutputTokens < 1 || m.MaxOutputTokens+256 >= m.ContextWindow {
 			continue
 		}

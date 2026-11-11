@@ -519,3 +519,23 @@ func TestRelayCallsToBedrockKeepTheBridgesRules(t *testing.T) {
 		}
 	}
 }
+
+// The relay never lists or serves a Claude Fable model: clause 08 says they are not available to AwwO 本地版 through
+// AwwO 云端, whatever the relay worker's catalog holds.
+func TestRelayNeverServesAModelOnlyAUserMayChoose(t *testing.T) {
+	health := strings.Replace(relayHealth, `"models":[`, `"models":[
+	{"id":"bedrock.claude-fable-5-2","name":"Claude Fable 5.2","provider":"bedrock","providerModel":"global.anthropic.claude-fable-5-2","protocol":"chat_completions","contextWindow":200000,"maxOutputTokens":64000},`, 1)
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, health) }))
+	defer worker.Close()
+	c := testConfig()
+	c.Relay, c.RelayWorkerURL, c.RelayWorkerToken = true, worker.URL, strings.Repeat("w", 32)
+	got, e := New(nil, c).relayCatalog(context.Background())
+	if e != nil || len(got.models) != 2 {
+		t.Fatal("the relay's models", got, e)
+	}
+	for _, m := range got.models {
+		if userChosenModel(m.ID) {
+			t.Fatal("the relay serves a Claude Fable model", m.ID)
+		}
+	}
+}

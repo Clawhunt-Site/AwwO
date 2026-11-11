@@ -389,9 +389,9 @@ func (a *App) reserveInvocation(ctx context.Context, tid, rid, invID, model stri
 				e = errModelNotAllowed
 			}
 		}
-		// A model only a user may choose (userChosenProvider) never runs as the operator's own call: AwwO does not plan
-		// on one (plannerModelSnapshot), and a call admitted as the operator's on one anyway is refused here.
-		if e == nil && operatorPaid && facts != nil && (facts.UserChosen || facts.Provider == userChosenProvider) {
+		// A model only a user may choose (userChosenProvider, userChosenModel) never runs as the operator's own call: AwwO
+		// does not plan on one (plannerModelSnapshot), and a call admitted as the operator's on one anyway is refused here.
+		if e == nil && operatorPaid && facts != nil && (facts.UserChosen || facts.Provider == userChosenProvider || userChosenModel(model)) {
 			e = errModelNotAllowed
 		}
 		if e == nil && facts != nil && facts.RequirePersonalConnection {
