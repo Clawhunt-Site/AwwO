@@ -313,6 +313,25 @@ it('mints a fresh canvas for every copy, keeps every agent in its sandbox comput
   }
 });
 
+// GATHER's first production run (2026-11-11) died twice over: its render's resize() read the free part of the stage
+// through G.panel.free(), whose own job was to call G.render.resize(), so the two recursed until the stack ran out; and its
+// first pass, fixing that, was cut off at 25 minutes with the page published but never handed on.
+it('makes the free part of the stage flow one way, and keeps both passes inside their 25 minutes', () => {
+  for (const item of CANVASES) {
+    const spec = piece(item.id);
+    expect(spec.api, item.id).toContain('free() -> { x, y, w, h } (it only measures: no side effect)');
+    expect(spec.api, item.id).toContain('the panel sets it, and render only reads it and never calls G.panel');
+    const panel = spec.modules.find(module => module.id === 'panel')!.duties;
+    expect(panel, item.id).toContain('render never calls G.panel, so the two never call each other');
+    for (const node of builders(item)) expect(node.task, node.id).toContain('Calls go one way');
+    for (const id of ['test', 'test2']) {
+      const task = item.nodes.find(node => node.id === id)!.task;
+      expect(task, id).toContain('Note the time (date +%s > /tmp/start)');
+      expect(task, id).toContain('from minute 17 on run no more checks');
+    }
+  }
+});
+
 it('writes the canvas in English and names no product, company or other work', () => {
   for (const item of CANVASES) {
     const text = JSON.stringify(item);
@@ -331,13 +350,13 @@ it('pins the canonical canvas text, its assembly template and sandbox runtimes i
   expect(text).toContain(`"${SANDBOX_RUNTIME}"`);
   const plain = { ...GATHER, nodes: GATHER.nodes.map(node => ({ ...node, sandbox: undefined })) };
   expect(canonicalCanvasText(createOfficialDocument(plain))).not.toBe(text);
-  expect(createHash('sha256').update(text).digest('hex')).toMatchInlineSnapshot(`"21b8acd6395ff928597fe3d795127bd26a8b95c77defa08c7403e8c9dc30affd"`);
+  expect(createHash('sha256').update(text).digest('hex')).toMatchInlineSnapshot(`"787e3048d62f06723a2bcfe83b36b6c35092a2289fe13873749292df836df058"`);
   const moss = canonicalCanvasText(createOfficialDocument(MOSSGREEN));
   expect(moss).toContain('{{in:from_course}}');
   expect(moss).toContain('"mossgreen.html"');
-  expect(createHash('sha256').update(moss).digest('hex')).toMatchInlineSnapshot(`"d83e22c0fdfb176e5fa329bc96cef3edeafe989f84eeb53eb2dc38ca0d48b6f3"`);
+  expect(createHash('sha256').update(moss).digest('hex')).toMatchInlineSnapshot(`"830590e1a5a66473f663834437cf12f007a356049738a8b371f4bfefc2b232a5"`);
   const freight = canonicalCanvasText(createOfficialDocument(FREIGHT));
   expect(freight).toContain('{{in:from_pilot}}');
   expect(freight).toContain('"night-freight.html"');
-  expect(createHash('sha256').update(freight).digest('hex')).toMatchInlineSnapshot(`"885533d9aa5e7b53473389d9b12086bfd68a119da7613872934390f011bab6da"`);
+  expect(createHash('sha256').update(freight).digest('hex')).toMatchInlineSnapshot(`"106e0a92854cb0c02228b1ce833e986aff117834d59a03683db51e22589ad8ec"`);
 });
