@@ -505,6 +505,7 @@ Worked numbers: with the default seed the card says siding 3; the autopilot thro
 | pilot.auto | Auto play | KeyP | press (toggles G.state.auto) |
 | round.new | New round | KeyN | press |
 | piece.map | Yard map | KeyM | press (the yard diagram large over the stage) |
+| piece.selftest | Self-test | F9 | press (the self-test overlay) |
 | piece.pause | Pause | Space | press |
 | piece.quarter | Quarter speed | KeyQ | press |
 Pointer: dragging on the stage turns the view. Touch: a stick under the left thumb walks (a 40 px push is full walking speed), a drag elsewhere turns the view, a Use button bottom right holds use. Panel, top to bottom: the dispatch card (the freight's number, 'to siding N', due in m:ss, then the outcome), the yard diagram (the four sidings, the points as set, the signal's aspect, the road the points make lit, the train where it is, the visitor's dot), the levers' settings, the buttons of the verbs, the toggles. Readouts: Train (km/h, 0 digits), To the signal (m, 0 digits), Due in (s, 0 digits), You (m/s, 1 digit). Status chip: LIVE, PAUSED, SELF-PLAYING, TRAIN DUE, AT DANGER, ROUTED, MISROUTED, DERAILED or the failure. A prompt over the stage while a lever is the target: "Hold E to throw S1" (or "to clear the signal"), with a ring that fills as it is held. Hint: "WASD to walk, drag to look, Shift to run, hold E at a lever. Set the points for the card's siding, clear the signal, stand clear." Footnote: "1 unit is 1 m. The train is 84.5 m long; it slows to 6 m/s in the yard and stops 5 m short of the buffers."
@@ -564,7 +565,7 @@ const FREIGHT_API = `Freight API sheet (fixed; each module owns exactly its name
 - world: G.world = { root, cars ([six Object3Ds]), signal (the signal's head), levers ({ id: Object3D }), rain (the rain's InstancedMesh), counts() -> { meshes } }.
 - hands: G.hands = { device ('mouse' | 'touch' | 'keys'), look(dx, dy) (what a drag of dx, dy CSS pixels does), stick(dx, dy) (what a push of the touch stick does), script }.
 - sound: G.sound = { ctx (null until unlocked), unlock() (safe to call again), muted, mute(on), play(name, options) -> a handle or null, bed(name, level), voices(), render(name, seconds) -> a Promise of a Float32Array (that sound alone, offline, at 48,000 Hz), gainAt(d) (a sound's level at d m from the visitor, 1 / (1 + d / 30)), names }.
-- panel: G.panel = { el, status(text), refresh(), free() -> { x, y, w, h } (it only measures: no side effect), fallback(reason), selftest() }. Commands piece.map.
+- panel: G.panel = { el, status(text), refresh(), free() -> { x, y, w, h } (it only measures: no side effect), fallback(reason), selftest() }. Commands piece.map and piece.selftest (F9, opens selftest()).
 - System orders (G.system): hands 10, pilot 15, walker 20, train 40, yard 50, sound 94. G.onRender orders: world 20, panel 30, render 100.`;
 
 const FREIGHT_DIRECTION = `Direction (the source of the look and the sound):
@@ -665,8 +666,8 @@ const FREIGHT: Showpiece = {
 - The panel built from the registries: a button for every command with panel set (a hold verb works while pressed: pointerdown runs it true, pointerup, pointercancel and pointerleave run it false), toggles that show their state. Every control has a visible focus ring and a title with its key.
 - refresh() writes the readouts from G.readout.list() (called 8 times a second from G.onRender at order 30, and at once on a state event), the card and the diagram; status(text) sets the chip, which follows pause, mode, the round and the train.
 - free() measures the stage's rectangle less the panel's and the masthead's columns and returns it, nothing else; on window resize and at init the panel sets G.render.free to it and then calls G.render.resize() (render never calls G.panel, so the two never call each other). Under 860 px wide the page stacks: the stage keeps the top 55 % and the rest scrolls under it.
-- fallback(reason): on fail, a centred panel with the reason in place of the stage. selftest() (F9): an overlay that runs G.tests.run() and lists every test and plant, green or red, with the counts.
-- Command piece.map (the diagram large over the stage); the stylesheet inserted once at init; transitions by the motion language (140 ms for a press, 200 ms for a panel), none under reduced motion.
+- fallback(reason): on fail, a centred panel with the reason in place of the stage. selftest(): an overlay that runs G.tests.run() and lists every test and plant, green or red, with the counts; the command piece.selftest (F9) opens it, since only the hands module listens to the keyboard. Each toast event shows its text in G.ui.layer('toast') for 2.5 s.
+- Commands piece.map (the diagram large over the stage) and piece.selftest; the stylesheet inserted once at init; transitions by the motion language (140 ms for a press, 200 ms for a panel), none under reduced motion.
 - Tests 28-29; plant P10.
 - Must not touch the canvas or the simulation.` },
   ],

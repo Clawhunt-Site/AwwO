@@ -361,5 +361,5 @@ it('pins the canonical canvas text, its assembly template and sandbox runtimes i
   const freight = canonicalCanvasText(createOfficialDocument(FREIGHT));
   expect(freight).toContain('{{in:from_pilot}}');
   expect(freight).toContain('"night-freight.html"');
-  expect(createHash('sha256').update(freight).digest('hex')).toMatchInlineSnapshot(`"afefbbf50c7d169787a86974bf495ac93e356ea0d8dc236fbd6164e3e5650cca"`);
+  expect(createHash('sha256').update(freight).digest('hex')).toMatchInlineSnapshot(`"b9e4e22448c9654c7de2e24730e380cac7bd3c2e27776ec4e0f2e160eea34ea5"`);
 });
