@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SessionNode } from './canvasDoc';
 import { modelLabel, modelLabels } from '../modelLabels';
+import { ClaudeFableNote } from './ClaudeFableNote';
 import { useCanvasI18n } from './i18n';
 import { labelModelName, nodeModelName, unnamedModelText, type ModelNameSources } from './modelNames';
 import { NODE_TEAM_LIMITS, NODE_TEAM_MODES, NODE_TEAM_RUNTIMES, NODE_TEAM_TOOLS, inheritingRuntime, nodeTeamRuntimeLabel, createNodeTeam, createNodeTeamMember, nodeTeamTurnEstimate, validateNodeTeam, type NodeTeam, type NodeTeamEffortCatalogs, type NodeTeamMember, type NodeTeamMode, type NodeTeamRuntime, type NodeTeamTool, type NodeTeamModelCatalogs } from './nodeTeam';
@@ -248,6 +249,7 @@ export function NodeTeamEditor({ node, available, runtimes = ['pi'], runtimeTool
             {member.model && !catalog?.includes(member.model) ? <option value={member.model} disabled>{unknownModelText(runtime, member.model)}</option> : null}
             {(catalog ?? []).map(model => <option key={model} value={model}>{labelModelName(modelLabel(model, catalogState?.key === catalogKey ? catalogState.labels[runtime] : undefined), model, locale)}</option>)}
           </select></label>
+          <ClaudeFableNote model={member.model} locale={locale} className="canvas-inspector-hint" />
           {effortLevels.length || member.effort ? <label>{t.effort}<select className="canvas-inspector-input" value={member.effort ?? ''} disabled={disabled || !available || !effortLevels.length}
             onChange={event => editMember(index, { effort: event.target.value })}>
             <option value="">{t.effortDefault}</option>

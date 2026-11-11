@@ -22,6 +22,7 @@ import { choiceModelName, nodeModelName, selectorModelName, unlistedModelLabel, 
 import { groupModels, type ModelPaletteSelection } from '../src/canvas/modelPalette';
 import type { NodeModelChoice } from '../src/canvas/NodeModelPicker';
 import { RunTimeline } from '../src/canvas/RunTimeline';
+import { PolicySite } from '../src/canvas/ClaudeFableNote';
 import { SessionTile } from '../src/canvas/SessionTile';
 import { resetAllSessions } from '../src/canvas/sessions';
 import type { Tenant } from '../src/saas/api';
@@ -372,6 +373,40 @@ describe('an opened node', () => {
     expect(within(card()).getByText('使用 Reviewer')).toBeVisible();
     expectNoSelector(chip());
     expectNoSelector(card());
+  });
+
+  it('says what the privacy policy says of Claude Fable under the chip, only while the node’s model is one (2026-11-11)', () => {
+    // AWS keeps a Claude Fable request for up to 30 days and its staff may read what its systems flag (clause 08): said
+    // where the model is chosen, with a pointer to the clause (ClaudeFableNote.tsx), and of no other model.
+    const FABLE = 'bedrock.claude-fable-5-2';
+    const entries: ModelPaletteSelection[] = [
+      { key: JSON.stringify(['openai-agents', FABLE]), runtime: 'openai-agents', model: FABLE, label: 'Claude Fable 5.2', displayName: 'Claude Fable 5.2', providerGroup: 'claude', available: true, userChosen: true },
+      { key: JSON.stringify(['openai-agents', OPUS]), runtime: 'openai-agents', model: OPUS, label: 'Claude Opus 5.5', displayName: 'Claude Opus 5.5', providerGroup: 'claude', available: true },
+    ];
+    // withChip false: no onChangeModel (an argument of undefined would take a parameter's default, so it is a flag).
+    const tile = (model: string, withChip = true) => <PolicySite.Provider value="https://clawhunt.example">
+      <SessionTile node={brief(model)} scale={1} focused modelChoices={choices(entries)} onChangeModel={withChip ? vi.fn() : undefined} onUpdateNode={vi.fn()}
+        freeConversation initializeOnSend onSend={vi.fn()} modelNames={{ models: entries, media }} /></PolicySite.Provider>;
+    const line = () => document.querySelector('.awwo-fable-note');
+    render(tile(FABLE));
+    expect(chip().querySelector('.awwo-node-model-picker-value')!.textContent).toBe('Claude Fable 5.2');
+    expect(line()).toHaveTextContent('Claude Fable 的请求由 AWS 保存最长 30 天，被系统标记的内容可能由 AWS 人员查看。隐私政策第 08 条');
+    expect(line()).toHaveClass('canvas-composer-notice');
+    // Under the row the chip is in.
+    expect(chip().closest('.canvas-composer-accessory')!.nextElementSibling).toBe(line());
+    const clause = within(line() as HTMLElement).getByRole('link', { name: '隐私政策第 08 条' });
+    expect(clause).toHaveAttribute('href', 'https://clawhunt.example/legal');
+    expect(clause).toHaveAttribute('target', '_blank');
+    expect(clause).toHaveAttribute('rel', 'noopener noreferrer');
+    cleanup();
+    render(tile(OPUS));
+    expect(chip().querySelector('.awwo-node-model-picker-value')!.textContent).toBe('Claude Opus 5.5');
+    expect(line()).toBeNull();
+    cleanup();
+    // A box without the chip (nothing there changes the model) has no line either.
+    render(tile(FABLE, false));
+    expect(document.querySelector('.awwo-node-model-picker')).toBeNull();
+    expect(line()).toBeNull();
   });
 
   it('names a model its chip’s choices no longer list in the chip and the card, never by its selector', () => {

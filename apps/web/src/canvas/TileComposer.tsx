@@ -94,6 +94,8 @@ export interface TileComposerProps {
   onTyped?: (previous: string, next: string, typed: boolean, edit?: TypedEdit) => void;
   /** Shown under the input, like a chat app's model switch. */
   accessory?: ReactNode;
+  /** Shown under that row: what has to be said of the model chosen in it (ClaudeFableNote.tsx), where there is something. */
+  accessoryNote?: ReactNode;
   /** The node files are attached on (provenance only). */
   attachNodeId?: string;
   /** An image, video or 3D node: what its generator does with attached files, which the box says when files are attached. */
@@ -200,7 +202,7 @@ function useFocusBackOnUnlock(composer: RefObject<HTMLElement | null>, box: RefO
   }, [locked, composer]);
 }
 
-export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, status, onTyped, accessory, attachNodeId, mediaNode, ref }: TileComposerProps) {
+export function TileComposer({ streaming, blocked = false, blockedReason, sendUnavailableReason, draft, onDraftChange, onSend, deferClear = false, notice, status, onTyped, accessory, accessoryNote, attachNodeId, mediaNode, ref }: TileComposerProps) {
   const { t } = useCanvasI18n();
   const reasonId = useId();
   const disclaimerId = useId();
@@ -316,6 +318,7 @@ export function TileComposer({ streaming, blocked = false, blockedReason, sendUn
         {accessory}
         {blocked ? null : <ComposerNotes className="canvas-composer-notes" notes={[notice ?? t('composer.notice'), t('composer.disclaimerFull')]} />}
       </div> : null}
+      {accessory ? accessoryNote : null}
       {blocked ? null : <p id={disclaimerId} className="sr-only">{t('composer.disclaimerFull')}</p>}
     </div>
   );

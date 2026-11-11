@@ -55,6 +55,20 @@ it('defaults to a clean draft even when a runtime and model are available, witho
   expect(fetcher.mock.calls.every(([url,init])=>url==='/api/v1/tenants/copy-workspace/runtime' && !init.method)).toBe(true);
 });
 
+it('says what the privacy policy says of Claude Fable while one is the model chosen for the copy (2026-11-11)',async()=>{
+  // The dialog reads in English in both interface languages; without a site to open, the clause is named, not linked.
+  server(()=>json({...catalog,models:[...catalog.models,{id:'bedrock.claude-fable-5-2',label:'Claude Fable 5.2',runtime:'openai-agents',userChosen:true}]}));
+  setup();
+  await choose();
+  const said='AWS keeps Claude Fable requests for up to 30 days, and its staff may read content its systems flag.';
+  expect(screen.queryByText(said,{exact:false})).toBeNull();
+  fireEvent.change(chooser(),{target:{value:JSON.stringify(['openai-agents','bedrock.claude-fable-5-2'])}});
+  const line=await screen.findByText(said,{exact:false});
+  expect(line).toHaveTextContent(`${said} Privacy policy, clause 08`);
+  expect(line.closest('.official-copy-selection')).not.toBeNull();
+  expect(within(line).queryByRole('link')).toBeNull();
+});
+
 it('binds the explicit runtime/model pair to every newly minted node without changing source templates or clean exports',()=>{
   const source=JSON.stringify(workflow), original=createOfficialDocument(workflow);
   const result=createOfficialCopyDocument(workflow,{runtime:'pi',model:'shared-model',label:'ignored'});

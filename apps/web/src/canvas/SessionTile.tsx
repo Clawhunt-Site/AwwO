@@ -71,6 +71,7 @@ import { prepareNodeConversation, type NodeConversationContext } from './nodeCon
 import './awwo-node.css';
 import { NodeViewStylePicker } from './NodeViewStylePicker';
 import { choiceText, currentChoiceKey, modelChoiceKey, NodeModelPicker, type NodeModelChoice } from './NodeModelPicker';
+import { ClaudeFableNote } from './ClaudeFableNote';
 import { useSimpleCanvas } from './uiMode';
 import { CardPreview } from './CardPreview';
 import { showsPreview } from './cardFrames';
@@ -1461,6 +1462,8 @@ export const SessionTile = memo(function SessionTile({
                       node.kind === 'session' && onOpenMarket && onDetachMarket && !viewOnly && marketUsable(node)
                         ? <MarketAgentChip agentRef={marketRef} disabled={busy || readOnly} disabledReason={busy ? t('tile.taskRunning') : undefined}
                           onOpen={() => onOpenMarket(nodeId)} onDetach={() => onDetachMarket(nodeId)} /> : null)}
+                    accessoryNote={node.kind === 'session' && modelChoices?.length && onChangeModel && !viewOnly && !node.team
+                      ? <ClaudeFableNote model={node.model} locale={locale} className="canvas-composer-notice" as="div" /> : undefined}
                     blocked={viewOnly || interactionLocked || (!node.binding && !initializeOnSend) || (!onSend && !gatewayBase) || Boolean(conversationError)}
                     blockedReason={viewOnly ? t('common.readOnly') : interactionLocked ? t('tile.taskRunning') : !node.binding && !initializeOnSend ? undefined : conversationError || (!onSend && !gatewayBase ? t('tile.conversationUnavailable') : undefined)} onSend={send} /> : null}
                 </div>

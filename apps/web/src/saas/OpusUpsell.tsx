@@ -12,7 +12,8 @@ import { fetchRouteUsage, recordUpgradeInterest, routeOrder, type RouteName, typ
 import { freePlanStanding } from './freePlan';
 import './opus-upsell.css';
 
-/** The model this invites to: the strongest one the canvas offers. */
+/** The model this invites to: a premium one that paid plans open (not called the strongest: Claude Fable 5.2 is
+ *  listed beside it since its opening, and only a person may choose that one). */
 export const OPUS_MODEL_ID = 'bedrock.claude-opus-5-5';
 
 /** Whose allowance an offered model spends: the route the server names, else what its id says. */
@@ -58,7 +59,7 @@ export function OpusUpsell({ tenantId, usage, route, chosen, available, onChoose
         : left !== null ? t(`今天还能免费用 ${left} 次；升级 Pro / Max / Ultra 用点数畅用，不受次数限制。`, `${left} free ${left === 1 ? 'call' : 'calls'} left today; Pro, Max and Ultra run it on credits, past that limit.`)
           : t('免费版每天有少量次数；升级 Pro / Max / Ultra 用点数畅用。', 'The free plan has a few calls a day; Pro, Max and Ultra run it on credits.');
   return <div className="saas-opus-upsell" role="note">
-    <p className="saas-opus-upsell-title"><Sparkles size={14} aria-hidden="true" />{t('Claude Opus 5.5 · 这里最强的模型', 'Claude Opus 5.5 · the strongest model here')}</p>
+    <p className="saas-opus-upsell-title"><Sparkles size={14} aria-hidden="true" />{t('Claude Opus 5.5 · 付费套餐的高级模型', 'Claude Opus 5.5 · a premium model on paid plans')}</p>
     <p>{t('复杂网页、游戏和 3D 交给它，做得更完整。', 'Complex pages, games and 3D come out more complete.')}{' '}
       <span className="saas-opus-upsell-allowance">{today}</span></p>
     <div className="saas-opus-upsell-actions">

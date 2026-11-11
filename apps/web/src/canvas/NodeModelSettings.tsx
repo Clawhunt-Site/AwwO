@@ -3,6 +3,7 @@
 // 2026-10-15). The workspace default is the server's: a node left on it is set up on the default runtime's default model.
 import { useId } from 'react';
 import type { SessionNode } from './canvasDoc';
+import { ClaudeFableNote } from './ClaudeFableNote';
 import { useCanvasI18n, type CanvasTextKey, type CanvasTranslate } from './i18n';
 import { listedModelName, nodeModelName, type ModelNameSources } from './modelNames';
 import type { ModelPaletteGroup, ModelPaletteSelection } from './modelPalette';
@@ -75,6 +76,7 @@ export function NodeModelSettings({ node, groups, names, loading = false, error 
         </option>)}
       </optgroup>)}
     </select>
+    <ClaudeFableNote model={node.model} locale={locale} className="canvas-inspector-hint" as="div" />
     {loading ? <div className="canvas-inspector-hint" role="status">{t('inspector.modelsLoading')}</div> : null}
     {error ? <div className="canvas-inspector-outcome canvas-inspector-outcome--err" role="alert">
       {t('inspector.modelsFailed')} {error}

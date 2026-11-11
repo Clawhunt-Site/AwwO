@@ -128,6 +128,7 @@ describe('saving a canvas', () => {
 
   it('says what a refusal of the market means, in both languages', () => {
     const codes = ['market_unavailable', 'market_agent_not_found', 'market_agent_unavailable', 'market_agent_not_usable', 'market_agent_model_unavailable',
+      'market_agent_version_changed', 'market_agent_model_choice_required',
       'market_agent_plan_required', 'canvas_reload_required', 'market_draft_invalid', 'market_skill_unavailable', 'market_skill_license', 'market_hidden_text',
       'market_price_invalid', 'credits_exhausted', 'market_agent_limit', 'market_review_pending', 'market_agent_suspended', 'market_no_draft', 'market_not_pending',
       'market_not_listed', 'market_not_listable', 'market_rating_unavailable', 'skill_context_limit', 'invalid_market_response'];
@@ -140,6 +141,12 @@ describe('saving a canvas', () => {
     expect(saasErrorMessage(plan, 'zh')).toContain('套餐');
     expect(saasErrorMessage(plan, 'en')).toContain('plan');
     expect(saasErrorMessage(new SaaSApiError(409, 'canvas_reload_required', 'x'), 'zh')).toContain('重新加载');
+    // A node that keeps a market Agent without the model its author locked, where that model is one only a person may
+    // choose (an imported canvas): the server names the model's id, which the page never shows; it says what to do.
+    const unchosen = new SaaSApiError(409, 'market_agent_model_choice_required',
+      "This Agent's author locked the model bedrock.claude-fable-5-2, which runs only where a person chose it: choose the Agent again on the node to see the model before it runs");
+    expect(saasErrorMessage(unchosen, 'zh')).toBe('这个 Agent 的作者锁定了一个只能由你自己选择的模型。请在节点上重新选一次这个 Agent，看清模型后再运行。');
+    expect(saasErrorMessage(unchosen, 'en')).toBe('This Agent’s author locked a model that runs only where you chose it. Choose the Agent again on the node to see the model before it runs.');
   });
 });
 

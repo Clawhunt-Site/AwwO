@@ -5,6 +5,7 @@ import { useAccountPreferences, type AccountPreferences } from '../accountPrefer
 import { clawHuntAccountURL } from '../clawhuntAuth';
 import { executionModelKey } from '../useManagedExecution';
 import { labelModelName, nodeModelName } from '../../canvas/modelNames';
+import { ClaudeFableNote } from '../../canvas/ClaudeFableNote';
 import { readExecutionRuntime, type ExecutionModel } from '../managedExecutionApi';
 import { UiModeSwitch, useSaaSPreferences } from '../preferences';
 import { browserNotificationsSupported, playChime, requestNotificationPermission } from '../taskNotifications';
@@ -92,6 +93,7 @@ function DefaultModel({ identity }: { identity: Identity }) {
           {(models || []).map(item => <option key={executionModelKey(item.runtime, item.id)} value={executionModelKey(item.runtime, item.id)}>{labelModelName(item.label || item.id, item.id, locale)}{item.requiresUpgrade ? t('（需升级套餐）', ' (needs an upgrade)') : ''}</option>)}
         </select>
       </label>
+      <ClaudeFableNote model={current?.model} locale={locale} className="saas-field-hint" />
       {models === null && <p role="status">{t('正在读取模型列表…', 'Loading models…')}</p>}
       {saved.feedback}
     </>}

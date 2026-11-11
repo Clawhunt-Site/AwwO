@@ -1,0 +1,3 @@
+/* The Claude Fable line under a model picker (ClaudeFableNote.tsx). It takes the size, colour and spacing of the hint
+   class of the place it is in; the clause's link keeps that colour and is told apart by its underline, so it adds none. */
+a.awwo-fable-clause { color: inherit; text-decoration: underline; text-underline-offset: 2px; }

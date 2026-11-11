@@ -4,6 +4,7 @@
 // (canvas/userChosenModels.ts) is never put on a node unasked. A locked one the reader is shown before choosing the Agent.
 import { automaticEntry, computerRuntime } from '../../canvas/nodeRuntime';
 import type { ModelPaletteSelection } from '../../canvas/modelPalette';
+import { CLAUDE_FABLE_SENTENCE, isBedrockClaudeFableModel } from '../../canvas/userChosenModels';
 import type { MarketModel } from '../marketApi';
 import type { MarketT } from './marketText';
 
@@ -38,8 +39,20 @@ export function marketModelDecision(model: MarketModel, catalogue: ReadonlyArray
   return { kind: 'apply', runtime: entry.runtime, model: entry.model, effort, label, userChosen: entry.userChosen === true };
 }
 
-/** What the decision does to the node, said before the reader chooses the Agent. */
+/** What the decision does to the node, said before the reader chooses the Agent. Choosing an Agent that puts the node on
+ *  a Claude Fable model chooses that model, so the note ends with what the page says under any picker set on one
+ *  (userChosenModels.ts; the dialog names the clause after it, MarketAgentDetail.tsx). */
 export function decisionNote(decision: MarketModelDecision, locked: boolean, t: MarketT): string {
+  const note = modelNote(decision, locked, t);
+  return fableDecision(decision) ? `${note}${t('', ' ')}${t(...CLAUDE_FABLE_SENTENCE)}` : note;
+}
+
+/** The node would run a Claude Fable model once the Agent is chosen. */
+export function fableDecision(decision: MarketModelDecision | null): boolean {
+  return decision?.kind === 'apply' && isBedrockClaudeFableModel(decision.model);
+}
+
+function modelNote(decision: MarketModelDecision, locked: boolean, t: MarketT): string {
   if (decision.kind === 'blocked') return t(`作者锁定了模型「${decision.label}」，你的工作区用不了它，所以这个 Agent 在这里用不了。`,
     `Its author locked the model “${decision.label}”, which your workspace cannot use, so this Agent cannot be used here.`);
   if (decision.kind === 'keep') return decision.reason === 'none' ? t('这个 Agent 没有指定模型，节点保留它现在的模型。', 'This Agent names no model, so the node keeps its own.')

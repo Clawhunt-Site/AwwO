@@ -5,6 +5,7 @@ import type { CanvasDocument } from '../../canvas/canvasDoc';
 import { mediaKindOf } from '../../canvas/mediaCatalog';
 import { createOfficialDocument, type OfficialWorkflow } from './officialWorkflows';
 import { automaticEntries, BLENDER_RUNTIME, SANDBOX_RUNTIME } from '../../canvas/nodeRuntime';
+import { ClaudeFableNote } from '../../canvas/ClaudeFableNote';
 import './official-copy-setup.css';
 
 /** `sandbox`: the sandbox computer offers the model too, so the agents of a canvas that works there take it with them;
@@ -168,7 +169,8 @@ export function OfficialCopySetup({ item, tenantId, busy, error, recording, onCl
         </select>
       </label>
       {chosen && <div className="official-copy-selection"><strong>{recorded ? recorded.media ? 'Applies to the editor agents' : 'Applies to its agents' : 'Applies to every new node'}</strong><span>{chosen.label}</span>
-        {(sandboxed || blendered) && <small>{computerNote(chosen, sandboxed, blendered)}</small>}</div>}
+        {(sandboxed || blendered) && <small>{computerNote(chosen, sandboxed, blendered)}</small>}
+        <ClaudeFableNote model={chosen.model} locale="en" as="small" /></div>}
       <div className="official-copy-catalog" aria-live="polite">
         {loading ? <p role="status">Loading models for this workspace…</p>
           : catalogError ? <p role="alert">Could not load the model catalog. Refresh it, or copy an unconfigured draft.</p>

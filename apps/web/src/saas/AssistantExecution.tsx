@@ -8,6 +8,7 @@ import { Check, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, RefreshC
 import { StoredArtifactPreview } from '../canvas/ArtifactPreview';
 import type { AssistantExecutionHost, AssistantTaskActions } from '../canvas/assistantRouting';
 import { automaticChoices } from '../canvas/userChosenModels';
+import { ClaudeFableNote } from '../canvas/ClaudeFableNote';
 import { ARTIFACT_REF_PREFIX } from './canvasBridge';
 import { renderInertMarkdown } from './inertMarkdown';
 import { freePlanEndedMessages, saasErrorMessage } from './api';
@@ -429,7 +430,7 @@ function PlanNeededNote({ tenantId }: { tenantId: string }) {
  *  it), a chip whose menu opens above the box like a chat app's model switch, and closes on a click elsewhere or Escape.
  *  "画布助手用：" stays in the chip for a screen reader and as its tooltip. */
 function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
-  const { t } = useSaaSPreferences();
+  const { locale, t } = useSaaSPreferences();
   const [open, setOpen] = useState(false);
   const details = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -463,7 +464,7 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
     return () => window.removeEventListener('resize', measure);
   }, [open]);
   const models = execution.runtime?.models ?? [];
-  // The strongest model, offered with the way to it (OpusUpsell.tsx): to a workspace without a paid plan that the server
+  // A premium model, offered with the way to it (OpusUpsell.tsx): to a workspace without a paid plan that the server
   // says cannot run it (Pro, Max and Ultra only, plan_only_models.go), and to a route-limited free one while it still runs there.
   // The local edition sells no plan, so it never offers one.
   const opus = models.find(model => model.id === OPUS_MODEL_ID);
@@ -502,6 +503,7 @@ function ExecutionSettings({ execution }: { execution: ManagedExecution }) {
               return <option key={key} value={key} disabled={model.requiresUpgrade === true && key !== execution.choice.key}>{optionLabel(model)}</option>; })}
           </select>
         </label>
+        <ClaudeFableNote model={chosen?.id} locale={locale} className="awwo-execution-model-note" />
         {!!chosen?.efforts?.length && <label>{t('思考强度', 'Reasoning effort')}
           <select value={execution.effort} disabled={execution.busy || !!execution.pendingSubmission} onChange={event => execution.setEffort(event.target.value)}>
             <option value="">{t('模型默认', 'Model default')}</option>

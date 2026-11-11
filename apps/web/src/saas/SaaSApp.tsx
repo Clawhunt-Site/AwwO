@@ -35,6 +35,7 @@ import { InviteAcceptance } from './InviteAcceptance';
 import { forgetPendingInvite, rememberPendingInvite, restorePendingInvite } from './pendingInvite';
 import { AdminPanel } from './AdminPanel';
 import { LocalEdition, inLocalWindow, isLocalEdition } from './edition';
+import { PolicySite } from '../canvas/ClaudeFableNote';
 import { RouteUsageMeter } from './RouteUsageMeter';
 import { RuntimeSettings } from './RuntimeSettings';
 import { HomeShell } from './home/HomeShell';
@@ -166,7 +167,7 @@ function AuthenticatedApp() {
   const content = inviteToken ? <InviteAcceptance key={inviteToken + identity.user.id} token={inviteToken} identity={identity} controls={controls} />
     : window.location.pathname === '/admin' ? <AdminPanel identity={identity} controls={controls} />
     : <Workspace identity={identity} onProfile={onProfile} />;
-  return <LocalEdition.Provider value={isLocalEdition(identity)}><AppearanceScope key={identity.user.id} userId={identity.user.id}><AccountPreferencesProvider userId={identity.user.id}>{sessionEnded && <SessionEndedNotice identity={identity} />}<SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity} onProfile={onProfile}>{content}</PersonalEngineGate></SaaSOnboarding><LaunchNoticeHost key={`${identity.user.id}:launch`} identity={identity} /></AccountPreferencesProvider></AppearanceScope></LocalEdition.Provider>;
+  return <LocalEdition.Provider value={isLocalEdition(identity)}><PolicySite.Provider value={identity.clawhuntSiteURL || ''}><AppearanceScope key={identity.user.id} userId={identity.user.id}><AccountPreferencesProvider userId={identity.user.id}>{sessionEnded && <SessionEndedNotice identity={identity} />}<SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity} onProfile={onProfile}>{content}</PersonalEngineGate></SaaSOnboarding><LaunchNoticeHost key={`${identity.user.id}:launch`} identity={identity} /></AccountPreferencesProvider></AppearanceScope></PolicySite.Provider></LocalEdition.Provider>;
 }
 /** The page stays as it is, so nothing typed is lost; leaving through sign-in keeps the unsaved-canvas warning. */
 function SessionEndedNotice({ identity }: { identity: Identity }) {

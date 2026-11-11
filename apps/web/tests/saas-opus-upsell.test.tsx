@@ -40,7 +40,7 @@ function Settings() {
 }
 const view = () => render(<SaaSPreferencesProvider><Settings /></SaaSPreferencesProvider>);
 const chip = () => document.querySelector<HTMLElement>('.awwo-execution-settings > summary')!;
-const invitation = () => screen.queryByText('Claude Opus 5.5 · 这里最强的模型')?.closest<HTMLElement>('[role="note"]') ?? null;
+const invitation = () => screen.queryByText('Claude Opus 5.5 · 付费套餐的高级模型')?.closest<HTMLElement>('[role="note"]') ?? null;
 const option = (model: string) => [...document.querySelectorAll<HTMLOptionElement>('option')].find(item => item.value === executionModelKey('pi', model))!;
 
 describe('the Opus 5.5 invitation in the canvas assistant’s model menu', () => {

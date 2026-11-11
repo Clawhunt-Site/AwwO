@@ -9,7 +9,8 @@ import { recordUpgradeInterest } from '../routeUsage';
 import { renderInertMarkdown } from '../inertMarkdown';
 import type { MarketAgentDetail as Detail } from '../marketApi';
 import type { MarketAgentReference } from '../../canvas/canvasDoc';
-import { decisionNote, type MarketModelDecision } from './marketModel';
+import { decisionNote, fableDecision, type MarketModelDecision } from './marketModel';
+import { PrivacyClause } from '../../canvas/ClaudeFableNote';
 import { authorText, categoryName, creditsText, dateText, numberText, percentText, priceText, secondsText, useMarketI18n, type MarketT } from './marketText';
 
 /** What a paid Agent asks of a workspace whose owner has no paid plan. An official Agent's fee is AwwO's, never an
@@ -67,7 +68,8 @@ export function MarketAgentDetailView({ detail, tenantId, target, decision, plan
     <section className="awwo-market-actions" aria-label={t('使用', 'Use')}>
       {pinned !== null && <p className="awwo-library-meta" role="status">{inUse ? t('这个节点正在用这个版本。', 'This node uses this version.')
         : t(`这个节点用的是 v${pinned}，最新上架的是 v${detail.version}。`, `This node uses v${pinned}; v${detail.version} is listed now.`)}</p>}
-      {decision && <p className={`awwo-market-note${decision.kind === 'blocked' ? ' is-warning' : ''}`}>{decisionNote(decision, detail.model.locked, t)}</p>}
+      {decision && <p className={`awwo-market-note${decision.kind === 'blocked' ? ' is-warning' : ''}`}>{decisionNote(decision, detail.model.locked, t)}
+        {fableDecision(decision) && <>{t('', ' ')}<PrivacyClause locale={locale} /></>}</p>}
       {planNeeded && <div className="awwo-market-plan" role="note">
         <p>{planNote(detail, t)}</p>
         {!localEdition && <a className="awwo-library-primary awwo-market-plan-link" href={accountURL('plans')} target="_blank" rel="noopener noreferrer"

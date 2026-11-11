@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { automaticEntries } from '../../canvas/nodeRuntime';
+import { ClaudeFableNote } from '../../canvas/ClaudeFableNote';
 import type { ModelPaletteSelection } from '../../canvas/modelPalette';
 import { cachedSkillCatalog, skillTitle, type SkillSummary } from '../skillsApi';
 import { MARKET_LIMITS, type MarketExample, type MarketModel } from '../marketApi';
@@ -12,7 +13,7 @@ import { useMarketI18n } from './marketText';
 const choiceKey = (runtime: string, id: string) => JSON.stringify([runtime, id]);
 
 export function ModelField({ model, models, disabled, onChange }: { model: MarketModel; models: ReadonlyArray<ModelPaletteSelection> | null; disabled: boolean; onChange: (model: MarketModel) => void }) {
-  const { t } = useMarketI18n();
+  const { locale, t } = useMarketI18n();
   const choices = useMemo(() => automaticEntries((models ?? []).filter(entry => entry.runtime !== 'sandbox' && entry.runtime !== 'blender')), [models]);
   const current = choices.find(entry => entry.model === model.id);
   const value = model.id ? current ? choiceKey(current.runtime, current.model) : choiceKey(model.runtime, model.id) : '';
@@ -29,6 +30,7 @@ export function ModelField({ model, models, disabled, onChange }: { model: Marke
       {model.id && !current && <option value={value}>{t(`当前：${model.id}`, `Current: ${model.id}`)}</option>}
       {choices.map(entry => <option key={entry.key} value={choiceKey(entry.runtime, entry.model)}>{entry.displayName || entry.label}</option>)}
     </select></label>
+    <ClaudeFableNote model={model.id} locale={locale} as="small" />
     {efforts.length > 0 && <label>{t('推理强度', 'Reasoning effort')}<select value={model.effort} disabled={disabled} onChange={event => onChange({ ...model, effort: event.target.value })}>
       <option value="">{t('模型默认', 'The model’s default')}</option>
       {efforts.map(level => <option key={level} value={level}>{level}</option>)}
