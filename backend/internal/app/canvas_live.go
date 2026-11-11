@@ -330,12 +330,14 @@ func (a *App) canvasLivePresence(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "invalid_input", "clientId is required")
 		return
 	}
-	// A person's role as their session's check found it (a.tenant, or livePresenceAccess within its trust): only one who
-	// may edit shows edits in progress and the field they type in.
+	// A person's role as their session's check found it (a.tenant, or livePresenceAccess within its trust), after the
+	// count of membership changes livePresenceAccess took: only one who may edit shows edits in progress and the field
+	// they type in.
 	role := ""
 	if agent == nil {
 		role = tenantRoleOf(r)
 	}
+	since, _ := r.Context().Value(liveMembersKey{}).(uint64)
 	update, err := parseLiveState(b.State, agent != nil, agent == nil && roleLevel(role) >= roleLevel("member"))
 	if err != nil {
 		fail(w, 400, "invalid_input", err.Error())
@@ -346,7 +348,7 @@ func (a *App) canvasLivePresence(w http.ResponseWriter, r *http.Request) {
 	if agent != nil {
 		a.touchCanvasAgent(r, tid, cid)
 	}
-	switch a.multiplayer.setState(tid, cid, actor, role, update) {
+	switch a.multiplayer.setState(tid, cid, actor, role, since, update) {
 	case liveStateTooFast:
 		w.Header().Set("Retry-After", "1")
 		fail(w, 429, "presence_too_fast", fmt.Sprintf("At most %d presence updates a second: send the latest again in a moment", livePresencePerSecond))
@@ -644,15 +646,38 @@ func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, err)
 		return
 	}
-	role, device := "", ""
-	if agentOf(r) == nil {
-		_ = a.db.QueryRow(ctx, "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2", tid, currentUser(r).ID).Scan(&role)
-		if d := r.URL.Query().Get("device"); liveDevices[d] {
-			device = d
-		}
+	device := ""
+	if d := r.URL.Query().Get("device"); agentOf(r) == nil && liveDevices[d] {
+		device = d
 	}
 	actor := canvasActorOf(r, clientID)
-	stream, refused := a.multiplayer.open(tid, cid, liveJoin{actor: actor, role: role, device: device})
+	var stream *liveStream
+	refused := liveStale
+	// A person's role is read after the count of membership changes is taken, and their stream opens only if no change
+	// of theirs came meanwhile: else it is read again. One that came after the stream opened finds the stream
+	// (membersChanged), so a removal or a new role never passes a stream by.
+	for tries := 0; refused == liveStale && tries < 3; tries++ {
+		role, since := "", uint64(0)
+		if agentOf(r) == nil {
+			since = a.multiplayer.memberCount()
+			err := a.db.QueryRow(ctx, "SELECT role FROM memberships WHERE tenant_id=$1 AND user_id=$2", tid, currentUser(r).ID).Scan(&role)
+			if noRows(err) {
+				// Removed, or gone, since a.tenant let the request in: as for anyone who is no member (AWWO-LAW-001).
+				fail(w, 404, "not_found", "Workspace not found")
+				return
+			}
+			if err != nil {
+				a.dbError(w, err)
+				return
+			}
+		}
+		stream, refused = a.multiplayer.open(tid, cid, liveJoin{actor: actor, role: role, device: device, since: since})
+	}
+	if refused == liveStale {
+		w.Header().Set("Retry-After", "1")
+		fail(w, 503, "membership_changing", "Your membership of this workspace is changing: open the canvas again in a moment")
+		return
+	}
 	if refused == liveTaken {
 		fail(w, 409, "client_taken", "Someone else on this canvas uses this page id: open the canvas again")
 		return
@@ -667,8 +692,7 @@ func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	controller := http.NewResponseController(w)
-	// write puts an event on the stream; send also flushes it.
-	write := func(event string, data any) bool {
+	put := func(event string, data any) bool {
 		raw, err := json.Marshal(data)
 		if err != nil {
 			return false
@@ -677,6 +701,29 @@ func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 		_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, raw)
 		return err == nil
 	}
+	// write puts an event on the stream; send also flushes it. Once the stream's bye is due (its person removed or gone,
+	// its token revoked), its next event is that bye, and the stream ends: what it read or queued and had not begun to
+	// write never goes (one write already under way may finish just before the bye).
+	// byeSent says the stream has said bye (its due one, or another), so it never says two.
+	byeSent := false
+	write := func(event string, data any) bool {
+		if reason := a.multiplayer.takeBye(stream); reason != "" {
+			if !byeSent && put("bye", map[string]any{"reason": reason}) {
+				_ = controller.Flush()
+			}
+			byeSent = true
+			return false
+		}
+		byeSent = byeSent || event == "bye"
+		return put(event, data)
+	}
+	// A stream that ends another way while its bye is due (a read that failed, a 15 s check with no answer) still says
+	// it, so its page is told why it ended.
+	defer func() {
+		if reason := a.multiplayer.takeBye(stream); reason != "" && !byeSent && put("bye", map[string]any{"reason": reason}) {
+			_ = controller.Flush()
+		}
+	}()
 	send := func(event string, data any) bool {
 		return write(event, data) && controller.Flush() == nil
 	}
@@ -848,6 +895,7 @@ func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		case <-ping.C:
+			since := a.multiplayer.memberCount()
 			role, allowed, err := a.liveAccessRole(r, tid, cid)
 			if err != nil {
 				return // no answer (the database, ClawHunt): the page connects again
@@ -856,8 +904,9 @@ func (a *App) canvasLiveEvents(w http.ResponseWriter, r *http.Request) {
 				send("bye", map[string]any{"reason": "access"})
 				return
 			}
-			// A role changed since the stream opened shows (a viewer made an editor, an editor a viewer).
-			a.multiplayer.setRole(tid, cid, actor.participantID(), role)
+			// A role changed since the stream opened shows (a viewer made an editor, an editor a viewer), if the hub was not
+			// told of it at once (membersChanged).
+			a.multiplayer.setRole(tid, cid, actor, role, since)
 			a.multiplayer.sweepRoom(tid, cid)
 			_ = controller.SetWriteDeadline(time.Now().Add(30 * time.Second))
 			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil || controller.Flush() != nil {

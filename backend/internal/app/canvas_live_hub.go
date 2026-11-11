@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -43,6 +44,9 @@ const (
 	// canvasTokenFailuresPerMinute how many failed token lookups one address may make (as the relay's keys).
 	canvasTokenRequestsPerMinute = 120
 	canvasTokenFailuresPerMinute = 30
+	// liveMemberChangesKept is how many of the latest membership changes the hub remembers (membersChanged), so a
+	// person's role read while one of theirs came is known to be stale (memberChangedSinceLocked).
+	liveMemberChangesKept = 256
 )
 
 // liveParticipantColors are the participants' colours. Each one's own is picked by their id (liveColor): an author's
@@ -182,11 +186,15 @@ type liveStream struct {
 	participantID string
 	userID        string
 	tokenID       string
+	// participant is the page or token whose place the stream holds (open): closing, it lets go of that one only, never
+	// of another that took its id since (its person was removed, and someone, or they again, came under the same id).
+	participant *liveParticipant
 	// waitOnly marks an agent's canvas_wait: woken like a stream, ended by its token's bye, but no participant, in no
 	// stream limit, and told nothing of presence.
 	waitOnly bool
-	// bye is why the stream must end, kept here as well as queued, so a full queue cannot swallow it.
-	bye string
+	// bye is why the stream must end, kept here as well as queued, so a full queue cannot swallow it. It is set once,
+	// under the hub's lock, and read without it: a stream whose bye is due writes that bye in place of its next event.
+	bye atomic.Pointer[string]
 	// wake is signalled (coalesced) when the canvas's document changed; events carries claims, messages and byes.
 	wake   chan struct{}
 	events chan liveEvent
@@ -251,10 +259,11 @@ func (r *canvasRoom) forgetColorsLocked() {
 }
 
 // markLocked tells a room's streams that a participant's presence changed (or that it left): each tells of their latest
-// state as soon as livePresenceEvery allows. Call with the hub's lock held.
+// state as soon as livePresenceEvery allows. A stream whose bye is due is told nothing more. Call with the hub's lock
+// held.
 func (m *canvasMultiplayer) markLocked(r *canvasRoom, id string) {
 	for s := range r.streams {
-		if s.waitOnly {
+		if s.waitOnly || s.bye.Load() != nil {
 			continue
 		}
 		s.pending[id] = struct{}{}
@@ -273,6 +282,33 @@ type canvasMultiplayer struct {
 	closeOnce sync.Once
 	// now is the clock of presence (tests set it); nil is time.Now.
 	now func() time.Time
+	// memberChanges counts the membership changes the hub was told of (membersChanged), and recentMembers holds the
+	// latest liveMemberChangesKept of them, the nth at n modulo their number. Both change under mu; the count is read
+	// without it too (memberCount), on every presence post.
+	memberChanges atomic.Uint64
+	recentMembers [liveMemberChangesKept]memberKey
+}
+
+// memberKey is one person's membership of one workspace.
+type memberKey struct{ tenant, user string }
+
+// memberCount gives how many membership changes the hub was told of. A person's role is read after it is taken, and it
+// goes with the role to open, setRole or setState, which then know whether a change of theirs came meanwhile.
+func (m *canvasMultiplayer) memberCount() uint64 { return m.memberChanges.Load() }
+
+// memberChangedSinceLocked says whether a person's membership of a workspace changed after a count was taken: a role
+// read from then on may be stale. A count too old to tell counts as a change. Call with mu held.
+func (m *canvasMultiplayer) memberChangedSinceLocked(tid, userID string, since uint64) bool {
+	count := m.memberChanges.Load()
+	if since > count || count-since > liveMemberChangesKept {
+		return true
+	}
+	for n := since; n < count; n++ {
+		if c := m.recentMembers[n%liveMemberChangesKept]; c.tenant == tid && c.user == userID {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *canvasMultiplayer) clock() time.Time {
@@ -338,9 +374,12 @@ func (m *canvasMultiplayer) sweep(key canvasKey, r *canvasRoom) {
 }
 
 // broadcastLocked sends an event to every stream of a room, never blocking: a stream that cannot take it is marked
-// behind and sends everyone again. Call with mu held.
+// behind and sends everyone again. A stream whose bye is due is sent nothing more. Call with mu held.
 func (m *canvasMultiplayer) broadcastLocked(r *canvasRoom, event liveEvent) {
 	for s := range r.streams {
+		if s.bye.Load() != nil {
+			continue
+		}
 		select {
 		case s.events <- event:
 		default:
@@ -394,28 +433,36 @@ func (m *canvasMultiplayer) bye(match func(*liveStream) bool, reason string) {
 	for _, r := range m.rooms {
 		for s := range r.streams {
 			if match(s) {
-				if s.bye == "" {
-					s.bye = reason
-				}
-				select {
-				case s.events <- liveEvent{"bye", map[string]any{"reason": reason}}:
-				default:
-					s.behind = true
-				}
-				select {
-				case s.wake <- struct{}{}:
-				default:
-				}
+				m.byeLocked(s, reason)
 			}
 		}
 	}
 }
 
-// takeBye gives why a stream must end, if it must.
+// byeLocked tells a stream it must end, with a reason: the first one given stays, and it is told once. Call with mu
+// held.
+func (m *canvasMultiplayer) byeLocked(s *liveStream, reason string) {
+	if s.bye.Load() != nil {
+		return
+	}
+	s.bye.Store(&reason)
+	select {
+	case s.events <- liveEvent{"bye", map[string]any{"reason": reason}}:
+	default:
+		s.behind = true
+	}
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+// takeBye gives why a stream must end, if it must. It takes no lock: the stream asks before each event it writes.
 func (m *canvasMultiplayer) takeBye(s *liveStream) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return s.bye
+	if reason := s.bye.Load(); reason != nil {
+		return *reason
+	}
+	return ""
 }
 
 // sweepRoom takes off a canvas the participants whose grace has run out (each stream does it at its ping, so someone
@@ -443,6 +490,53 @@ func (m *canvasMultiplayer) tokensRevoked(tokens []revokedCanvasToken) {
 	for _, t := range tokens {
 		m.leave(t.tenantID, t.canvasID, "t_"+t.id)
 		m.claimsChanged(t.tenantID, t.canvasID)
+	}
+}
+
+// membersChanged acts at once on a person's pages in a workspace, once a change of their membership there is committed
+// (commitMembershipChange, which tells the changes in the order they were committed; role "" for none): their stream's
+// own check would see it only within reauthEvery. Removed or gone, their streams there end with bye access (nothing
+// made after the change was answered reaches them) and their pages leave its canvases at once, with no grace: everyone
+// else is told they left. Given another role, it shows on every canvas of it at once, and as a reader they show no edit
+// in progress and no editing mark. Their canvas agent tokens are tokensRevoked's.
+func (m *canvasMultiplayer) membersChanged(tid, userID, role string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := m.memberChanges.Load()
+	m.recentMembers[n%liveMemberChangesKept] = memberKey{tid, userID}
+	m.memberChanges.Store(n + 1)
+	for key, r := range m.rooms {
+		if key.tenant != tid {
+			continue
+		}
+		if role == "" {
+			for s := range r.streams {
+				if !s.waitOnly && s.tokenID == "" && s.userID == userID {
+					m.byeLocked(s, "access")
+				}
+			}
+		}
+		gone := false
+		for id, p := range r.participants {
+			if p.Kind != "human" || p.UserID != userID {
+				continue
+			}
+			if role == "" {
+				delete(r.participants, id)
+				m.markLocked(r, id)
+				gone = true
+				continue
+			}
+			changed := p.Role != role
+			p.Role = role
+			if p.dropEditsUnlessEditor() || changed {
+				m.markLocked(r, id)
+			}
+		}
+		if gone {
+			r.forgetColorsLocked()
+			m.sweep(key, r)
+		}
 	}
 }
 
@@ -480,22 +574,28 @@ func (m *canvasMultiplayer) watch(tid, cid, tokenID string) (*liveStream, func()
 	}
 }
 
-// liveJoin is who opens a stream or touches a canvas, and for a page what it says it runs in (liveDevices).
+// liveJoin is who opens a stream or touches a canvas, and for a page what it says it runs in (liveDevices). For a
+// person, since is the count of membership changes (memberCount) their role was read after.
 type liveJoin struct {
 	actor  canvasActor
 	role   string
 	device string
+	since  uint64
 }
 
 // liveDevices are the devices a page may say it runs in: a browser, the Mac app, AwwO Cloud for Windows, a phone or a
 // tablet. Anything else is no device.
 var liveDevices = map[string]bool{"browser": true, "mac": true, "windows": true, "phone": true, "tablet": true}
 
-// open registers a stream of a participant on a canvas; ok is false when the canvas or the participant has too many.
-// open admits a stream; its refusal is liveFull (a limit) or liveTaken (another person or token holds the id).
+// open admits a stream of a participant on a canvas; its refusal is liveFull (a limit), liveTaken (another person or
+// token holds the id) or liveStale (the person's membership changed after their role was read: read it again). A stream
+// it admits is in the room before any later membership change is acted on (membersChanged), so none passes it by.
 func (m *canvasMultiplayer) open(tid, cid string, who liveJoin) (*liveStream, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if who.actor.Kind != "agent" && m.memberChangedSinceLocked(tid, who.actor.UserID, who.since) {
+		return nil, liveStale
+	}
 	key := canvasKey{tid, cid}
 	r := m.room(key)
 	m.sweep(key, r)
@@ -561,6 +661,7 @@ func (m *canvasMultiplayer) open(tid, cid string, who liveJoin) (*liveStream, st
 		m.markLocked(r, id)
 	}
 	s := newLiveStream(id, who.actor, false)
+	s.participant = p
 	m.markLocked(r, id)
 	r.streams[s] = struct{}{}
 	return s, ""
@@ -570,6 +671,7 @@ func (m *canvasMultiplayer) open(tid, cid string, who liveJoin) (*liveStream, st
 const (
 	liveFull  = "full"
 	liveTaken = "taken"
+	liveStale = "stale"
 )
 
 func (m *canvasMultiplayer) newParticipantLocked(r *canvasRoom, who liveJoin) *liveParticipant {
@@ -592,7 +694,8 @@ func colorKey(actor canvasActor) string {
 	return "u_" + actor.UserID
 }
 
-// close ends a stream; its participant stays for its grace.
+// close ends a stream; its participant stays for its grace. One taken off the canvas while the stream was open
+// (membersChanged) is gone already, and a page that took its id since is not the stream's to let go of.
 func (m *canvasMultiplayer) close(tid, cid string, s *liveStream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -602,7 +705,7 @@ func (m *canvasMultiplayer) close(tid, cid string, s *liveStream) {
 		return
 	}
 	delete(r.streams, s)
-	if p := r.participants[s.participantID]; p != nil {
+	if p := r.participants[s.participantID]; p != nil && p == s.participant {
 		p.streams--
 		if p.streams <= 0 {
 			p.streams = 0
@@ -677,9 +780,10 @@ const (
 )
 
 // setState changes an actor's own state (only the parts given) and tells the room. `role` is the actor's role as the
-// request found it (empty for an agent): a page's participant shows the role it has now, not the one its stream
-// opened with.
-func (m *canvasMultiplayer) setState(tid, cid string, actor canvasActor, role string, update liveUpdate) int {
+// request found it (empty for an agent), read after the count `since` (memberCount): a page's participant shows the
+// role it has now, not the one its stream opened with, unless a change of the person's membership came after it was
+// read (membersChanged has shown the newer one).
+func (m *canvasMultiplayer) setState(tid, cid string, actor canvasActor, role string, since uint64, update liveUpdate) int {
 	id := actor.participantID()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -709,7 +813,7 @@ func (m *canvasMultiplayer) setState(tid, cid string, actor canvasActor, role st
 	if p.streams == 0 && p.Kind == "agent" {
 		p.goneAt = now.Add(liveAgentGrace)
 	}
-	if role != "" {
+	if role != "" && !m.memberChangedSinceLocked(tid, actor.UserID, since) {
 		p.Role = role
 	}
 	update.apply(&p.State)
@@ -731,16 +835,18 @@ func (p *liveParticipant) dropEditsUnlessEditor() bool {
 	return true
 }
 
-// setRole is a participant's role as its stream's check of access found it again (it may have changed since the stream
-// opened); the room is told when it changed.
-func (m *canvasMultiplayer) setRole(tid, cid, id, role string) {
+// setRole is a person's role as their stream's check of access found it again, read after the count `since`
+// (memberCount): it may have changed since the stream opened without the hub being told (an operator's deletion), and
+// the room is told when it changed. A change of their membership that came after it was read stands (membersChanged).
+func (m *canvasMultiplayer) setRole(tid, cid string, actor canvasActor, role string, since uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r := m.rooms[canvasKey{tid, cid}]
-	if r == nil || role == "" {
+	if r == nil || role == "" || m.memberChangedSinceLocked(tid, actor.UserID, since) {
 		return
 	}
-	if p := r.participants[id]; p != nil {
+	id := actor.participantID()
+	if p := r.participants[id]; p != nil && p.heldBy(actor) {
 		changed := p.Role != role
 		p.Role = role
 		if p.dropEditsUnlessEditor() || changed {

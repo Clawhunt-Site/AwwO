@@ -49,6 +49,41 @@ func (l *liveEvents) nextOf(t *testing.T, id string) map[string]any {
 	}
 }
 
+// rest gives a stream's events until it ends, waiting at most `within`, and when it ended (zero: it did not).
+func (l *liveEvents) rest(t *testing.T, within time.Duration) ([][2]string, time.Time) {
+	t.Helper()
+	var events [][2]string
+	deadline := time.After(within)
+	for {
+		select {
+		case e, ok := <-l.events:
+			if !ok {
+				return events, time.Now()
+			}
+			events = append(events, e)
+		case <-deadline:
+			return events, time.Time{}
+		}
+	}
+}
+
+// nextLeft waits for the presence event that tells a participant left.
+func (l *liveEvents) nextLeft(t *testing.T, id string) {
+	t.Helper()
+	for l.next(t, "presence")["left"] != id {
+	}
+}
+
+// nextRole waits for the presence event that tells of a participant with a role, and gives that participant.
+func (l *liveEvents) nextRole(t *testing.T, id, role string) map[string]any {
+	t.Helper()
+	for {
+		if p := l.nextOf(t, id); p["role"] == role {
+			return p
+		}
+	}
+}
+
 func (lt liveTeam) addPerson(t *testing.T, email, role string) (*http.Cookie, string) {
 	t.Helper()
 	cookie, _, id := lt.h.register(t, email)
@@ -381,5 +416,250 @@ func TestPostgresCanvasLivePresenceForgetsOnceTheChangeIsCommitted(t *testing.T)
 	}
 	if got := post(); got != 401 {
 		t.Fatalf("after the change was committed: %d", got)
+	}
+}
+
+// A membership change reaches the person's open streams at once, not at the stream's own check (an hour away here):
+// removed, their stream ends with one bye access, no change made after the removal reaches it, and everyone else sees
+// them leave at once; leaving is the same; made a reader with no post of theirs, they show as one at once, with no edit
+// in progress or editing mark, and their stream goes on.
+func TestPostgresCanvasLiveMembershipChangesReachOpenStreamsAtOnce(t *testing.T) {
+	// A hold, once armed, holds the notice of the next change of its person giving its role ("" a removal), after that
+	// change's commit, until its release is closed; a watch, once armed, says when the next change of its person giving
+	// its role comes to take the notices' lock. Every release is closed on every way out of the test (a held request
+	// would keep the test's server from closing).
+	type hold struct {
+		user, role    string
+		held, release chan struct{}
+		released      bool
+	}
+	type watch struct {
+		user, role string
+		arrived    chan struct{}
+	}
+	var holding atomic.Pointer[hold]
+	var watching atomic.Pointer[watch]
+	var holds []*hold
+	letGo := func(h *hold) {
+		if !h.released {
+			h.released = true
+			close(h.release)
+		}
+	}
+	defer func() {
+		for _, h := range holds {
+			letGo(h)
+		}
+	}()
+	lt := newLiveTeam(t, func(a *App) {
+		a.reauthEvery = time.Hour
+		a.liveMemberNoticeHook = func(step, _, userID, role string) {
+			if w := watching.Load(); step == "commit" && w != nil && w.user == userID && w.role == role && watching.CompareAndSwap(w, nil) {
+				w.arrived <- struct{}{}
+			}
+			if h := holding.Load(); step == "notice" && h != nil && h.user == userID && h.role == role && holding.CompareAndSwap(h, nil) {
+				h.held <- struct{}{}
+				<-h.release
+			}
+		}
+	})
+	// ordered sends a first membership change of a person (giving firstRole) and holds its notice after its commit, then
+	// sends a second one (giving secondRole) and checks that, once it has come to the notices' lock, it is not answered
+	// while the first one's notice is held; then lets the first go and gives both answers.
+	ordered := func(name, user, firstRole string, first func() int, secondRole string, second func() int) (int, int) {
+		t.Helper()
+		h := &hold{user: user, role: firstRole, held: make(chan struct{}, 1), release: make(chan struct{})}
+		holds = append(holds, h)
+		holding.Store(h)
+		a, b := make(chan int, 1), make(chan int, 1)
+		go func() { a <- first() }()
+		select {
+		case <-h.held:
+		case code := <-a:
+			t.Fatalf("%s: the first change was answered (%d) without its notice", name, code)
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s: the first change's notice never came", name)
+		}
+		w := &watch{user: user, role: secondRole, arrived: make(chan struct{}, 1)}
+		watching.Store(w)
+		go func() { b <- second() }()
+		select {
+		case <-w.arrived:
+		case code := <-b:
+			t.Fatalf("%s: the second change was answered (%d) before it came to the notices' lock", name, code)
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s: the second change never came to the notices' lock", name)
+		}
+		select {
+		case code := <-b:
+			t.Fatalf("%s: the second change was answered (%d) while the first one's notice was held", name, code)
+		case <-time.After(time.Second):
+		}
+		letGo(h)
+		var answers [2]int
+		for i, ch := range []chan int{a, b} {
+			select {
+			case answers[i] = <-ch:
+			case <-time.After(30 * time.Second):
+				t.Fatalf("%s: change %d was never answered after the first one's notice was let go", name, i+1)
+			}
+		}
+		return answers[0], answers[1]
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	call := func(who *http.Cookie, method, path string, body any) int {
+		raw, _ := json.Marshal(body)
+		req, _ := http.NewRequest(method, lt.h.server.URL+"/api/v1"+path, bytes.NewReader(raw))
+		req.Header.Set("Origin", lt.h.cfg.PublicOrigin)
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(who)
+		resp, err := client.Do(req)
+		if err != nil {
+			return 0
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	owner := lt.openLive(t, lt.owner, "", "after=1&client=owner-page-1")
+	owner.next(t, "hello")
+	ended := func(l *liveEvents, from time.Time, who string) {
+		t.Helper()
+		events, at := l.rest(t, 5*time.Second)
+		if at.IsZero() {
+			t.Fatalf("%s's stream is still open: %v", who, events)
+		}
+		var byes []string
+		for _, e := range events {
+			switch e[0] {
+			case "bye":
+				byes = append(byes, e[1])
+			case "changes", "reset", "message", "claims":
+				t.Fatalf("%s's stream was sent %s after the change: %s", who, e[0], e[1])
+			}
+		}
+		if len(byes) != 1 || byes[0] != `{"reason":"access"}` || events[len(events)-1][0] != "bye" {
+			t.Fatalf("%s's stream ended with %v", who, events)
+		}
+		t.Logf("%s's stream ended %d ms after the change", who, at.Sub(from).Milliseconds())
+	}
+
+	// Removed: the member's open stream ends at once, the owner's edit right after never reaches it, and the owner sees
+	// them leave at once, not after their 30 s.
+	removed, removedID := lt.addPerson(t, "live-removed@example.test", "member")
+	gone := lt.openLive(t, removed, "", "after=1&client=removed-page-1")
+	gone.next(t, "hello")
+	owner.nextOf(t, "removed-page-1")
+	if status, _ := lt.presenceStatus(t, removed, "removed-page-1", map[string]any{"cursor": map[string]any{"x": 1, "y": 1}}); status != 204 {
+		t.Fatalf("the member's presence: %d", status)
+	}
+	owner.nextOf(t, "removed-page-1")
+	at := time.Now()
+	lt.h.request(t, lt.owner, "DELETE", "/tenants/"+lt.tid+"/members/"+removedID, nil, 204)
+	_, version := lt.document(t)
+	lt.patch(t, lt.owner, version, []map[string]any{set([]string{"nodes", "n1", "title"}, "After the removal")}, 200)
+	lt.h.request(t, lt.owner, "POST", lt.prefix+"/live/messages", map[string]any{"clientId": "owner-page-1", "text": "After the removal"}, 200)
+	ended(gone, at, "the removed member")
+	owner.nextLeft(t, "removed-page-1")
+	if _, here := lt.h.a.multiplayer.participant(lt.tid, lt.cid, "removed-page-1"); here {
+		t.Fatal("the removed member is still on the canvas")
+	}
+	// Its answer is closed and its request cancelled before the check, so a stream wrongly opened cannot keep the test's
+	// server from closing.
+	reopen, cancelReopen := context.WithCancel(context.Background())
+	stream, _ := http.NewRequestWithContext(reopen, "GET", lt.h.server.URL+"/api/v1"+lt.prefix+"/live/events?after=1&client=removed-page-1", nil)
+	stream.AddCookie(removed)
+	reopened, err := http.DefaultClient.Do(stream)
+	status := 0
+	if err == nil {
+		status = reopened.StatusCode
+		reopened.Body.Close()
+	}
+	cancelReopen()
+	if status != 404 {
+		t.Fatalf("the removed member opens the stream again: %d %v", status, err)
+	}
+
+	// Leaving is the same. (The stream opens at the canvas's version: what it catches up on would be from before.)
+	leaver, _ := lt.addPerson(t, "live-leaver@example.test", "reader")
+	_, version = lt.document(t)
+	left := lt.openLive(t, leaver, "", fmt.Sprintf("after=%v&client=leaver-page-1", version))
+	left.next(t, "hello")
+	owner.nextOf(t, "leaver-page-1")
+	at = time.Now()
+	lt.h.request(t, leaver, "POST", "/tenants/"+lt.tid+"/leave", nil, 204)
+	ended(left, at, "the member who left")
+	owner.nextLeft(t, "leaver-page-1")
+
+	// Made a reader with no post of theirs: the owner and the member's own page see a reader at once, with no edit in
+	// progress or editing mark, and the member's stream goes on.
+	_, version = lt.document(t)
+	member := lt.openLive(t, lt.member, "", fmt.Sprintf("after=%v&client=member-page-1", version))
+	member.next(t, "hello")
+	if status, _ := lt.presenceStatus(t, lt.member, "member-page-1", map[string]any{
+		"preview": map[string]any{"nodes": []any{map[string]any{"id": "n1", "x": 5, "y": 6}}},
+		"editing": map[string]any{"node": "n1", "field": "title"},
+	}); status != 204 {
+		t.Fatalf("the member's presence: %d", status)
+	}
+	for p := owner.nextOf(t, "member-page-1"); p["state"].(map[string]any)["editing"] == nil; p = owner.nextOf(t, "member-page-1") {
+	}
+	lt.h.request(t, lt.owner, "PATCH", "/tenants/"+lt.tid+"/members/"+lt.memberID, map[string]string{"role": "reader"}, 204)
+	for name, l := range map[string]*liveEvents{"the owner": owner, "the member": member} {
+		state := l.nextRole(t, "member-page-1", "reader")["state"].(map[string]any)
+		if state["preview"] != nil || state["editing"] != nil {
+			t.Fatalf("%s sees the reader's %v", name, state)
+		}
+	}
+	lt.patch(t, lt.owner, version, []map[string]any{set([]string{"nodes", "n2", "title"}, "Seen by a reader")}, 200)
+	if change := member.next(t, "changes"); change["version"] != version+1 {
+		t.Fatalf("the reader's stream: %v", change)
+	}
+
+	// Two quick changes of one person are told in the order they were committed: the second waits for the first one's
+	// notice, so the change committed last stands.
+	members := "/tenants/" + lt.tid + "/members"
+	role := func(r string) func() int {
+		return func() int { return call(lt.owner, "PATCH", members+"/"+lt.memberID, map[string]string{"role": r}) }
+	}
+	if a, b := ordered("two role changes", lt.memberID, "member", role("member"), "reader", role("reader")); a != 204 || b != 204 {
+		t.Fatalf("the two role changes: %d, %d", a, b)
+	}
+	if p, _ := lt.h.a.multiplayer.participant(lt.tid, lt.cid, "member-page-1"); p.Role != "reader" {
+		t.Fatalf("the change committed last does not stand: %+v", p)
+	}
+	lt.patch(t, lt.owner, version+1, []map[string]any{set([]string{"nodes", "n2", "title"}, "Still seen")}, 200)
+	if change := member.next(t, "changes"); change["version"] != version+2 {
+		t.Fatalf("the reader's stream after the two changes: %v", change)
+	}
+
+	// A person removed and at once added back, by the owner or by an invitation: the adding waits for the removal's
+	// notice, which ends the stream they had open, so a stream they open once they are back stays open.
+	readd, readdID := lt.addPerson(t, "live-readd@example.test", "member")
+	invite := lt.h.request(t, lt.owner, "POST", "/tenants/"+lt.tid+"/invites", map[string]any{"role": "member", "email": "live-readd@example.test"}, 201)
+	for i, way := range []struct {
+		name string
+		add  func() int
+		want int
+	}{
+		{"added back by the owner", func() int {
+			return call(lt.owner, "POST", members, map[string]string{"email": "live-readd@example.test", "role": "member"})
+		}, 201},
+		{"added back by an invitation", func() int { return call(readd, "POST", "/invites/"+invite["token"].(string)+"/accept", nil) }, 200},
+	} {
+		_, v := lt.document(t)
+		before := lt.openLive(t, readd, "", fmt.Sprintf("after=%v&client=readd-page-%d", v, 2*i))
+		before.next(t, "hello")
+		at := time.Now()
+		remove := func() int { return call(lt.owner, "DELETE", members+"/"+readdID, nil) }
+		if a, b := ordered(way.name, readdID, "", remove, "member", way.add); a != 204 || b != way.want {
+			t.Fatalf("%s: the removal %d, the adding %d", way.name, a, b)
+		}
+		ended(before, at, "the member "+way.name)
+		back := lt.openLive(t, readd, "", fmt.Sprintf("after=%v&client=readd-page-%d", v, 2*i+1))
+		back.next(t, "hello")
+		lt.patch(t, lt.owner, v, []map[string]any{set([]string{"nodes", "n1", "title"}, way.name)}, 200)
+		if change := back.next(t, "changes"); change["version"] != v+1 {
+			t.Fatalf("%s: the stream opened once back: %v", way.name, change)
+		}
 	}
 }

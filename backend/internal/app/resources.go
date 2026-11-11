@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"hash/fnv"
 	"net/http"
 	"strings"
 	"sync"
@@ -139,7 +140,7 @@ func (a *App) addMember(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	if e = tx.Commit(r.Context()); e != nil {
+	if e = a.commitMembershipChange(r.Context(), tx, tid, uid, b.Role, nil); e != nil {
 		a.dbError(w, e)
 		return
 	}
@@ -206,13 +207,57 @@ func (a *App) changeMember(w http.ResponseWriter, r *http.Request, role string) 
 		a.dbError(w, e)
 		return
 	}
-	if e = tx.Commit(r.Context()); e != nil {
+	if e = a.commitMembershipChange(r.Context(), tx, tid, id, role, revoked); e != nil {
 		a.dbError(w, e)
 		return
 	}
-	a.multiplayer.tokensRevoked(revoked)
-	a.livePresence.forgetMember(tid, id)
 	w.WriteHeader(204)
+}
+
+// liveMemberNoticeStripes is how many locks membership changes are spread over, by workspace (liveMemberNoticeLock).
+const liveMemberNoticeStripes = 64
+
+// liveMemberCommitWait bounds a membership change's commit, which goes on if the request's own context ends meanwhile
+// (its client gone, its deadline passed): a commit cut short may still have been made, and its notice would be lost. One
+// made but answered later than this is not told either; the person's streams see it at their 15 s check.
+const liveMemberCommitWait = 10 * time.Second
+
+// liveMemberNoticeLock is the lock the membership changes of a workspace commit and are told under. Only the order of
+// one workspace's changes matters: a slow commit in one workspace holds up another's only when the two share a lock (one
+// pair of workspaces in 64).
+func (a *App) liveMemberNoticeLock(tid string) *sync.Mutex {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(tid))
+	return &a.liveMemberNotices[h.Sum32()%liveMemberNoticeStripes]
+}
+
+// commitMembershipChange commits a change of a person's membership of a workspace (added, given another role, removed
+// or gone; role: the one it gives, "" for none) and, once it is committed and before its request is answered, ends what
+// they lost and tells the live canvases (membersChanged). Every such change commits holding its workspace's notice lock
+// and lets go of it only once the canvases are told, so no change of the workspace commits between another's commit and
+// its notice: the canvases are told of the changes in the order they were committed, and the one committed last stands
+// (a removal told late can never end a stream the person opened once they were added back).
+func (a *App) commitMembershipChange(ctx context.Context, tx pgx.Tx, tid, userID, role string, revoked []revokedCanvasToken) error {
+	if a.liveMemberNoticeHook != nil {
+		a.liveMemberNoticeHook("commit", tid, userID, role)
+	}
+	lock := a.liveMemberNoticeLock(tid)
+	lock.Lock()
+	defer lock.Unlock()
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), liveMemberCommitWait)
+	defer cancel()
+	if err := tx.Commit(commitCtx); err != nil {
+		return err
+	}
+	a.multiplayer.tokensRevoked(revoked)
+	// Their trust for presence posts ends before the live canvases are told of the change: a post that still found it
+	// took the hub's count before the change moved it, so the role it carries does not undo the new one (setState).
+	a.livePresence.forgetMember(tid, userID)
+	if a.liveMemberNoticeHook != nil {
+		a.liveMemberNoticeHook("notice", tid, userID, role)
+	}
+	a.multiplayer.membersChanged(tid, userID, role)
+	return nil
 }
 
 // revokeAdministeredAccess revokes what only a workspace's owners and admins hold there, for a person ($uid) who is no
@@ -284,12 +329,10 @@ func (a *App) leaveTenant(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	if e = tx.Commit(r.Context()); e != nil {
+	if e = a.commitMembershipChange(r.Context(), tx, tid, uid, "", revoked); e != nil {
 		a.dbError(w, e)
 		return
 	}
-	a.multiplayer.tokensRevoked(revoked)
-	a.livePresence.forgetMember(tid, uid)
 	w.WriteHeader(204)
 }
 

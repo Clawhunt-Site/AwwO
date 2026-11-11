@@ -46,6 +46,9 @@ type presenceSessions struct {
 
 type presenceGenerationKey struct{}
 
+// liveMembersKey holds the count of membership changes (memberCount) a presence post's role was found after.
+type liveMembersKey struct{}
+
 // begin gives the generation a full check starts in.
 func (s *presenceSessions) begin() uint64 {
 	s.mu.Lock()
@@ -155,7 +158,9 @@ func (s *presenceSessions) forgetMember(tenantID, userID string) {
 }
 
 // livePresenceAccess admits a presence post as canvasAccess(next, 1) does, but takes a person's session as checked when
-// a full check admitted it to this workspace within livePresenceTrust. An agent's token is checked every time.
+// a full check admitted it to this workspace within livePresenceTrust. An agent's token is checked every time. The
+// count of membership changes is taken first: a role found trusted or checked is stale if one of the person's came
+// after (setState).
 func (a *App) livePresenceAccess(next http.HandlerFunc) http.HandlerFunc {
 	checked := a.canvasAccess(func(w http.ResponseWriter, r *http.Request) {
 		if agentOf(r) == nil {
@@ -169,6 +174,7 @@ func (a *App) livePresenceAccess(next http.HandlerFunc) http.HandlerFunc {
 		next(w, r)
 	}, 1)
 	return func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(context.WithValue(r.Context(), liveMembersKey{}, a.multiplayer.memberCount()))
 		if _, token := bearerCanvasToken(r); !token {
 			if c, err := r.Cookie("awwo_session"); err == nil && len(c.Value) <= 256 {
 				if e, ok := a.livePresence.lookup(presenceKey(tokenHash(c.Value), r.PathValue("tenantId"))); ok {

@@ -117,6 +117,12 @@ type App struct {
 	multiplayer canvasMultiplayer
 	// livePresence trusts a checked session for presence posts for a moment (canvas_live_presence.go).
 	livePresence presenceSessions
+	// liveMemberNotices make a membership change's commit and its notice to the live canvases one step, so a workspace's
+	// changes are told in the order they were committed (commitMembershipChange; one lock per stripe of workspaces).
+	liveMemberNotices [liveMemberNoticeStripes]sync.Mutex
+	// liveMemberNoticeHook, set by tests before the API serves, runs as a change comes to take its lock (step "commit")
+	// and between its commit and its notice (step "notice").
+	liveMemberNoticeHook func(step, tid, userID, role string)
 }
 type rateEntry struct {
 	start time.Time

@@ -427,6 +427,8 @@ func (a *App) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "invite_used", "Invitation has already been accepted")
 		return
 	}
+	// joined says the acceptance added the person to the workspace (they were not a member).
+	joined := false
 	if acceptedBy == nil {
 		if revoked != nil {
 			fail(w, 410, "invite_revoked", "Invitation has been revoked")
@@ -452,10 +454,12 @@ func (a *App) acceptInvite(w http.ResponseWriter, r *http.Request) {
 			fail(w, 403, "invite_unavailable", "Invitation issuer no longer has permission")
 			return
 		}
-		if _, e = tx.Exec(r.Context(), "INSERT INTO memberships(tenant_id,user_id,role) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", tid, uid, role); e != nil {
-			a.dbError(w, e)
+		added, err := tx.Exec(r.Context(), "INSERT INTO memberships(tenant_id,user_id,role) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", tid, uid, role)
+		if err != nil {
+			a.dbError(w, err)
 			return
 		}
+		joined = added.RowsAffected() == 1
 		if _, e = tx.Exec(r.Context(), "UPDATE tenant_invites SET accepted_by=$2,accepted_at=clock_timestamp() WHERE id=$1", id, uid); e != nil {
 			a.dbError(w, e)
 			return
@@ -480,7 +484,13 @@ func (a *App) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
-	if e = tx.Commit(r.Context()); e != nil {
+	// One who joins is told to the live canvases in order with every other membership change (commitMembershipChange).
+	if joined {
+		e = a.commitMembershipChange(r.Context(), tx, tid, uid, role, nil)
+	} else {
+		e = tx.Commit(r.Context())
+	}
+	if e != nil {
 		a.dbError(w, e)
 		return
 	}

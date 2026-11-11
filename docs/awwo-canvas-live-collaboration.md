@@ -302,9 +302,10 @@ Only a person who may edit (a member or above) shows a preview or an editing mar
 reader's post and from a token's, and an agent's pointer and viewport too. Readers (只读成员) are on the canvas live:
 they hold the stream (role 1), are seen by everyone with their pointer and selection, and are refused changes, messages
 and claims. A page says what it runs in when its stream opens (`device`: `browser`, `mac`, `windows`, `phone` or
-`tablet`; shown, never trusted), and a participant's `role` is the one it has now (read again at the stream's 15 s
-check and with each presence post). The pointer, the preview and the editing mark go when the page's last stream
-closes; the rest stays for its 30 s.
+`tablet`; shown, never trusted), and a participant's `role` is the one it has now: a change of it in AwwO shows on
+every canvas of the workspace at once, and it is read again at the stream's 15 s check and with each presence post
+(neither undoes a change made after it was read). The pointer, the preview and the editing mark go when the page's
+last stream closes; the rest stays for its 30 s.
 
 **Colours.** Each person (all their pages) and each token wears a colour no one else on the canvas wears while they are
 there, up to twelve: the first one free from their own on (their own comes from one palette by `u_` + user id or `t_`
@@ -355,7 +356,7 @@ an edit token):
 | --- | --- | --- |
 | `PATCH` (the canvas itself) | `{baseVersion, changeId, clientId, ops, label?}` | `{version, results, reasons?, changes}`: `results[i]` is `ok`, `gone`, `claimed`, `node_running` or `forbidden` for `ops[i]`; when any op is refused, `reasons[i]` says in one sentence why (`""` for an op done; see Ports); `changes` holds every change after `baseVersion`; or `{version, results, reasons?, reset: true, document}` when the log no longer reaches back |
 | `GET /changes?after=v` | | `{version, changes}`, or `{version, reset: true, document}` |
-| `GET /live/events?after=v&client=c&device=d` | | the live stream (`device` optional) |
+| `GET /live/events?after=v&client=c&device=d` | | the live stream (`device` optional); `409 client_taken`, `429 too_many_streams` (with `Retry-After`), or `503 membership_changing` (with `Retry-After`: the person's membership changed three times while the stream read their role) |
 | `POST /live/presence` | `{clientId, state}` (the parts given; at most 128 KiB) | 204; `429 presence_too_fast` (with `Retry-After`) past 10 a second |
 | `POST /live/claims` | `{clientId, nodeIds, ttlSeconds?, note?}` | `{claims, refused: [{nodeId, holder}]}` |
 | `DELETE /live/claims` | `{clientId, nodeIds?}` | `{claims}` |
@@ -390,6 +391,19 @@ A `: ping` comment goes every 15 s. Access is checked again every 15 s (a page's
 or a token's liveness), as the run event stream does. Changes are durable before they are streamed; a process-local
 signal wakes the streams at once, and each stream reads the log again on every ping. A page reconnects with `after` set
 to its confirmed version and misses nothing. When the API stops, every stream ends at once with `bye: restart`.
+
+A membership change made in AwwO (an owner or admin removes a person or gives them another role, or a person leaves)
+reaches the person's open streams at once, once it is committed and before its request is answered, not at their 15 s
+check. Removed or gone, each of their streams in the workspace is set to end with `bye: access`: its next event is that
+bye, so nothing made after the change was answered reaches it (an event the stream had already begun to write may still
+go just before the bye; a stream that ends another way meanwhile still sends it), and their pages leave every canvas of
+the workspace at once, with no 30 s, so everyone else sees them leave. Given another role, it shows on every canvas of
+the workspace at once; as a reader, their edit in progress and editing mark go. Every membership change (adding someone,
+by an owner or an invitation, included) commits and is told to the canvases in one step, so they are told of the
+changes in the order they were committed: of two quick changes of one person the one committed last stands, and a
+removal told late never ends a stream the person opened once they were added back. A stream whose person's membership
+changed while it opened reads their role again; their tokens go as their revocation says (`bye: revoked`). A change the
+API is not told of (an operator's deletion of a workspace or an account) is still seen at the 15 s check.
 
 ### Limits
 
