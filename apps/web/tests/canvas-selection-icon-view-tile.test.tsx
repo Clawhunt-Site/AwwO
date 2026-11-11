@@ -24,8 +24,8 @@ const agent = (id = 'a', extra: Partial<CanvasNode> = {}): CanvasNode =>
 const bound = { binding: { companyId: 'c1', agentId: 'agent-a', agentName: '甲' }, runtime: 'claude_local' } as Partial<CanvasNode>;
 
 function fakeWiring(interactive = true): WiringApi {
-  return { pendingPort: null, wireDrag: null, interactive, wireCount: () => 0, clearPending: vi.fn(), cancelWiring: vi.fn(),
-    onPortPointerDown: vi.fn(), onPortClick: vi.fn() };
+  return { pendingPort: null, wireDrag: null, interactive, wireCount: () => 0, canEndDrag: () => false, clearPending: vi.fn(),
+    cancelWiring: vi.fn(), onPortPointerDown: vi.fn(), onPortClick: vi.fn() };
 }
 
 function draw(node: CanvasNode, props: Partial<NodeIconTileProps> = {}, wrap?: (child: ReactElement) => ReactElement) {

@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { TilePorts, type WiringApi } from '../src/canvas/TilePorts';
+import { useMemo, useRef } from 'react';
+import { TilePorts, useWiring, type WiringApi } from '../src/canvas/TilePorts';
 import { SessionTile } from '../src/canvas/SessionTile';
 import { NodeIconTile } from '../src/canvas/NodeIconTile';
-import { createSessionNode, type SessionNode } from '../src/canvas/canvasDoc';
+import { createSessionNode, type CanvasEdge, type SessionNode } from '../src/canvas/canvasDoc';
+import type { ContractFieldType } from '../src/canvas/nodeContracts';
+import type { PortSpec } from '../src/canvas/ports';
 
 afterEach(cleanup);
 function node(): SessionNode {
@@ -15,7 +18,7 @@ function node(): SessionNode {
   };
 }
 function wiring(): WiringApi {
-  return { pendingPort: null, wireDrag: null, interactive: true, wireCount: () => 0,
+  return { pendingPort: null, wireDrag: null, interactive: true, wireCount: () => 0, canEndDrag: () => false,
     clearPending: vi.fn(), cancelWiring: vi.fn(), onPortPointerDown: vi.fn(), onPortClick: vi.fn() };
 }
 
@@ -212,17 +215,23 @@ describe('field labels without room beside their port', () => {
     expect(inputLabel()).toBeNull();
   });
 
-  it('names the ports a dragged wire may end on while the drag lasts', () => {
+  it('names the ports the wiring says a dragged wire may end on, while the drag lasts', () => {
+    const asked: [string, string][] = [];
+    // A stand-in for the wiring's answer (the real one asks canConnect, below): every port of the other side.
     const drag = (side: 'input' | 'output' | null) => ({ ...wiring(),
-      wireDrag: side ? { from: { nodeId: 'other', portId: 'out:x' }, side, world: { x: 0, y: 0 } } : null });
+      wireDrag: side ? { from: { nodeId: 'other', portId: 'out:x' }, side, world: { x: 0, y: 0 } } : null,
+      canEndDrag: (nodeId: string, port: PortSpec) => { asked.push([nodeId, port.id]); return side !== null && port.side !== side; } });
     const { rerender } = render(<TilePorts node={node()} wiring={drag(null)} />, { container: stage });
     room(inputPort(), false);
     room(outputPort(), false);
     expect(inputLabel()).toBeNull();
     expect(outputLabel()).toBeNull();
+    // Nothing dragged: nothing asked.
+    expect(asked).toEqual([]);
     rerender(<TilePorts node={node()} wiring={drag('output')} />);
     expect(inputLabel()!.style.left).toBe('18px');
     expect(outputLabel()).toBeNull();
+    expect(asked).toContainEqual(['frontend', 'in:private_input_id']);
     rerender(<TilePorts node={node()} wiring={drag(null)} />);
     expect(inputLabel()).toBeNull();
   });
@@ -342,15 +351,16 @@ describe('field labels: Escape, blur and drags where they must not reach', () =>
     expect(inputLabel()).toBeNull();
   });
 
-  it('names no port a dragged wire cannot end on: its own node\'s, or an input that takes one wire and has it', () => {
-    const drag = (from: string, wires = 0) => ({ ...wiring(), wireCount: () => wires,
-      wireDrag: { from: { nodeId: from, portId: 'out:x' }, side: 'output' as const, world: { x: 0, y: 0 } } });
-    const { rerender } = render(<TilePorts node={node()} wiring={drag('other')} />, { container: stage });
+  it('names no port the wiring says a dragged wire cannot end on, and none on an inert board', () => {
+    const drag = (ends: boolean, interactive = true) => ({ ...wiring(), interactive, canEndDrag: () => ends,
+      wireDrag: { from: { nodeId: 'other', portId: 'out:x' }, side: 'output' as const, world: { x: 0, y: 0 } } });
+    const { rerender } = render(<TilePorts node={node()} wiring={drag(true)} />, { container: stage });
     noRoom(inputPort());
     expect(inputLabel()).not.toBeNull();
-    rerender(<TilePorts node={node()} wiring={drag('frontend')} />);
+    rerender(<TilePorts node={node()} wiring={drag(false)} />);
     expect(inputLabel()).toBeNull();
-    rerender(<TilePorts node={node()} wiring={drag('other', 1)} />);
+    // A run starts mid-drag, or the board turns read-only: its ports are inert and name nothing.
+    rerender(<TilePorts node={node()} wiring={drag(true, false)} />);
     expect(inputLabel()).toBeNull();
   });
 
@@ -373,5 +383,152 @@ describe('field labels: Escape, blur and drags where they must not reach', () =>
     } finally {
       iconStage.remove();
     }
+  });
+});
+
+// What a drag names is the wiring's own judgement (useWiring, with canConnect), the one its release acts on: every
+// port without room beside it here, so a label is drawn only while a dragged wire may end on its port.
+describe('the ports a dragged wire may end on, as the wiring judges them', () => {
+  let observers: { callback: IntersectionObserverCallback; targets: Element[] }[] = [];
+  let stage: HTMLDivElement;
+  beforeEach(() => {
+    observers = [];
+    vi.stubGlobal('IntersectionObserver', class {
+      private readonly entry: (typeof observers)[number];
+      constructor(callback: IntersectionObserverCallback) {
+        this.entry = { callback, targets: [] };
+        observers.push(this.entry);
+      }
+      observe(target: Element) { this.entry.targets.push(target); }
+      unobserve(target: Element) { this.entry.targets = this.entry.targets.filter(item => item !== target); }
+      disconnect() { this.entry.targets = []; }
+    });
+    stage = document.createElement('div');
+    stage.className = 'canvas-root';
+    document.body.appendChild(stage);
+  });
+  afterEach(() => {
+    stage.remove();
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(document, 'elementFromPoint');
+  });
+  type Field = [id: string, label: string, type: ContractFieldType];
+  const contractNode = (id: string, x: number, inputs: Field[], outputs: Field[]): SessionNode => ({
+    ...createSessionNode('coding', { x, y: 0 }), id, w: 400, h: 420,
+    contract: { version: 1,
+      inputs: inputs.map(([field, label, type]) => ({ id: field, label, type, required: true, value: '' })),
+      outputs: outputs.map(([field, label, type]) => ({ id: field, label, type, required: true, value: '' })) },
+  });
+  // The scorer takes a number and gives a number and a file; the writer takes words, a number and a file and gives
+  // words; the counter gives a number. The painter is an image node: it has no fields, so no labels of its own, and its
+  // result is a picture, which canFeed lets feed words.
+  const SCORER = contractNode('scorer', 0, [['seed', '种子', 'number']], [['score', '评分', 'number'], ['sheet', '评分表', 'file']]);
+  const WRITER = contractNode('writer', 600, [['brief', '写作要求', 'markdown'], ['count', '字数', 'number'], ['notes', '参考文件', 'file']],
+    [['draft', '初稿', 'markdown']]);
+  const COUNTER = contractNode('counter', 1200, [], [['n', '计数', 'number']]);
+  const PAINTER: SessionNode = { ...createSessionNode('image', { x: 1800, y: 0 }), id: 'painter' };
+  // The writer's number input already takes the counter's number: an input that takes one wire, and has it.
+  const COUNTED: CanvasEdge = { id: 'counter:out:n->writer:in:count', fromNode: 'counter', fromPort: 'out:n', toNode: 'writer',
+    toPort: 'in:count', dataType: 'number' };
+  function Board({ nodes, edges, onConnect }: { nodes: SessionNode[]; edges: CanvasEdge[]; onConnect: () => void }) {
+    const rootRef = useRef<HTMLDivElement>(null);
+    const view = useMemo(() => ({ x: 0, y: 0, scale: 1 }), []);
+    const wiring = useWiring({ nodes, edges, onConnect, rootRef, view });
+    return <div ref={rootRef}><div className="canvas-viewport">
+      {nodes.map(node => <TilePorts key={node.id} node={node} wiring={wiring} />)}
+    </div></div>;
+  }
+  const port = (nodeId: string, portId: string) => stage.querySelector(`[data-node-id="${nodeId}"][data-port-id="${portId}"]`)!;
+  // The ports of the nodes with fields: only those have labels (each one's room is watched).
+  const fieldPorts = () => [...stage.querySelectorAll('.canvas-port')].filter(each => observers.some(item => item.targets.includes(each)));
+  const named = () => [...stage.querySelectorAll('.canvas-port-field-label')].map(label => label.textContent);
+  const draw = (nodes = [SCORER, WRITER], edges: CanvasEdge[] = [], onConnect = vi.fn()) => {
+    render(<Board nodes={nodes} edges={edges} onConnect={onConnect} />, { container: stage });
+    for (const each of fieldPorts()) {
+      act(() => observers.find(item => item.targets.includes(each))!.callback(
+        [{ target: each, intersectionRatio: 0.4 } as unknown as IntersectionObserverEntry], {} as IntersectionObserver));
+    }
+    return onConnect;
+  };
+  const dragFrom = (nodeId: string, portId: string) => {
+    fireEvent.pointerDown(port(nodeId, portId), { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 40, clientY: 0 });
+  };
+  const cancel = () => fireEvent.pointerCancel(window, { pointerId: 1 });
+
+  it('names, of another node, only the ports of the dragged one\'s data type on the other side', () => {
+    draw();
+    expect(named()).toEqual([]);
+    dragFrom('scorer', 'out:score');
+    // Not 写作要求 (words) or 参考文件 (a file), not the scorer's own 种子, not an output.
+    expect(named()).toEqual(['字数']);
+    cancel();
+    expect(named()).toEqual([]);
+    dragFrom('scorer', 'out:sheet');
+    expect(named()).toEqual(['参考文件']);
+    cancel();
+    // Dragged back from an input: the outputs that may feed it.
+    dragFrom('writer', 'in:count');
+    expect(named()).toEqual(['评分']);
+    cancel();
+    dragFrom('writer', 'in:brief');
+    expect(named()).toEqual([]);
+    cancel();
+  });
+
+  it('names a words input for a media node\'s result, which canFeed lets feed words, and no input of another type', () => {
+    draw([SCORER, WRITER, PAINTER]);
+    dragFrom('painter', 'result');
+    // A picture: into words, as canFeed allows a media node's result; not into a number or a file.
+    expect(named()).toEqual(['写作要求']);
+    cancel();
+    // The writer's words may feed the painter's words, but the painter has no fields to name.
+    dragFrom('writer', 'out:draft');
+    expect(named()).toEqual([]);
+    cancel();
+  });
+
+  it('names no input that takes one wire and has it, whichever node feeds it', () => {
+    draw([SCORER, WRITER, COUNTER], [COUNTED]);
+    // The writer's number input has the counter's wire, so the scorer's number may not end there.
+    dragFrom('scorer', 'out:score');
+    expect(named()).toEqual([]);
+    cancel();
+    // The counter's own wire is there already; the scorer's number input is free.
+    dragFrom('counter', 'out:n');
+    expect(named()).toEqual(['种子']);
+    cancel();
+    // Dragged back from the input that has its wire: any wire it would make lands on an input that has one.
+    dragFrom('writer', 'in:count');
+    expect(named()).toEqual([]);
+    cancel();
+  });
+
+  it('names exactly the ports where letting go reports a wire, on a board with a wire and a media node', () => {
+    // As canConnect judges it: the board itself may still refuse a wire for a moment (a setup, a node streaming), and
+    // then its ports are mostly inert, so they name nothing.
+    const onConnect = draw([SCORER, WRITER, COUNTER, PAINTER], [COUNTED]);
+    const found: Record<string, number> = {};
+    const starts = [['scorer', 'out:score'], ['scorer', 'out:sheet'], ['writer', 'in:count'], ['writer', 'in:brief'], ['writer', 'out:draft'],
+      ['painter', 'result'], ['counter', 'out:n']];
+    for (const [nodeId, portId] of starts) {
+      const start = `${nodeId} ${portId}`;
+      found[start] = 0;
+      for (const target of fieldPorts()) {
+        dragFrom(nodeId, portId);
+        const label = target.querySelector('.canvas-port-field-label');
+        if (label) found[start] += 1;
+        onConnect.mockClear();
+        Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => target });
+        fireEvent.pointerUp(window, { pointerId: 1, clientX: 40, clientY: 0 });
+        expect([`${start} -> ${target.getAttribute('data-node-id')} ${target.getAttribute('data-port-id')}`, onConnect.mock.calls.length])
+          .toEqual([expect.any(String), label ? 1 : 0]);
+      }
+    }
+    // The scorer's number has no free input of its kind and the writer's number input has its wire; only the painter
+    // feeds the writer's words, and it has no field; nothing with fields takes words. Every drop ended its drag.
+    expect(found).toEqual({ 'scorer out:score': 0, 'scorer out:sheet': 1, 'writer in:count': 0, 'writer in:brief': 0,
+      'writer out:draft': 0, 'painter result': 1, 'counter out:n': 1 });
+    expect(named()).toEqual([]);
   });
 });

@@ -60,6 +60,10 @@ export interface WiringApi {
    *  the fan-in count badge — with a multi input you have to be able to SEE that three things
    *  feed this node, not discover it when the prompt comes out wrong. */
   wireCount: (nodeId: string, portId: string, side: PortSide) => number;
+  /** Could the wire being dragged end on this port of this node? canConnect's answer for the wire its release would make
+   *  (from an output to an input, whichever end the drag started from); false while no wire is dragged. A tile names the
+   *  ports a dragged wire may end on, and only those. Asked while the tile renders, of the latest graph. */
+  canEndDrag: (nodeId: string, port: PortSpec) => boolean;
   /** Disarm the click-click flow — wire this to the viewport's background pointer-down. */
   clearPending: () => void;
   /** End any wiring at once, as a cancelled pointer does: the drag (no connect, no preview left behind) and the armed
@@ -231,6 +235,22 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
     [wiresKey],
   );
 
+  // What a dragged wire may end on hangs on the port it started from, not on where the pointer is: only a new start
+  // makes a new function. Like wireCount it reads the latest graph when a tile asks, and every tile asks again when the
+  // object changes: at each move of the drag, and when a wire comes or goes (a new wireCount).
+  const dragNode = wireDrag?.from.nodeId;
+  const dragPort = wireDrag?.from.portId;
+  const dragSide = wireDrag?.side;
+  const canEndDrag = useCallback((nodeId: string, port: PortSpec) => {
+    if (dragNode === undefined || dragPort === undefined || dragSide === undefined || port.side === dragSide) return false;
+    const pressed: PortRef = { nodeId: dragNode, portId: dragPort };
+    const other: PortRef = { nodeId, portId: port.id };
+    // Oriented as the release orients them: the wire runs from an output to an input.
+    return dragSide === 'output'
+      ? canConnect(nodesRef.current, edgesRef.current, pressed, other)
+      : canConnect(nodesRef.current, edgesRef.current, other, pressed);
+  }, [dragNode, dragPort, dragSide]);
+
   // The same object while nothing in it changed: every tile is memoised on its props, this one included, so a new
   // object per render would re-render every tile on the canvas each time it renders.
   const interactive = Boolean(onConnect);
@@ -239,11 +259,12 @@ export function useWiring({ nodes, edges, onConnect, rootRef, view }: UseWiringO
     wireDrag,
     interactive,
     wireCount,
+    canEndDrag,
     clearPending,
     cancelWiring,
     onPortPointerDown,
     onPortClick,
-  }), [pendingPort, wireDrag, interactive, wireCount, clearPending, cancelWiring, onPortPointerDown, onPortClick]);
+  }), [pendingPort, wireDrag, interactive, wireCount, canEndDrag, clearPending, cancelWiring, onPortPointerDown, onPortClick]);
 }
 
 const TYPE_LABEL: Record<DataType, CanvasTextKey> = {
@@ -406,9 +427,9 @@ export function TilePorts({ node, wiring, media, scale = 1, tabbable = true, cov
     focusedLabel.current = null;
     setExpandedLabel(null);
   }, [interactive]);
-  // A wire being dragged ends on a port of the other side; the pointer is captured by the port it started from, so no
-  // other port is hovered meanwhile, and their labels are drawn for as long as the drag lasts.
-  const dragSide = interactive ? wiring?.wireDrag?.side : undefined;
+  // A wire being dragged ends on a port of another node; the pointer is captured by the port it started from, so no
+  // other port is hovered meanwhile, and the labels of the ports it may end on are drawn for as long as the drag lasts.
+  const dragging = interactive && Boolean(wiring?.wireDrag);
   const guideIds = useId();
   // Counter-scale about the port's anchor: the guide's top-left sits on the anchor (transform-origin 0 0), is moved
   // beside the port in its own pixels, then scaled by 1/scale, so on screen it is always the same size and distance.
@@ -445,10 +466,10 @@ export function TilePorts({ node, wiring, media, scale = 1, tabbable = true, cov
         // An inert port (simple mode, a read-only board, a node running, being set up or held for binding) is never
         // hovered or focused, so there a label without room is not drawn: its name and title still say its field.
         const labelInside = labelsInside.has(portKey);
-        // Not one canConnect would refuse anyway: a port of the node the drag started on, or an input that takes one wire
-        // and has it.
-        const dragTarget = dragSide !== undefined && dragSide !== p.side && wiring?.wireDrag?.from.nodeId !== node.id
-          && !(p.side === 'input' && !p.multi && wires > 0);
+        // Only a port the wire may end on, as canConnect judges it (its release does too): not one of the node it started
+        // from, not an input that takes one wire and has it, not one canFeed refuses (another data type, but for a media
+        // node's result into words). Asked of a field label's port alone, the only kind it names.
+        const dragTarget = hasContract && dragging && Boolean(wiring?.canEndDrag(node.id, p));
         const headline = `${portLabel} · ${typeLabel}${p.multi ? ` · ${t('ports.multi')}`
           : (mediaPorts || editPorts) && p.side === 'input' ? ` · ${t('media.portSingle')}` : ''}${wires ? ` · ${t('ports.connected', { count: wires })}` : ''}`;
         // A media port that can be wired explains itself where the wiring happens. Inert ports (read-only, simple
