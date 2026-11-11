@@ -3,7 +3,8 @@
 // "Claude Fable models"), in one sentence, and a pointer to the clause. It is drawn only for such a model, so a picker
 // on any other model shows nothing, a person's own Claude Fable connection in the local edition included.
 // The clause's page is the ClawHunt site's /legal, linked only where the API named an https site (as 设置 → 关于 does);
-// without one, the clause is named and not linked.
+// without one, the clause is named and not linked. The link opens on the clause itself (#s-privacy-c8, the id clause
+// 07 also links to): /legal alone opens on the Terms of Service, about 4,600 px above it.
 import { createContext, useContext, type ReactNode } from 'react';
 import { CLAUDE_FABLE_SENTENCE, PRIVACY_CLAUSE_NAME, isBedrockClaudeFableModel } from './userChosenModels';
 import './claude-fable-note.css';
@@ -11,10 +12,10 @@ import './claude-fable-note.css';
 /** The ClawHunt site the signed-in identity names (`clawhuntSiteURL`); SaaSApp provides it. Empty: none. */
 export const PolicySite = createContext('');
 
-/** The privacy policy's page on that site; '' unless the site is an https URL. */
+/** Clause 08 of the privacy policy on that site; '' unless the site is an https URL. */
 export function privacyPolicyURL(site: string | null | undefined): string {
   const base = typeof site === 'string' ? site.trim().replace(/\/+$/, '') : '';
-  return /^https:\/\//.test(base) ? `${base}/legal` : '';
+  return /^https:\/\//.test(base) ? `${base}/legal#s-privacy-c8` : '';
 }
 
 /** Clause 08 by name: a link to the policy in a new tab where there is one to open, else its name alone. */

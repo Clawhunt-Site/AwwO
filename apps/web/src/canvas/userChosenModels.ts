@@ -13,8 +13,9 @@ export function automaticChoices<T extends { userChosen?: boolean }>(entries: Re
 
 /** Anthropic's Claude Fable models, by id alone as the API knows them (backend tenant_models.go userChosenModel): after
  *  an optional `bedrock.` prefix the id starts with `claude-fable-`. The API marks them `userChosen` too, for another
- *  reason than DeepSeek's: AWS keeps the inputs and outputs of every Claude Fable request for up to 30 days and its staff
- *  may read what its systems flag (clause 08, "Claude Fable models"). Wherever a person has one chosen in a model picker,
+ *  reason than DeepSeek's: AWS keeps the inputs and outputs of every Claude Fable request for up to 30 days, or longer
+ *  where the law requires it, and its staff may read what its systems flag (clause 08, "Claude Fable models"; AWS Service
+ *  Terms 50.12.2). Wherever a person has one chosen in a model picker,
  *  the page says so beside it (ClaudeFableNote.tsx), and says nothing that contradicts the clause. */
 export function isClaudeFableModel(id: string | null | undefined): boolean {
   return typeof id === 'string' && (id.startsWith('bedrock.') ? id.slice('bedrock.'.length) : id).startsWith('claude-fable-');
@@ -27,10 +28,10 @@ export function isBedrockClaudeFableModel(id: string | null | undefined): boolea
   return typeof id === 'string' && id.startsWith('bedrock.claude-fable-');
 }
 
-/** What the page says beside such a model a person has chosen, in the clause's own terms ([zh, en]), and the name of
- *  the clause it points to. */
-export const CLAUDE_FABLE_SENTENCE = ['Claude Fable 的请求由 AWS 保存最长 30 天，被系统标记的内容可能由 AWS 人员查看。',
-  'AWS keeps Claude Fable requests for up to 30 days, and its staff may read content its systems flag.'] as const;
+/** What the page says beside such a model a person has chosen, in the clause's own terms ([zh, en]): its keeping time
+ *  with the clause's caveat ("or longer where the law requires it"), and the name of the clause it points to. */
+export const CLAUDE_FABLE_SENTENCE = ['Claude Fable 的请求由 AWS 保存最长 30 天（法律要求时更久），被系统标记的内容可能由 AWS 人员查看。',
+  'AWS keeps Claude Fable requests for up to 30 days, or longer where the law requires it, and its staff may read content its systems flag.'] as const;
 export const PRIVACY_CLAUSE_NAME = ['隐私政策第 08 条', 'Privacy policy, clause 08'] as const;
 
 /** The models a canvas plan may put a node on, from the canvas's palette: each entry with its name and effort levels,

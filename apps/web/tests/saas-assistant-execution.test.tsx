@@ -164,15 +164,15 @@ describe('the canvas assistant’s tasks', () => {
   });
 
   it('says what the privacy policy says of Claude Fable under the model, only while one is chosen (2026-11-11)', async () => {
-    // AWS keeps a Claude Fable request for up to 30 days and its staff may read what its systems flag (clause 08): said at
-    // the place of choice, with a pointer to the clause, and not of any other model.
+    // AWS keeps a Claude Fable request for up to 30 days, or longer where the law requires it, and its staff may read
+    // what its systems flag (clause 08): said at the place of choice, with a pointer to the clause, and not of any other model.
     const fable = { id: 'bedrock.claude-fable-5-2', label: 'Claude Fable 5.2', runtime: 'openai-agents', efforts: [], userChosen: true };
     vi.stubGlobal('fetch', vi.fn(async (url: string) => json(url.endsWith('/computer-runtime')
       ? { ...runtime, models: [fable, runtime.models[0]] } : url.endsWith('/computer-runs') ? { items: [] } : detail)));
     render(<PolicySite.Provider value="https://clawhunt.example">{view()}</PolicySite.Provider>);
     // Listed first, it is passed over: nobody chose it, so nothing is said yet.
     expect(await composerReady()).toBeInTheDocument();
-    const said = 'Claude Fable 的请求由 AWS 保存最长 30 天，被系统标记的内容可能由 AWS 人员查看。';
+    const said = 'Claude Fable 的请求由 AWS 保存最长 30 天（法律要求时更久），被系统标记的内容可能由 AWS 人员查看。';
     expect(screen.queryByText(said, { exact: false })).toBeNull();
     fireEvent.change(screen.getByLabelText('画布助手的模型'), { target: { value: executionModelKey('openai-agents', fable.id) } });
     expect(await screen.findByTitle('画布助手用：Claude Fable 5.2')).toBeInTheDocument();
@@ -180,7 +180,7 @@ describe('the canvas assistant’s tasks', () => {
     expect(line).toHaveClass('awwo-execution-model-note');
     expect(line.previousElementSibling).toBe(screen.getByLabelText('画布助手的模型').closest('label'));
     const clause = within(line).getByRole('link', { name: '隐私政策第 08 条' });
-    expect(clause).toHaveAttribute('href', 'https://clawhunt.example/legal');
+    expect(clause).toHaveAttribute('href', 'https://clawhunt.example/legal#s-privacy-c8');
     expect(clause).toHaveAttribute('target', '_blank');
     expect(clause).toHaveAttribute('rel', 'noopener noreferrer');
     fireEvent.change(screen.getByLabelText('画布助手的模型'), { target: { value: executionModelKey('openai-agents', 'byok_model_a') } });

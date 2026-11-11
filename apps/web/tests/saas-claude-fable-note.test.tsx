@@ -1,7 +1,8 @@
 // Claude Fable models (bedrock.claude-fable-5-2 and any later one): AWS keeps the inputs and outputs of every request
-// to one for up to 30 days and its staff may read what its systems flag (ClawHunt's privacy policy, clause 08, "Claude
-// Fable models"). Wherever a person has one chosen in a model picker, the page says so under the picker and points to
-// the clause; on any other model it says nothing. The clause's page is linked only where the API named an https site.
+// to one for up to 30 days, or longer where the law requires it, and its staff may read what its systems flag
+// (ClawHunt's privacy policy, clause 08, "Claude Fable models"). Wherever a person has one chosen in a model picker, the
+// page says so under the picker and points to the clause; on any other model it says nothing. The clause's page is
+// linked only where the API named an https site, and the link opens on the clause itself (/legal#s-privacy-c8).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactElement } from 'react';
@@ -25,15 +26,17 @@ import { SaaSPreferencesProvider } from '../src/saas/preferences';
 import { GeneralSettings } from '../src/saas/settings/general';
 
 const FABLE = 'bedrock.claude-fable-5-2', OPUS = 'bedrock.claude-opus-5-5', DEEPSEEK = 'deepseek-flash';
-const ZH = 'Claude Fable 的请求由 AWS 保存最长 30 天，被系统标记的内容可能由 AWS 人员查看。';
-const EN = 'AWS keeps Claude Fable requests for up to 30 days, and its staff may read content its systems flag.';
+const ZH = 'Claude Fable 的请求由 AWS 保存最长 30 天（法律要求时更久），被系统标记的内容可能由 AWS 人员查看。';
+const EN = 'AWS keeps Claude Fable requests for up to 30 days, or longer where the law requires it, and its staff may read content its systems flag.';
 const SITE = 'https://clawhunt.example';
+/** Clause 08 itself: /legal opens on the Terms of Service, about 4,600 px above it; its id is the one clause 07 links to. */
+const CLAUSE = `${SITE}/legal#s-privacy-c8`;
 const onSite = (view: ReactElement, site = SITE) => <PolicySite.Provider value={site}>{view}</PolicySite.Provider>;
 const note = () => screen.queryByRole('note');
-/** The clause's link as the settings' privacy link is made: the site's /legal, in a new tab, with no opener. */
+/** The clause's link as the settings' privacy link is made: in a new tab, with no opener; it opens on clause 08. */
 function expectClauseLink(name: string) {
   const link = within(note()!).getByRole('link', { name });
-  expect(link).toHaveAttribute('href', `${SITE}/legal`);
+  expect(link).toHaveAttribute('href', CLAUSE);
   expect(link).toHaveAttribute('target', '_blank');
   expect(link).toHaveAttribute('rel', 'noopener noreferrer');
 }
@@ -88,7 +91,8 @@ describe('the line under a picker', () => {
   });
 
   it('names the clause without a link where there is no https site to open', () => {
-    expect(privacyPolicyURL(SITE)).toBe(`${SITE}/legal`);
+    expect(privacyPolicyURL(SITE)).toBe(CLAUSE);
+    expect(privacyPolicyURL(`${SITE}/ `)).toBe(CLAUSE);
     for (const site of ['', 'http://clawhunt.example', 'javascript:alert(1)', '//clawhunt.example', undefined, null]) expect(privacyPolicyURL(site), String(site)).toBe('');
     for (const site of ['', 'http://clawhunt.example']) {
       render(onSite(<ClaudeFableNote model={FABLE} locale="en" />, site));
@@ -205,7 +209,7 @@ describe('the Agent market', () => {
     render(page(FABLE));
     const said = document.querySelector('.awwo-market-note')!;
     expect(said).toHaveTextContent(`选用这个 Agent 就是选用这个模型。${ZH}隐私政策第 08 条`);
-    expect(within(said as HTMLElement).getByRole('link', { name: '隐私政策第 08 条' })).toHaveAttribute('href', `${SITE}/legal`);
+    expect(within(said as HTMLElement).getByRole('link', { name: '隐私政策第 08 条' })).toHaveAttribute('href', CLAUSE);
     cleanup();
     render(page(FABLE, 'en'));
     expect(document.querySelector('.awwo-market-note')).toHaveTextContent(`choosing this Agent chooses that model. ${EN} Privacy policy, clause 08`);

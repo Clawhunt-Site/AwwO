@@ -60,7 +60,7 @@ it('says what the privacy policy says of Claude Fable while one is the model cho
   server(()=>json({...catalog,models:[...catalog.models,{id:'bedrock.claude-fable-5-2',label:'Claude Fable 5.2',runtime:'openai-agents',userChosen:true}]}));
   setup();
   await choose();
-  const said='AWS keeps Claude Fable requests for up to 30 days, and its staff may read content its systems flag.';
+  const said='AWS keeps Claude Fable requests for up to 30 days, or longer where the law requires it, and its staff may read content its systems flag.';
   expect(screen.queryByText(said,{exact:false})).toBeNull();
   fireEvent.change(chooser(),{target:{value:JSON.stringify(['openai-agents','bedrock.claude-fable-5-2'])}});
   const line=await screen.findByText(said,{exact:false});

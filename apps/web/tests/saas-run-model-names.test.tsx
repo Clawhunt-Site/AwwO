@@ -376,8 +376,9 @@ describe('an opened node', () => {
   });
 
   it('says what the privacy policy says of Claude Fable under the chip, only while the node’s model is one (2026-11-11)', () => {
-    // AWS keeps a Claude Fable request for up to 30 days and its staff may read what its systems flag (clause 08): said
-    // where the model is chosen, with a pointer to the clause (ClaudeFableNote.tsx), and of no other model.
+    // AWS keeps a Claude Fable request for up to 30 days, or longer where the law requires it, and its staff may read
+    // what its systems flag (clause 08): said where the model is chosen, with a pointer to the clause
+    // (ClaudeFableNote.tsx), and of no other model.
     const FABLE = 'bedrock.claude-fable-5-2';
     const entries: ModelPaletteSelection[] = [
       { key: JSON.stringify(['openai-agents', FABLE]), runtime: 'openai-agents', model: FABLE, label: 'Claude Fable 5.2', displayName: 'Claude Fable 5.2', providerGroup: 'claude', available: true, userChosen: true },
@@ -390,12 +391,12 @@ describe('an opened node', () => {
     const line = () => document.querySelector('.awwo-fable-note');
     render(tile(FABLE));
     expect(chip().querySelector('.awwo-node-model-picker-value')!.textContent).toBe('Claude Fable 5.2');
-    expect(line()).toHaveTextContent('Claude Fable 的请求由 AWS 保存最长 30 天，被系统标记的内容可能由 AWS 人员查看。隐私政策第 08 条');
+    expect(line()).toHaveTextContent('Claude Fable 的请求由 AWS 保存最长 30 天（法律要求时更久），被系统标记的内容可能由 AWS 人员查看。隐私政策第 08 条');
     expect(line()).toHaveClass('canvas-composer-notice');
     // Under the row the chip is in.
     expect(chip().closest('.canvas-composer-accessory')!.nextElementSibling).toBe(line());
     const clause = within(line() as HTMLElement).getByRole('link', { name: '隐私政策第 08 条' });
-    expect(clause).toHaveAttribute('href', 'https://clawhunt.example/legal');
+    expect(clause).toHaveAttribute('href', 'https://clawhunt.example/legal#s-privacy-c8');
     expect(clause).toHaveAttribute('target', '_blank');
     expect(clause).toHaveAttribute('rel', 'noopener noreferrer');
     cleanup();
