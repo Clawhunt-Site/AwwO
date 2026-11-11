@@ -241,10 +241,15 @@
 /* Side by side from 900px: as many columns as plans fit at 260px or more (three; two where a server lists two). */
 @container (min-width: 900px) {
   .saas-voucher-row { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); row-gap: 0; }
-  /* Each ticket's body and stub sit on the row's own two lines (subgrid), so the perforations run level across the
-     plans however long each one's words are. */
-  .saas-voucher { display: grid; grid-row: span 2; grid-template-rows: subgrid; }
-  .saas-voucher-ticket { grid-row: span 2; grid-template-rows: subgrid; }
+  /* Each ticket's lines sit on the row's own seven (subgrid): the body's six (PlanVoucher.tsx: kicker, name, face
+     value, its note, perks, serial), then the stub. So the names, the figures and the perforations run level across
+     the plans however long each one's words are. Before, only the body and the stub did, and Pro's short tagline,
+     fitting beside its kicker, put its name a line above the other two. */
+  .saas-voucher { display: grid; grid-row: span 7; grid-template-rows: subgrid; }
+  .saas-voucher-ticket { grid-row: span 7; grid-template-rows: subgrid; }
+  .saas-voucher-body { grid-row: span 6; grid-template-rows: subgrid; align-items: start; }
+  /* The tagline under the kicker on every ticket, short or long. */
+  .saas-voucher-kicker { flex-direction: column; align-items: flex-start; }
   .saas-voucher-stub { align-content: start; }
 }
 /* An upright ticket, on a narrow page and in the side-by-side row: the stub goes under the body, along a straight

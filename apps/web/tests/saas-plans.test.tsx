@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { PlansPage, returnPoll } from '../src/saas/PlansPage';
@@ -335,6 +337,29 @@ it('puts the vouchers first for an account without a plan, and its plan first fo
   serve(() => response(pro));
   page();
   expect(before(await screen.findByRole('region', { name: '当前套餐' }), screen.getByRole('region', { name: 'Pro' }))).toBe(true);
+});
+
+// Side by side, each ticket's lines sit on the row's own lines (subgrid), so the three names, face values and stubs
+// run level however each plan's words wrap (2026-11-11, seen on production: Pro's short tagline fitted beside its
+// kicker and its name sat a line above Max's and Ultra's). jsdom lays nothing out, so the stylesheet's spans are held
+// to the lines a voucher really has: a line added to the body without its row would push the stub off its own.
+it('gives each line of a voucher its own row across the three plans', async () => {
+  serve(() => response(pro));
+  page();
+  await screen.findByRole('region', { name: 'Ultra' });
+  const lines = [...document.querySelectorAll('.saas-voucher-body')].map(body => body.children.length);
+  expect(new Set(lines).size).toBe(1); // the plan held (its stamp sits inside the face value's line) has no line more
+  const css = readFileSync(resolve(process.cwd(), 'src/saas/plan-voucher.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const wide = /@container \(min-width: 900px\) \{((?:[^{}]|\{[^{}]*\})*)\}/.exec(css)?.[1] ?? '';
+  const rule = (selector: string) => new RegExp(`${selector.replace('.', '\\.')} \\{([^{}]*)\\}`).exec(wide)?.[1] ?? '';
+  const span = (selector: string) => Number(/grid-row: span (\d+);/.exec(rule(selector))?.[1]);
+  expect(span('.saas-voucher-body')).toBe(lines[0]);
+  expect(span('.saas-voucher-ticket')).toBe(lines[0] + 1); // and the stub
+  expect(span('.saas-voucher')).toBe(lines[0] + 1);
+  for (const selector of ['.saas-voucher', '.saas-voucher-ticket', '.saas-voucher-body']) expect(rule(selector)).toContain('grid-template-rows: subgrid;');
+  // A line shorter than its row stays at the row's top, and the tagline goes under the kicker on every ticket.
+  expect(rule('.saas-voucher-body')).toContain('align-items: start;');
+  expect(rule('.saas-voucher-kicker')).toContain('flex-direction: column;');
 });
 
 it('leaves out a plan it has no name for, rather than drawing it without one', async () => {
