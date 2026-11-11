@@ -854,9 +854,11 @@ test('the fetch sends cache checkpoints only when the operator turned the cache 
 });
 
 test('Claude Opus 5.5 is asked for its thinking as a summary, on every profile, only in a request of the Python worker\'s shape', () => {
-  assert.deepEqual([...SUMMARIZED_THINKING_MODELS], ['anthropic.claude-opus-5-5']);
+  // Claude Fable 5.2 beside it since 2026-11-11, by its family's documented behaviour (in the catalog, not offered).
+  assert.deepEqual([...SUMMARIZED_THINKING_MODELS], ['anthropic.claude-opus-5-5', 'anthropic.claude-fable-5-2']);
   const user = { role: 'user', content: [{ text: 'Hello' }] };
-  for (const model of [MODEL, 'us.anthropic.claude-opus-5-5', 'eu.anthropic.claude-opus-5-5', 'anthropic.claude-opus-5-5']) {
+  for (const model of [MODEL, 'us.anthropic.claude-opus-5-5', 'eu.anthropic.claude-opus-5-5', 'anthropic.claude-opus-5-5',
+    'global.anthropic.claude-fable-5-2', 'us.anthropic.claude-fable-5-2', 'anthropic.claude-fable-5-2']) {
     const plain = toConverseInput(request({ model }), model);
     assert.deepEqual(withSummarizedThinking(plain), { modelId: model, messages: [user], system: [{ text: 'Be brief.' }],
       inferenceConfig: { maxTokens: 512 }, additionalModelRequestFields: { thinking: { type: 'adaptive', display: 'summarized' } } }, model);
@@ -873,10 +875,21 @@ test('Claude Opus 5.5 is asked for its thinking as a summary, on every profile, 
     assert.equal(withSummarizedThinking(command), command, label);
   }
   // Another model, a name that only looks like it, and an operator's thinking budget are left exactly as they were.
-  for (const model of [OPUS_48, 'us.anthropic.claude-sonnet-4-5', 'anthropic.claude-opus-5-5-v2', 'xglobal.anthropic.claude-opus-5-5', 'deepseek.v3']) {
+  for (const model of [OPUS_48, 'us.anthropic.claude-sonnet-4-5', 'anthropic.claude-opus-5-5-v2', 'xglobal.anthropic.claude-opus-5-5', 'deepseek.v3',
+    'global.anthropic.claude-fable-5-1', 'global.anthropic.claude-fable-5-2-v2']) {
     const command = toConverseInput(request({ model }), model);
     assert.equal(withSummarizedThinking(command), command, model);
   }
+  // Claude Fable 5.2 keeps the same exceptions (a forced tool choice is a 400 for its family too), and its effort stays
+  // beside the summary.
+  const FABLE = 'global.anthropic.claude-fable-5-2';
+  for (const [label, body] of [['tool history', request({ model: FABLE, tools: TIME_TOOL, messages: TOOL_LOOP })],
+    ['required tool', request({ model: FABLE, tools: TIME_TOOL, tool_choice: 'required' })]] as const) {
+    const command = toConverseInput(body, FABLE);
+    assert.equal(withSummarizedThinking(command), command, `Fable 5.2: ${label}`);
+  }
+  assert.deepEqual(withSummarizedThinking(toConverseInput(request({ model: FABLE, reasoning_effort: 'high' }), FABLE, ['low', 'medium', 'high'])).additionalModelRequestFields,
+    { output_config: { effort: 'high' }, ...SUMMARY });
   const budgeted = withClaudeThinking(toConverseInput(request({ max_tokens: 8000 }), MODEL), 2048);
   assert.equal(withSummarizedThinking(budgeted), budgeted);
   assert.equal(withSummarizedThinking({ messages: [] }).additionalModelRequestFields, undefined, 'a command without a model ID');

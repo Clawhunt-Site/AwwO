@@ -403,8 +403,13 @@ export function withClaudeThinking(command: Json, budget: number): Json {
  * 300,064-300,092 ms, no tokens). With the summary the thinking streams within seconds. The Python worker's bridge asks
  * the same since 2026-10-21 (bedrock_bridge.py SUMMARIZED_THINKING_MODELS), of single calls only (its runs make one call
  * with text history, sometimes offering tools): 417 completed by 2026-10-26, none refused by Bedrock as invalid.
+ * Claude Fable 5.2 (in the catalog since 2026-11-11, not offered) is here by the Fable family's documented behaviour
+ * alone, not by a call: thinking is always on (turning it off or a budget is a 400), its text is omitted unless the
+ * request asks for display "summarized", and a forced tool choice is a 400, as for Opus 5.5. No call to it has been made
+ * through this bridge: the production probe that sets its catalog entry's `verified` must see the summary stream, alone,
+ * with an effort, with tools and with a tool turn in the history, before the model is offered.
  */
-export const SUMMARIZED_THINKING_MODELS: ReadonlySet<string> = new Set(['anthropic.claude-opus-5-5']);
+export const SUMMARIZED_THINKING_MODELS: ReadonlySet<string> = new Set(['anthropic.claude-opus-5-5', 'anthropic.claude-fable-5-2']);
 const SUMMARIZED_THINKING = { type: 'adaptive', display: 'summarized' } as const;
 // An inference profile's prefix, as bedrock-catalog.ts reads it.
 const PROFILE_PREFIX = /^(?:global|us|eu|apac|jp|au|ca)\./;

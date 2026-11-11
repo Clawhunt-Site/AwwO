@@ -141,11 +141,36 @@ test('thinking efforts are a Claude entry\'s own levels with a default among the
     ['a default without levels', claude({ defaultReasoningEffort: 'medium' })], ['an empty default', claude({ reasoningEfforts: ['low'], defaultReasoningEffort: '' })]] as const) {
     assert.throws(() => parseBedrockCatalog(catalogOf(bad)), /catalog is invalid/, label);
   }
-  // The built-in catalog offers them for Claude Opus 5.5 alone, at its own default.
-  const offered = readBedrockCatalog().filter(model => model.reasoningEfforts !== undefined);
-  assert.deepEqual(offered.map(model => [model.id, model.reasoningEfforts, model.defaultReasoningEffort]), [['bedrock.claude-opus-5-5', ['low', 'medium', 'high'], 'medium']]);
+  // The built-in catalog lists them for Claude Opus 5.5, at its own default, and for Claude Fable 5.2 (not offered), at
+  // its family's documented default; among the models it offers, for Opus 5.5 alone.
+  const listed = readBedrockCatalog().filter(model => model.reasoningEfforts !== undefined);
+  assert.deepEqual(listed.map(model => [model.id, model.reasoningEfforts, model.defaultReasoningEffort]),
+    [['bedrock.claude-fable-5-2', ['low', 'medium', 'high'], 'high'], ['bedrock.claude-opus-5-5', ['low', 'medium', 'high'], 'medium']]);
+  assert.deepEqual(listed.filter(model => model.verified).map(model => model.id), ['bedrock.claude-opus-5-5']);
   const opus = bedrockCatalogProfiles('pi', { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_MODELS: 'bedrock.claude-opus-5-5' })[0];
   assert.deepEqual([opus.reasoningEfforts, opus.defaultReasoningEffort], [['low', 'medium', 'high'], 'medium']);
+});
+
+test('Claude Fable 5.2 is in the catalog on both inference profiles, unverified, so no worker offers it until an operator names it', () => {
+  const entries = readBedrockCatalog();
+  const fable = entries[0];
+  assert.deepEqual(fable, { id: 'bedrock.claude-fable-5-2', name: 'Claude Fable 5.2', vendor: 'anthropic', target: 'global.anthropic.claude-fable-5-2',
+    fallbackTarget: 'us.anthropic.claude-fable-5-2', contextWindow: 200000, maxTokens: 64000, input: ['text', 'image'], tools: true, runtime: 'openai-agents',
+    verified: '', reasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'high' });
+  // No real call has answered (verified is empty) and nothing was measured (no prose rate).
+  assert.equal(fable.verified, '');
+  assert.equal('proseBytesPerToken' in fable, false);
+  // The default selection (builtin) of either runtime does not hold it, and no other Fable is in the catalog.
+  for (const runtime of ['openai-agents', 'pi'] as const) {
+    assert.ok(!bedrockCatalogProfiles(runtime, { AWWO_BEDROCK_CATALOG: 'builtin' }).some(profile => profile.id === fable.id), runtime);
+  }
+  assert.deepEqual(entries.filter(item => /fable/i.test(`${item.id} ${item.name} ${item.target}`)).map(item => item.id), [fable.id]);
+  // Only an operator's explicit choice reaches it: builtin-all, or its id in AWWO_BEDROCK_MODELS.
+  assert.equal(bedrockCatalogProfiles('openai-agents', { AWWO_BEDROCK_CATALOG: 'builtin-all' })[0].id, fable.id);
+  const [named] = bedrockCatalogProfiles('openai-agents', { AWWO_BEDROCK_CATALOG: 'builtin', AWWO_BEDROCK_MODELS: fable.id });
+  assert.deepEqual(named, { id: fable.id, provider: 'bedrock', model: 'global.anthropic.claude-fable-5-2', name: 'Claude Fable 5.2', vendor: 'anthropic',
+    region: 'us-east-1', baseURL: bedrockBridgeBaseURL('us-east-1'), apiKey: '', contextWindow: 200000, maxTokens: 64000, input: ['text', 'image'],
+    fallbackModel: 'us.anthropic.claude-fable-5-2', reasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'high' });
 });
 
 test('an explicit model list selects in catalog order and refuses unknown or tool-less Agents models', () => {

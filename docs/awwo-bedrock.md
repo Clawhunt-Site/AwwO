@@ -1,6 +1,6 @@
 # AwwO 通过 Amazon Bedrock 提供模型
 
-状态：生产启用中。2026-10-03 开放 23 个区域内模型，2026-10-04 再开放 19 个经跨区域推理配置文件调用的模型（Claude 8 个、Grok 2 个、Kimi K3、DeepSeek R1、Pixtral Large、Llama 3 个、Nova 3 个），内置目录 `builtin` 共 42 个，三个 worker 都提供；2026-10-07 下架 Fable 5 与 5.1 后为 40 个（目录 48 项），Opus 5.5 改回 global 推理配置文件（见文末）。凭证来自 AwwO 专用的 EC2 实例角色，只允许目录里的这些模型；实例凭证只对三个 worker 开放。Claude Sonnet 5.5 与 7 个 GPT 尚未开放：AWS Marketplace 以 `INVALID_PAYMENT_INSTRUMENT` 拒绝订阅，账号补上有效付款方式后才能订阅并验收（见文末 2026-10-04 记录）。
+状态：生产启用中。2026-10-03 开放 23 个区域内模型，2026-10-04 再开放 19 个经跨区域推理配置文件调用的模型（Claude 8 个、Grok 2 个、Kimi K3、DeepSeek R1、Pixtral Large、Llama 3 个、Nova 3 个），内置目录 `builtin` 共 42 个，三个 worker 都提供；2026-10-07 下架 Fable 5 与 5.1 后为 40 个（目录 48 项），Opus 5.5 改回 global 推理配置文件（见文末）；2026-11-11 目录加入 Claude Fable 5.2，未核验、未开放（目录 49 项，`builtin` 仍是 40 个，见「2026-11-11：Fable 5.2 进目录（未开放）」）。凭证来自 AwwO 专用的 EC2 实例角色，只允许目录里的这些模型；实例凭证只对三个 worker 开放。Claude Sonnet 5.5 与 7 个 GPT 尚未开放：AWS Marketplace 以 `INVALID_PAYMENT_INSTRUMENT` 拒绝订阅，账号补上有效付款方式后才能订阅并验收（见文末 2026-10-04 记录）。
 
 运营方在自己的 AWS 账号里调用 Bedrock，AwwO 的模型架子因此可以列出 Claude、GPT、Grok、Kimi、DeepSeek、Qwen、GLM、MiniMax、Mistral、Llama、Nova、Gemma、Nemotron 等约 50 个热门模型。LLM Gate 保持不变：Bedrock 上没有的模型（例如 Gemini）继续由 Gate 提供，个人连接仍只允许 Gate。
 
@@ -46,12 +46,12 @@ flowchart LR
 | `name` / `vendor` | 显示名与厂商；网页按显示名归入品牌组 |
 | `target` | Converse `modelId`：只通过推理配置文件提供的模型用 `global.`/`us.` 配置文件，否则用区域内模型 ID |
 | `fallbackTarget` | 可选，目前只有 Claude：同一模型的另一个推理配置文件（`global.` ↔ `us.`）。目标在输出任何内容之前因容量或额度拒绝调用时，桥用它重发一次（见下文 2026-10-19） |
-| `reasoningEfforts` / `defaultReasoningEffort` | 可选，只给 Claude：节点可以选的思考强度（`low`、`medium`、`high` 中的若干档，桥把选中的一档作为 Claude 的 `output_config.effort` 发出），以及不选时模型自己的强度（只显示，从不发送）。目前只有 Claude Opus 5.5：`low`/`medium`/`high`，默认 `medium`（见下文 2026-10-26） |
+| `reasoningEfforts` / `defaultReasoningEffort` | 可选，只给 Claude：节点可以选的思考强度（`low`、`medium`、`high` 中的若干档，桥把选中的一档作为 Claude 的 `output_config.effort` 发出），以及不选时模型自己的强度（只显示，从不发送）。已开放的模型里只有 Claude Opus 5.5：`low`/`medium`/`high`，默认 `medium`（见下文 2026-10-26）；未开放的 Claude Fable 5.2 也列了这三档、默认 `high`，取自 Fable 系列的文档，尚未探测（见下文 2026-11-11） |
 | `contextWindow` / `maxTokens` | AwwO 的保守预算（worker 把 contextWindow 当字节预算），不是厂商上限 |
 | `input` | `text`，可含 `image`（仅展示；桥目前只发文本） |
 | `tools` | 观察到流式工具调用或文档写明 ConverseStream 支持工具；没有工具能力的模型只放 Pi。Pixtral Large 与 Llama 只在非流式 Converse 接受工具（ConverseStream 回答 “This model doesn't support tool use in streaming mode”），所以放 Pi |
 | `runtime` | 默认归属：有工具能力的放 `openai-agents`（含项目执行），其余放 `pi`，每个模型默认只出现一次 |
-| `verified` | 经 AwwO worker 在本账号真实调用成功的日期；空值表示尚未开放（目前是 Marketplace 订阅被拒的 8 个），`builtin` 模式不提供这些模型 |
+| `verified` | 经 AwwO worker 在本账号真实调用成功的日期；空值表示尚未开放（目前 9 个：Marketplace 订阅被拒的 8 个，以及 2026-11-11 加入、还没有任何真实调用的 Claude Fable 5.2），`builtin` 模式不提供这些模型 |
 
 目录顶层的 `regions` 记录这些条目核对过的区域（目前只有 `us-east-1`）：模型 ID 和推理配置文件因区域而异，`AWWO_BEDROCK_REGION` 不在其中时内置目录直接拒绝启动，其他区域请先核对，再用 `*_MODELS_JSON` 写明确的档案。目录在每个 worker 启动时严格校验，格式错误直接拒绝启动。模型会下线或改名：修改目录前先只读核对账号可见的模型（不产生推理费用）：
 
@@ -219,7 +219,7 @@ Python worker 从仓库或发布树（`apps/openai-agents-python-worker`）运�
 AWS 顾问要求上线前逐一确认已开放模型的数据政策。以下来自 AWS 一手文档（Bedrock 用户指南的 abuse-detection、data-retention、data-protection、cross-region-inference 页、Bedrock FAQ、AWS 服务条款 §50、第三方模型条款），2026-10-07 读取：
 
 - **默认（下列例外以外的全部 40 个模型）**：Bedrock 默认不存储输入与输出；不提供给模型方（模型运行在模型方无权访问的 AWS 账号里，AWS 只与模型方共享不含客户内容的用量数据）；AWS 与模型方都不用这些输入输出训练模型。人工审阅仅限疑似儿童性虐待内容（CSAM）。Anthropic 与 xAI 的条款另外写明不用客户内容训练。
-- **推理配置文件的处理地域**：`us.` 只在美国区域处理；`global.` 可能被路由到任一商业区域处理。留存的数据（如有）存放在实际处理请求的目标区域，不是发起区域（AWS data-retention 页：跨区域推理时，留存的输入输出存放在处理请求的区域；2026-10-09 更正，原文误写为“只在发起区域”）。账号设置按发起区域生效，本账号三个美国区域的控制面自 2026-10-07 14:51Z 起为 `none`，此时需要留存的模型会被 Bedrock 直接拒绝，能应答的模型不留存。我们的隐私条款写明服务运行在 AWS 美国、模型方可能在其他国家处理请求，覆盖这一点。
+- **推理配置文件的处理地域**：`us.` 只在美国区域处理；`global.` 可能被路由到任一商业区域处理。留存的数据（如有）存放在实际处理请求的目标区域，不是发起区域（AWS data-retention 页：跨区域推理时，留存的输入输出存放在处理请求的区域；2026-10-09 更正，原文误写为“只在发起区域”）。账号设置按发起区域生效，本账号三个美国区域的控制面自 2026-10-07 14:51Z 起为 `none`，此时需要留存的模型会被 Bedrock 直接拒绝，能应答的模型不留存（2026-11-11 01:33Z 起 us-east-1 的控制面改回 `provider_data_share`，这一条对 us-east-1 不再成立，见下文「2026-11-11：Fable 5.2 进目录（未开放）」）。我们的隐私条款写明服务运行在 AWS 美国、模型方可能在其他国家处理请求，覆盖这一点。
 - **例外**：Claude Fable 5 / 5.1 对全部流量留存最长 30 天并对分类器标记内容做 AWS 人工审阅（模型卡要求账号使用 `aws_review` 留存设置）——已于 2026-10-07 下架。OpenAI 自有的 GPT-5.4 至 GPT-6 系列对标记流量留存最长 30 天：目前不在开放列表里（Marketplace 付款问题），开放前要先评估；Sonnet 5.5 与 GPT-6.1 Sol 不在例外列表上，留存情况待 AWS 确认。OpenAI 的 Bedrock 协议 §2.3 还限制向第三方提供「开放式或自动化的编码能力」，开放 GPT 前一并确认。
 - **账号留存设置**：Fable 能被调用，说明 us-east-1 的留存设置很可能是 `aws_review`。下架 Fable 后可以把它设为 `none`（零留存），Bedrock 会拒绝任何需要留存的模型，从而证明剩余模型都不留存；但这是账号级设置，研发在同一账号里自用的 Fable 5 也会被拒，需要运营方决定。该设置不跨区域传播。
 - **请 AWS 确认**：① 本账号 us-east-1 的当前留存设置，以及 2026-10-05 到 10-07 生产发往 Fable 5.1 的流量保存在哪、保存多久；② 40 个模型是否都允许 `none`；③ us-east-1 的设置是否覆盖被 `global.` / `us.` 路由到其他区域的调用；④ Bedrock 的提示缓存（最长 1 小时，Kimi K3 至少 30 分钟）是否算存储；⑤ Anthropic 是否从不接收 Claude 内容；⑥ 非例外模型的滥用检测具体检查并保留什么。
@@ -233,6 +233,26 @@ AWS 顾问要求上线前逐一确认已开放模型的数据政策。以下来�
   - 同时（11:46Z）从实例角色的 `awwo-bedrock-cross-region-profiles` 删去 6 个 Fable 资源（91 → 85）。
 - **前沿模型被拒**：约 12:09Z 起，Claude Opus 5.5、Opus 5、Sonnet 5、Opus 4.8，Grok 4.7、4.6 返回 `AccessDeniedException: … is not available for this account … contact AWS Sales`。这发生在控制面仍是最宽松的 `provider_data_share` 的时候：14:4xZ 在 us-east-1 对 40 个已核验模型各发一次 8-token 调用，33 个应答，被拒的正是这 6 个（Kimi K3 是探针的 maxTokens 低于它的下限）；Opus 5.5 在 eu-west-1（未设置）也被拒得一模一样；`GetFoundationModelAvailability` 对 Opus 5.5、Sonnet 5 仍报 `AUTHORIZED` / `AVAILABLE`。AWS 文档列出的需要留存的模型只有 Fable 5 / 5.1 与 GPT-5.4 至 GPT-6 系列。结论：**拒绝来自账号层面的模型访问，与零留存无关**，改回留存设置不会恢复。设为 `none` 后立即复测，应答的仍是同样的 33 个。
 - **请 AWS 确认**（接上面的列表）：⑦ 本账号自 2026-10-07 12:09Z 起调用 Opus 5.5 等前沿模型返回 “not available for this account”，而可用性接口仍报已授权，原因是什么、怎样恢复；⑧ 零留存下 40 个已核验模型是否都可调用（14:51Z 设置后复测 33 个应答，与设置前相同）。
+
+## 2026-11-11：Fable 5.2 进目录（未开放）
+
+- **起因**：业主 2026-11-11「在awwo的模型列表中是上线fable5.2」。目录第一项加入 `bedrock.claude-fable-5-2`（Claude Fable 5.2），`verified` 为空：还没有任何一次经生产 worker 的真实 ConverseStream 调用应答，所以 `builtin` 模式不提供它（目录 49 项，已核验仍是 40 个）。只有 `builtin-all`，或在 `AWWO_BEDROCK_MODELS` 里点名，worker 才会提供它：下面的步骤走完之前，任何 worker 都不要用 `builtin-all`，也不要点名它。
+- **2026-11-11 从 AWS 读到的**：us-east-1 有两个 ACTIVE 的推理配置文件，`global.anthropic.claude-fable-5-2`（目录的 `target`）与 `us.anthropic.claude-fable-5-2`（`fallbackTarget`）。Bedrock 标价（global、标准档，每百万 token）：输入 $8、输出 $40，缓存读取 $0.20，缓存写入 $10（5 分钟）/ $16（1 小时）。
+- **账号留存设置**：us-east-1 控制面的留存模式于 2026-11-11 01:33:18Z 设为 `provider_data_share`（us-east-2 仍是 `none`；us-west-2 与 mantle 端点的设置本节没有记录）。10-07 14:51Z 起它是 `none`，需要留存的模型会被 Bedrock 直接拒绝；改回 `provider_data_share` 之后，需要留存的模型才可能应答。代价：生产的 Bedrock 调用都从 us-east-1 发起，「设置为 `none`，所以能应答的模型都不留存」这条账号级的证明对它不再成立；其余 40 个模型的默认行为仍按上文 AWS 文档，但不再由这项设置兜底。
+- **留存与审阅：没有确认**：Fable 5 / 5.1 对全部流量留存最长 30 天，并由 AWS 审阅分类器标记的内容，10-07 因此下架。Fable 5.2 是否一样**没有确认**：要读它的模型卡，或者问 AWS。确认之前按「与 5 / 5.1 相同」对待。
+- **行为还没有探测**：它的思考方式、强度档位、流式工具调用都没有探测过。目录和桥先按 Fable 系列的文档（Fable 5.1）与 Opus 5.5 的做法写，探测时逐项确认：
+  - 思考始终开启（关闭或给预算是 400），默认不返回思考文字。所以两个桥的 `SUMMARIZED_THINKING_MODELS`、Python 桥的 `THINKS_SILENTLY` 都加入 `anthropic.claude-fable-5-2`，请求带 `thinking: {type: "adaptive", display: "summarized"}`，和 Opus 5.5 一样。
+  - 强度经 `output_config.effort` 发出。目录列 `low`/`medium`/`high`（文档里还有 `xhigh`、`max`，桥不发），默认 `high`（只显示，不发送）。
+  - 强制 `tool_choice`（any / 指定工具）按文档是 400。
+  - Python 桥的 `QUICK_FIRST_BYTE_SECONDS` **没有**加它：没有测过它的任何调用，所以它的调用不论带不带摘要，都等流的 15 分钟空闲上限，不会在 3 分钟被切断。
+  - `maxTokens` 64,000（与 Opus 5.5 同样的理由：先思考再回答，文档上限 128K），`contextWindow` 200,000，没有 `proseBytesPerToken`（没有测过，按字节规则）。Pi 的 `AWWO_PI_BEDROCK_THINKING_MODELS` 不能点名它：列了强度的模型不接受思考预算。
+- **开放之前，按顺序**：
+  1. 隐私条款先写明 Fable 5.2 和它的留存、审阅方式（先确认上面「留存与审阅」）。
+  2. worker 的 IAM 策略加入 Fable 5.2 的资源，也就是 10-07 删去的 6 个 Fable 资源的后继：两个推理配置文件，以及 `ListInferenceProfiles` 报告的它们各自路由到的基础模型 ARN。
+  3. 经生产 worker 做真实探测：两个配置文件各自应答；思考摘要在流里出现（单独调用、带强度、带工具、历史里有工具轮次）；`low`/`medium`/`high` 都被接受；流式工具调用可用。有一项不符就先改目录和上面的行为表，再往下走。
+  4. 探测通过，把日期写进目录的 `verified`。
+  5. `AWWO_MODEL_PRICING_JSON` 给两个运行时都写上它的价格（上面的标价）。
+  6. 白名单：`AWWO_NEW_WORKSPACE_ALLOWED_MODELS` 与已有工作区的 `allowed_models`。
 
 ## 2026-10-18：Python worker 单次运行时限 25 分钟
 
