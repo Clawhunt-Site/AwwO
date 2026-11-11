@@ -38,7 +38,9 @@ attribution: <empty, or the source, licence, copyright holder and "modified for 
   run anything, and never let them claim a render, test or visual check happened. A skill written for the sandbox
   computer or 直接执行, where the agent does run commands, says so and says what to do without a sandbox
   (rea-app-reading, self-test-oracle).
-- Media models are shown to users by generic names only, so skills never name vendors or model brands.
+- Media models are shown to users by generic names only, so skills never name vendors or model brands. An identifier
+  a file needs is not a brand: a skill may name the user-agent tokens a robots.txt file matches, or an open format's
+  field names (search-ready-page, level-data).
 - Concrete numbers beat adjectives. Give the method as steps or tables and end with a short checklist.
 - Motion numbers come from AwwO's one motion language (`MOTION.md`, values in `apps/motion-tokens.json`): curves,
   durations and springs by their names. `TestBuiltinSkillsSpeakOneMotionLanguage` fails on any other curve or any

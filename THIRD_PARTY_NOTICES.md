@@ -136,6 +136,37 @@ soft shadows (Fernando, 2005), ordered (Bayer) dithering, the OKLab colour space
 Henyey-Greenstein phase function. No text, code, shader, name or picture of the four pages is used, the skills carry
 an empty `attribution`, and GATHER, the first showpiece canvas, is a subject none of them has.
 
+Read on 2026-11-11, ideas only: nine posts on X, none with a license (x.com/rewind02/status/2120120672890274039,
+x.com/flxrnc/status/2120207374250049675, x.com/TheoAGI/status/2120163220312699025,
+x.com/0xsoul/status/2120137005732336004 quoting x.com/seeconvm/status/2106096193235259564,
+x.com/BlendiByl/status/2120341251178594532, x.com/HashemGhaili/status/2120202746121085321,
+x.com/wquguru/status/2120382704030261437 and x.com/Nyxera0x/status/2118689860437315679), and 21 repositories they
+point to, each read at the head of its default branch at 14:06Z that day (commit; license as the repository's own
+files state it): storytold/craft-anything@7116cc6cb486 (MIT or Apache-2.0 at the user's option, LICENSE-MIT and
+LICENSE-APACHE), deepnight/ldtk@2b7b5512f2f8 (MIT), harry0703/MoneyPrinterTurbo@e4c122d3c1b2 (MIT),
+wquguru/fable52-fps-repro@a7e1df3ce32e (MIT), Nyxera0x/cutaway@5d8f1c6efe0e (MIT),
+JohnHeibel/ClaudeAnimationBase@0ac8bf2b3194 (MIT), JohnHeibel/PDoomVideo@fa546a38092e (no license file),
+RomeoSEO/seo-skills@e2fed0c2e1c5 (MIT), AgriciDaniel/claude-seo@734998e5fdbb (MIT),
+animate-css/animate.css@3f8ab233dbbd (Hippocratic License 2.1), Rezmason/matrix@5ba90490453c (MIT),
+nolimits4web/swiper@82cb393aaf37 (MIT), paper-design/shaders@e7003a2d4e6e (Apache-2.0),
+simeydotme/pokemon-cards-css@acb1197633e7 (GPL-3.0), shuding/liquid-glass@a2d2e847f793 (MIT),
+codrops/RainEffect@5270be663903 and tholman/cursor-effects@182a33839ad3 (no license file),
+oframe/ogl@385ce65c352c (the Unlicense, as its README states), subprotocol/verlet-js@3293d409aafe (MIT, as its README
+states), magicuidesign/magicui@1ac985adca3c (MIT, LICENSE.md) and phaserjs/phaser@02d8931b626d (MIT, LICENSE.md).
+Each LICENSE file is the repository's root file of that name. What they describe (rebuilding an object from one
+reference picture against a numbered checklist with measured darkness and proportions; painting a scene with
+instanced brush strokes; keeping game levels in an open file format and proving them playable; pages that search
+crawlers and assistants can read and cite;
+directing a coded film with quantities and one score as its clock; and the surface effects those libraries are known
+for) informed six skills in `backend/internal/app/skills/`: `reference-build.md`, `painterly-render.md`,
+`level-data.md`, `search-ready-page.md`, `film-direction.md` and `surface-effects.md`. Every number in them that is
+not from a source's own published facts was measured in AwwO's own trial builds the same day or derived from AwwO's
+motion tokens and its own code. `level-data.md` names
+LDtk's JSON fields because a compatible file needs them; those identifiers are the format's facts, read from its
+published schema (version 1.5.3). Verlet integration (Verlet, 1967) and signed distance fields are published methods
+described in AwwO's own words. No text, code, shader, figure or picture of these sources is used, and the skills
+carry an empty `attribution`.
+
 ## AwwO SaaS runtime dependencies
 
 The independent `apps/pi-worker` service uses `@earendil-works/pi-coding-agent`
