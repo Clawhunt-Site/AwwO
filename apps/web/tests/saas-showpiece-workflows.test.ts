@@ -19,6 +19,7 @@ import { THREE_MODULE_FILES } from '../src/canvas/previewModules.generated';
 const CANVASES = Object.values(SHOWPIECE_WORKFLOWS);
 const GATHER = SHOWPIECE_WORKFLOWS['gather-glass'];
 const MOSSGREEN = SHOWPIECE_WORKFLOWS['mossgreen-golf'];
+const FREIGHT = SHOWPIECE_WORKFLOWS['night-freight-yard'];
 const piece = (id: string) => SHOWPIECES.find(item => item.id === id)!;
 
 // The node prompt the API admits (128,000 bytes) and the per-task budget the flagship builders are held to.
@@ -36,7 +37,7 @@ const agentsOf = (document: ReturnType<typeof createOfficialDocument>) => docume
 
 it('is no case until a run of it is published', () => {
   expect(Object.keys(SHOWPIECE_WORKFLOWS)).toEqual(SHOWPIECES.map(item => item.id));
-  expect(Object.keys(SHOWPIECE_WORKFLOWS)).toEqual(['gather-glass', 'mossgreen-golf']);
+  expect(Object.keys(SHOWPIECE_WORKFLOWS)).toEqual(['gather-glass', 'mossgreen-golf', 'night-freight-yard']);
   for (const item of CANVASES) expect(PRODUCTION_WORKFLOWS[item.id], item.id).toBeUndefined();
 });
 
@@ -53,6 +54,7 @@ it('has a design room of two, a builder per module, the assembly, two passes wit
   }
   expect(builders(GATHER).map(node => node.id)).toEqual(['core', 'render', 'glass', 'look', 'bench', 'hands', 'sound', 'panel']);
   expect(builders(MOSSGREEN).map(node => node.id)).toEqual(['core', 'render', 'course', 'ball', 'play', 'world', 'hands', 'sound', 'panel']);
+  expect(builders(FREIGHT).map(node => node.id)).toEqual(['core', 'render', 'yard', 'train', 'walker', 'pilot', 'world', 'hands', 'sound', 'panel']);
 });
 
 it('compiles into one acyclic DAG that runs left to right, every wire compatible and every input fed exactly once', () => {
@@ -334,4 +336,8 @@ it('pins the canonical canvas text, its assembly template and sandbox runtimes i
   expect(moss).toContain('{{in:from_course}}');
   expect(moss).toContain('"mossgreen.html"');
   expect(createHash('sha256').update(moss).digest('hex')).toMatchInlineSnapshot(`"d83e22c0fdfb176e5fa329bc96cef3edeafe989f84eeb53eb2dc38ca0d48b6f3"`);
+  const freight = canonicalCanvasText(createOfficialDocument(FREIGHT));
+  expect(freight).toContain('{{in:from_pilot}}');
+  expect(freight).toContain('"night-freight.html"');
+  expect(createHash('sha256').update(freight).digest('hex')).toMatchInlineSnapshot(`"885533d9aa5e7b53473389d9b12086bfd68a119da7613872934390f011bab6da"`);
 });

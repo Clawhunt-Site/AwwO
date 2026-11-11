@@ -442,7 +442,235 @@ const MOSSGREEN: Showpiece = {
   ],
 };
 
+// NIGHT FREIGHT: a first-person slice in a freight yard at night, in rain. The visitor walks to the levers beside the
+// points, sets the road the dispatch card names and clears the home signal; the freight comes in on whatever road the
+// points make, slowing by braking curves (the yard's limit, the signal at danger, the buffers, a person on the line).
+// Tuned on a prototype: at danger the front stops at x = 64.00; clear, the train stops 5 m short of the buffers at
+// 82.6 s; over every card the autopilot has the road set by 41 s.
+const FREIGHT_DESIGN = `## Part A - NIGHT FREIGHT, the design
+### A1 The piece
+A freight yard at night, in steady rain. The visitor stands outside the yard hut with a lantern; a dispatch card says which of four sidings the incoming freight must go to and when it is due. They walk to the levers beside the points, hold E to throw each, clear the home signal and stand clear: the freight comes in, takes the road the points make and stops at the buffers of the siding it reaches. Throw a point under a moving train and it derails; leave the signal at danger and the train waits at it; stand on the line and it stops short. Left alone for 8 s the piece works the yard itself. Kicker "Night shifts / No. 11", title "Night Freight", subtitle "set the road before it comes". Caption: "A freight yard at night, in the rain. Set the points for the siding the card names, clear the signal, and stand clear while the train comes in."
+### A2 Space, units and the view
+1 unit = 1 m. Y is up, the ground at y = 0. The main line comes in along z = 0 from +X; the yard spans x -20 to 90 and z -14 to 16, fenced. The view is the visitor's eye: a PerspectiveCamera at height 1.65 (plus a bob of 0.03 at the stride while walking, none under reduced motion), field of view 70 degrees, at yaw and pitch (degrees; the view's direction is (cos yaw * cos pitch, sin pitch, sin yaw * cos pitch)), pitch within -70 and 70. A round starts the visitor at H (40, -9) looking at yaw 60. Where the panel leaves the stage narrow (a phone), the field of view widens to atan(tan(35 degrees) * max(1, stage width / free width)) * 2 so that what is ahead stays in the free part.
+### A3 The yard (module yard)
+Routes, from the train's start at x = 724 on z = 0, each to its buffer stop at x = -10 (S(t) = t * t * (3 - 2 * t) with t clamped to 0..1):
+| route = siding | z(x) |
+|---|---|
+| 1 | 0 |
+| 2 | 0 for x > 34; -4.5 * S((34 - x) / 20) for 14 < x <= 34; -4.5 for x <= 14 |
+| 3 | 0 for x > 50; 4.5 * S((50 - x) / 20) for 30 < x <= 50; 4.5 for x <= 30 |
+| 4 | as 3 for x > 24; 4.5 + 4.5 * S((24 - x) / 20) for 4 < x <= 24; 9 for x <= 4 |
+Each route is sampled every 0.25 m of x from 724 down to -10 into a polyline with arc lengths (s = 0 at x = 724); at(route, s) interpolates along it (and is (724 - s, 0) for s < 0); its heading is the direction from at(s - 1) to at(s + 1). The routes are 734.0, 734.6, 734.6 and 735.2 m long.
+Points: S1 at x = 50 (normal: towards siding 1 or 2; reversed: towards 3 or 4), S2 at x = 34 (normal: 1; reversed: 2), S3 at x = 24 (normal: 3; reversed: 4). The road they make: siding = S1 ? (S3 ? 4 : 3) : (S2 ? 2 : 1). The home signal stands at x = 62 beside the line (its post at (62, -2.2)): at danger until cleared, and back to danger once the train's tail has passed x = 50.
+| lever | at | stand point |
+|---|---|---|
+| SIG | 66, -3 | 66, -4.2 |
+| S1 | 52, -3 | 52, -4.2 |
+| S2 | 38, -3 | 38, -4.2 |
+| S3 | 27, 7 | 28.2, 7.6 |
+Obstacles (the visitor cannot pass them): the hut, a box x 38 to 42, z -13 to -10, its door facing +Z; each lever's frame, a box 0.5 by 0.5 about it; lamp posts (circles of 0.15) at (44, -6.5), (60, -7.5), (30, 12), (10, -8) and (75, 4); the signal's post (a circle of 0.15); sleeper stacks, boxes x 17 to 23, z -8.6 to -7.4 and x 67 to 73, z 8.4 to 9.6; a container, x -4 to 8, z -13.25 to -10.75; each buffer stop, a box 1 by 2 behind its siding's end; the fence; and the train's vehicles while they stand. A crossing of boards crosses the main line at x = 58.
+The round: its card names the siding 1 + floor(r * 4), r the next draw of the yard's own generator G.rng(G.SEED * 3 + 1) (the default seed's first card is siding 3), and the train is due at the signal 60 s after the round starts. A round ends when the train arrives ('routed' if its siding is the card's, else 'misrouted') or derails ('derailed'), with the seconds it waited at the signal; 8 s later a new round starts: the points normal, the signal at danger, the train at its start, the visitor at H.
+### A4 The train (module train)
+A locomotive of 17 m and five wagons of 13.5 m, coupled end to end, 84.5 m in all; each vehicle's bogies are 2.5 m in from its ends. The front is at arc length s on its route (s = 0 at the start, at 11 m/s); vehicle k lies from s - o_k back to s - o_k - len_k, its centre and heading from the route. Each step (dt = 1/60), in this order:
+1. The route: the road the points make, except that a point the front has passed keeps the branch it was set to when the front's x passed the point's.
+2. The cap on the speed: min(11, sqrt(36 + 1.2 * max(0, x - 120))) for the front's x (it slows to 6 m/s by x = 120); while the signal is at danger and s is short of the stop line (s_stop, where route 1's x is 64), min(cap, sqrt(1.2 * max(0, s_stop - s))); min(cap, sqrt(1.2 * max(0, s_end - s))) with s_end = the route's length - 5; and for a person within 1.6 m of the route's centreline at s + d (d = 1 to 60, each 1 m, the first found), min(cap, sqrt(1.8 * max(0, d - 8))), sounding the horn (at most once every 2 s).
+3. The speed: if v > cap, v = max(cap, v - 0.9 * dt), else v = min(cap, v + 0.3 * dt).
+4. s += v * dt; the waited clock counts while it stands at the signal.
+5. At rest with s >= s_end - 0.05: arrived, in its route's siding.
+Derailing: a point thrown while any bogie lies within 6 m of it along the line derails the train: it stops at 3 m/s^2 where it is, and the round is 'derailed'.
+Worked numbers: at line speed the front would reach the stop line in 60 s; it brakes for the yard from about x = 191; at danger its front stops at x = 64.00, at rest from 71.1 s; with the road set to siding 1 and the signal clear it passes the signal at 66.5 s and stops with its front at x = -5.00 at 82.6 s; a person on the line 30 m ahead of it at 6 m/s stops it 8.6 m short.
+### A5 The visitor (module walker)
+Walking 1.6 m/s, running 3.2 m/s; the velocity eases to the input's at rate 10 a second (v += (target - v) * min(1, 10 * dt)); the visitor is a circle of radius 0.3 pushed out of every obstacle each step and sliding along it. Turning: 0.25 degree per CSS pixel dragged, 120 degrees a second by the arrow keys. Use: the lever whose stand point is within 0.8 m of the visitor and that lies within 50 degrees of the view's direction is the target; holding use for 1.2 s throws it (G.yard.throw); releasing early, or a new target, starts it again. The lantern is a narrow warm spot from the eye, on at the start (G.state.lantern).
+Worked numbers: from rest, 120 steps of walking forward cover 3.05 m (within 3 %); walking into the hut leaves the visitor 0.3 m from its wall.
+### A6 The autopilot (module pilot)
+It runs while G.playing or G.state.auto, with the visitor's own verbs. At a round's start it waits 1 s; then, for each lever of its plan in order, it runs the waypoint graph's shortest path to the lever's stand point (3.2 m/s), turns to the lever (the view eases, at most 180 degrees a second) and holds use until the lever is thrown; then it walks to V and watches: its view follows the train's front while it is within 220 m, else faces the signal. It never steps onto the crossing (D to E) while the train's front is within 80 m of x = 58 or a vehicle lies within 10 m of it: it waits at D or E.
+Plan: the points whose setting differs from the card's road (S1 for sidings 3 and 4; S2 for 2 when S1 is normal; S3 for 4 when S1 is reversed), nearest first by the graph from where it stands, then SIG.
+Waypoints: H (40, -9), A (52, -6), B (66, -6), C (38, -6), D (58, -6), E (58, 3), F (48, 8.5), G (28.2, 8.5), V (56, -8), and the stand points SIG, S1, S2 and S3; edges H-C, H-A, C-A, A-D, D-B, A-S1, C-S2, B-SIG, D-E, E-F, F-G, G-S3, H-V, V-A, V-D.
+Worked numbers: with the default seed the card says siding 3; the autopilot throws S1 at about 7 s, clears the signal at about 14 s and stands at V by 18 s; the train, never stopped, passes the signal at 66.5 s and stops in siding 3 at 82.7 s: routed. Siding 4 takes longest: S1 at 7 s, S3 at 24 s, the signal at 41 s.
+### A7 The script (seconds, action, argument); with it running the autopilot works the round (A6), so it is the attract mode, the recording and a test
+0 state { lantern: true } | 34 state { lantern: false } | 60 state { lantern: true }
+### A8 Verbs, keys and the panel
+| id | label | key | kind |
+|---|---|---|---|
+| walk.forward | Forward | KeyW, ArrowUp | hold |
+| walk.back | Back | KeyS, ArrowDown | hold |
+| walk.left | Left | KeyA | hold |
+| walk.right | Right | KeyD | hold |
+| turn.left | Turn left | ArrowLeft | hold |
+| turn.right | Turn right | ArrowRight | hold |
+| walk.run | Run | ShiftLeft, ShiftRight | hold |
+| walker.use | Use | KeyE | hold |
+| piece.lantern | Lantern | KeyF | press (toggles G.state.lantern) |
+| pilot.auto | Auto play | KeyP | press (toggles G.state.auto) |
+| round.new | New round | KeyN | press |
+| piece.map | Yard map | KeyM | press (the yard diagram large over the stage) |
+| piece.pause | Pause | Space | press |
+| piece.quarter | Quarter speed | KeyQ | press |
+Pointer: dragging on the stage turns the view. Touch: a stick under the left thumb walks (a 40 px push is full walking speed), a drag elsewhere turns the view, a Use button bottom right holds use. Panel, top to bottom: the dispatch card (the freight's number, 'to siding N', due in m:ss, then the outcome), the yard diagram (the four sidings, the points as set, the signal's aspect, the road the points make lit, the train where it is, the visitor's dot), the levers' settings, the buttons of the verbs, the toggles. Readouts: Train (km/h, 0 digits), To the signal (m, 0 digits), Due in (s, 0 digits), You (m/s, 1 digit). Status chip: LIVE, PAUSED, SELF-PLAYING, TRAIN DUE, AT DANGER, ROUTED, MISROUTED, DERAILED or the failure. A prompt over the stage while a lever is the target: "Hold E to throw S1" (or "to clear the signal"), with a ring that fills as it is held. Hint: "WASD to walk, drag to look, Shift to run, hold E at a lever. Set the points for the card's siding, clear the signal, stand clear." Footnote: "1 unit is 1 m. The train is 84.5 m long; it slows to 6 m/s in the yard and stops 5 m short of the buffers."
+### A9 The look (modules render and world)
+The ground: a Reflector (three/addons/objects/Reflector.js) at half the drawing size (a quarter on medium; none on low, where the ground's own gloss shows the lamps) whose shader mixes the mirror into wet ballast and asphalt by a puddle mask; rails on sleepers along each route inside the yard, the points' blades, the signal (a post, a head with a red and a green lamp, a point light of the aspect's colour), the four levers in their frames with tags, five sodium lamps (spot lights downwards with soft edges, each with an additive cone in the rain), the hut with a lit window, the sleeper stacks, the container, the buffer stops, the fence; the train (a locomotive with its headlight, a spot light ahead and amber cab windows, and five wagons; red tail lamps on the last); rain, one InstancedMesh of at most 4,000 thin streaks falling at 9 m/s with a slant, wrapped in a box about the eye and moved in its vertex shader by uTime (hidden under reduced motion), and ripples on the ground. Fog (exponential, the direction's colour) closes the distance. AgX tone mapping, UnrealBloomPass, then an OutputPass; one shadow map at most, from the brightest lamp, on high only.
+### A10 Budget
+At most 250 draw calls and 600,000 triangles a frame; the world at most 90 meshes (repeated things instanced); the pixel ratio at most 2 (1 on low, 1.5 on medium).
+### A11 Acceptance tests (number, owner, name: what must hold)
+1. core: events and verbs: listeners run in the order added and an unsubscribe stops one; a disabled command returns false; a hold verb gets run(true) then run(false).
+2. core: the clock: G.loop.step(60) moves G.time by exactly 1 s and runs systems lower order first.
+3. core: the replay: G.restart(), G.play() and 360 steps give the same G.checksum() twice, and G.touch() during attract mode emits mode { attract: false }.
+4. render: one frame draws at most 250 calls and 600,000 triangles (G.render.info()).
+5. render: passes() lists the world, bloom and output in that order, the tone mapping is AgX, and the mirror's target is at most half the drawing size.
+6. render: after a frame, with the visitor at yaw 30 and pitch 20, the camera is at the visitor's eye within 0.001 and looks along their view within 0.5 degree.
+7. yard: siding() for all eight settings of the points is A3's; each route starts at x = 724, ends at x = -10 and is 734 to 736 m long.
+8. yard: along each route consecutive samples are at most 0.27 m apart, and route 3 at x = 40 lies at z = 2.25 within 0.01.
+9. yard: a lever thrown from its stand point changes it; from 5 m away nothing changes; the signal cleared goes back to danger once the train's tail has passed x = 50.
+10. yard: the default seed's first card is siding 3; an outcome is recorded with the seconds waited, and 8 s later a new round starts with the points normal, the signal at danger and the train at its start.
+11. train: at danger its front stops at x = 64 within 0.05 and waits; cleared, its speed after 60 steps is 0.3 m/s within 0.01.
+12. train: with siding 1 set and the signal clear, its front stops at x = -5 within 0.1 by 85 s, never over 11 m/s and at most 6.05 m/s once its front's x is under 120.
+13. train: points set while the front is short of them take it there: S1 reversed at 30 s and S3 reversed at 40 s bring it to siding 4.
+14. train: throwing S1 while the front is 3 m past it derails the train (it stops, the round is derailed); thrown when its tail is 10 m past, nothing happens.
+15. train: a person standing on the line 30 m ahead of the front (the train at 6 m/s) stops it at least 7 m short of them.
+16. walker: from rest, 120 steps of walking forward cover 3.05 m within 3 %, and running doubles the speed.
+17. walker: 300 steps of walking into the hut leave the visitor at least 0.29 m from its box, and walking along a wall keeps moving.
+18. walker: at S1's stand point facing the lever, 72 steps of use throw it; released after 60 steps, nothing changes; facing more than 50 degrees away, nothing is the target.
+19. pilot: plan() from H with the points normal: siding 1 is SIG; 2 is S2, SIG; 3 is S1, SIG; 4 is S1, S3, SIG.
+20. pilot: with G.state.auto set, the default seed's road is set and the signal clear within 1,500 steps, and the visitor stands within 1 m of V within 1,800 steps.
+21. pilot: the shortest path from H to S3 crosses the main line only by D to E, and with the train's front within 80 m of x = 58 the autopilot waits short of the crossing.
+22. world: at most 90 meshes; after a frame each vehicle's mesh is at G.train.cars()'s place within 0.01, and the signal's lamp shows its aspect.
+23. world: the rain is one InstancedMesh of at most 4,000 streaks whose uTime is G.time, hidden under reduced motion.
+24. hands: KeyW down then up runs walk.forward true then false, but not while an input has focus; look(100, 0) turns the view by 25 degrees within 1.
+25. hands: the script is in rising t and names only registered commands and acts; stick(0, -40) sets the walk input to full speed forward.
+26. sound: G.sound.render('clunk', 1) peaks between -20 and -8 dBFS, has energy in its first 40 ms and ends under a thousandth of its peak; nothing sounds before unlock.
+27. sound: 40 plays leave at most 24 voices; a muted render is silent; gainAt(200) is under a quarter of gainAt(20).
+28. panel: every panel command has a button; the card shows the round's siding and its due time counting down; the yard diagram lights the road the points make.
+29. panel: refresh() shows the train's speed (km/h within 1) and its distance to the signal; pause shows PAUSED on the status chip; G.fail('x') shows the fallback with its reason.
+### A12 Planted failures (id, owner, the wrong variant, the tests that catch it)
+| P1 | core | the fixed step is 1/30 s | 2 |
+| P2 | render | the camera ignores the pitch | 6 |
+| P3 | yard | S2's branches are swapped | 7 |
+| P4 | yard | a lever can be thrown from anywhere | 9 |
+| P5 | train | the signal's stop line is ignored | 11 |
+| P6 | train | a point thrown under the train never derails it | 14 |
+| P7 | walker | the hut is no obstacle | 17 |
+| P8 | pilot | the plan for siding 4 leaves out S1 | 19 |
+| P9 | sound | the clunk never releases (neither its decay nor its fade) | 26 |
+| P10 | panel | a readout keeps its first value | 29 |`;
+
+const FREIGHT_API = `Freight API sheet (fixed; each module owns exactly its namespace and the names listed for it; every other module may call these names and nothing else):
+- core: the kernel's names, and the commands piece.pause, piece.quarter, piece.restart and test.run.
+- render: G.render = { renderer, scene, cam (the visitor's PerspectiveCamera), uniforms ({ uTime, uRes }, each { value }, one object shared with the world's materials), mirror (the ground's Reflector, or null on low), lantern (the SpotLight at the eye), frame(dt), resize(), info() -> { calls, triangles } of the last frame, passes() -> the pass names in order, setQuality(tier) }.
+- yard: G.yard = { lengths ({ 1: m, 2: m, 3: m, 4: m }), z(route, x), at(route, s) -> [x, z], heading(route, s) (radians), sAt(route, x) (the arc length where the route first reaches x), points ({ S1, S2, S3 }: true when reversed), signal ('danger' | 'clear'), siding() -> 1 to 4 (the road the points make), levers ([{ id, at: [x, z], stand: [x, z] }]), throw(id) -> true when it changed, target(x, z, yaw) -> the lever id a visitor there could use, or null, round ({ no, siding, due, start, outcome (null | 'routed' | 'misrouted' | 'derailed'), waited }), newRound(), obstacles() -> [{ box: [x0, z0, x1, z1] } or { circle: [x, z, r] }] (the train's standing vehicles included) }. Commands round.new. Events thrown { id, to }, signal { aspect }, card { siding }, outcome { result, waited }.
+- train: G.train = { s, v, state ('running' | 'arrived' | 'derailed'), route, waited, LENGTH (84.5), cars() -> [{ x, z, heading, len }] (each vehicle's centre), derails(id) -> whether throwing that point now derails it, reset() }. Events horn, arrived { siding }, derailed.
+- walker: G.walker = { x, z, yaw, pitch (degrees), eye() -> { x, y, z }, view() -> [dx, dy, dz], speed(), input ({ forward, strafe }, each -1 to 1, which the hands and the autopilot set), turn(dyaw, dpitch), target (a lever id or null), hold (0 to 1 of the use), place(x, z, yaw), collide(x, z) -> [x, z] (pushed out of every obstacle) }. Commands walk.forward, walk.back, walk.left, walk.right, turn.left, turn.right, walk.run, walker.use, piece.lantern.
+- pilot: G.pilot = { active() -> whether it runs, plan(siding, points, from) -> [lever ids], path(from, to) -> [node names] (the waypoint graph's shortest), nodes ({ name: [x, z] }), edges ([[a, b], ...]), goal (where it is heading, or null) }. Commands pilot.auto.
+- world: G.world = { root, cars ([six Object3Ds]), signal (the signal's head), levers ({ id: Object3D }), rain (the rain's InstancedMesh), counts() -> { meshes } }.
+- hands: G.hands = { device ('mouse' | 'touch' | 'keys'), look(dx, dy) (what a drag of dx, dy CSS pixels does), stick(dx, dy) (what a push of the touch stick does), script }.
+- sound: G.sound = { ctx (null until unlocked), unlock() (safe to call again), muted, mute(on), play(name, options) -> a handle or null, bed(name, level), voices(), render(name, seconds) -> a Promise of a Float32Array (that sound alone, offline, at 48,000 Hz), gainAt(d) (a sound's level at d m from the visitor, 1 / (1 + d / 30)), names }.
+- panel: G.panel = { el, status(text), refresh(), free() -> { x, y, w, h }, fallback(reason), selftest() }. Commands piece.map.
+- System orders (G.system): hands 10, pilot 15, walker 20, train 40, yard 50, sound 94. G.onRender orders: world 20, panel 30, render 100.`;
+
+const FREIGHT_DIRECTION = `Direction (the source of the look and the sound):
+- A freight yard at night in steady rain: wet ballast and asphalt that mirror every light, sodium lamps on tall posts throwing orange pools and visible cones of falling rain, rails catching thin highlights, a hut with a lit window, stacked sleepers, a rusting container, a fence at the edge; beyond the yard, darkness and fog. The darkest of the night is a deep blue-grey (the fog about #1a2230), never black.
+- Light: almost all of it from the lamps (warm orange), the signal (a pure red or green, small and intense), the visitor's lantern (warm white, a narrow cone) and the train (a hard white headlight, amber cab windows, red tail lamps).
+- The train: a dark-green diesel locomotive with yellow ends and five weathered wagons (rust brown, grey), wet and glossy.
+- The interface: a dispatcher's clipboard at night: graphite panels, off-white type, one signal-amber accent, red and green only for the signal's states; a condensed display face for titles and numbers, a mono face for the readouts.
+- Sound: rain is the room tone, a steady hiss with drops on metal now and then. Footsteps crunch on ballast; a lever is a heavy iron clunk with a ratchet while it is held; the signal's relay clicks; the train is first a far horn and a growing rumble, then wheels clacking over the joints, brakes squealing as it slows, the rumble settling at the buffers. Nothing harsh. As peaks in dBFS: the horn -10, the clunk -14, a clack -18, the squeal -22, the relay -24, a step -24, the radio (a new card) -18, a tick -26; the beds, the rain -26, the rumble -20 at 20 m (by gainAt), the ratchet -28; a master gain of +6 dB into a limiter (threshold -10 dB, ratio 4).`;
+const FREIGHT_DIRECTION_SECTIONS = `1. Palette tokens (hex): sky, fog, ballast, asphalt, rail, sleeper, lamp, signal red, signal green, lantern, paper, muted, hairline, accent.
+2. Materials: ballast, asphalt and puddles (how wet: roughness and the mirror's share), rails, sleepers, the hut, the container, the lever frames and their tags, the locomotive and wagons: colour, roughness, metalness, and the noise each takes from a canvas texture.
+3. Light: each lamp's colour, intensity, angle and penumbra and its cone's opacity in the rain; the signal's two aspects; the lantern; the headlight, cab and tail lamps; the fog's colour and density; the environment's strength.
+4. Rain and wet: the streaks' count, length, speed, slant and opacity; the ripples' size, rate and fade; how the mirror is mixed into the ground (by a puddle mask and roughness).
+5. Bloom and grade: AgX exposure, the bloom's threshold, strength and radius, vignette, grain.
+6. Interface tokens: the type sizes, the panel's width, paddings, the card, the yard diagram's lines and colours, the buttons, the touch stick, the prompt and its ring, the status chip's colours.
+7. A synthesis recipe for every sound name: rain, step, clunk, ratchet, relay, horn, rumble, clack, squeal, radio, tick, each with its peak in dBFS as the direction gives it.`;
+
+const FREIGHT: Showpiece = {
+  id: 'night-freight-yard',
+  title: 'NIGHT FREIGHT first-person yard',
+  name: 'NIGHT FREIGHT',
+  global: 'Freight',
+  file: 'night-freight.html',
+  brief: 'Build NIGHT FREIGHT, an original first-person slice in one web page: a freight yard at night in the rain, where a visitor walks to the levers beside the points, sets the road the dispatch card names, clears the home signal and stands clear while the freight comes in on whatever road the points make. Throw a point under the train and it derails; leave the signal at danger and the train waits; stand on the line and it stops short. The yard, the train, the rain on the wet ground and every sound are made in code, with no file loaded. Left alone it works the yard itself with an honest autopilot that walks to the levers, and the same seed replays any second, so the page can be recorded and checked frame by frame. Ten builders write it against one fixed kernel contract, and it tests itself: twenty-nine acceptance tests and ten planted failures run inside the page in a headless browser, a first pass fixes what fails, and a second looks at the page\'s frames and fixes what they show. Every name and word is original.',
+  lib: [
+    ['THREE', "import * as THREE from 'three';"],
+    ['EffectComposer', "import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';"],
+    ['RenderPass', "import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';"],
+    ['UnrealBloomPass', "import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';"],
+    ['OutputPass', "import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';"],
+    ['Reflector', "import { Reflector } from 'three/addons/objects/Reflector.js';"],
+    ['mergeGeometries', "import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';"],
+  ],
+  events: 'thrown { id, to }, signal { aspect }, card { siding }, horn, arrived { siding }, derailed, outcome { result, waited }',
+  state: 'auto, lantern, quarter',
+  api: FREIGHT_API,
+  design: FREIGHT_DESIGN,
+  direction: FREIGHT_DIRECTION,
+  directionSections: FREIGHT_DIRECTION_SECTIONS,
+  fonts: 'Oxanium, Manrope or JetBrains Mono',
+  style: 'html,body{margin:0;height:100%;overflow:hidden;background:#0d1420;color:#e8e4da;font:13px Manrope,system-ui,sans-serif}#stage{position:fixed;inset:0}#stage canvas{display:block;width:100%;height:100%;touch-action:none}#boot{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 30%,#5a3a1c 0%,#1a2230 45%,#0d1420 80%);font:600 72px/1 Oxanium,system-ui,sans-serif;letter-spacing:.04em;color:#e8e4da}',
+  check: { frames: [2, 10, 30, 67, 80], viewport: '960x600', drawCalls: 250, triangles: 600000 },
+  look: `- every frame is first person, at night in rain: the lamps' orange pools and cones, the wet ground mirroring the lights, the streaks of rain, fog in the distance;
+- at 2 s the visitor stands by the hut looking into the yard; at 10 s and 30 s the levers, the points and the signal are where the autopilot works and watches; at 67 s the headlight and the locomotive come past the signal; at 80 s the train runs slowly into its siding;
+- the signal reads red or green from where the visitor stands, and the headlight blooms without burning out the frame;
+- no frame is mostly black (pixels.dark under 0.6: the night is a deep blue-grey and its lamps and pools must read) or burnt out (pixels.bright under 0.05), and the yard reads (lumaStdDev 10 or more);
+- the masthead, the panel, the card, the diagram and the readouts are readable and nothing overlaps.`,
+  modules: [
+    { id: 'core', title: 'Kernel', limit: 16000, duties: `${CORE_DUTIES}
+- Tests 1-3; plant P1.` },
+    { id: 'render', title: 'Renderer, rain light and grade', limit: 18000, art: true, duties: `- A WebGLRenderer in the boot root (no WebGL 2: G.fail('This piece needs WebGL 2.') and nothing else), created inside try and catch; pixel ratio by the tier (A10); AgX tone mapping and the direction's exposure.
+- The camera of A2 at G.walker.eye(), looking along G.walker.view(), each frame; its field of view by the free part of the stage (view: the panel's free()).
+- The ground of A9: a Reflector at half the drawing size (a quarter on medium, none on low) given a shader that mixes the mirror into the direction's wet ballast and asphalt by a puddle mask drawn in code; on low a plain glossy ground.
+- The light by the direction: the lamps (G.world places their meshes; render owns the light objects of the lantern and the environment's strength), fog of the direction's colour and density, the lantern (a SpotLight at the eye along the view, on while G.state.lantern).
+- An EffectComposer: RenderPass, UnrealBloomPass, OutputPass; passes() lists world, bloom, output.
+- uniforms.uTime follows G.time; resize() on window resize and on quality, with every target; setQuality(tier) changes the mirror's size and the pixel ratio.
+- frame(dt) at G.onRender order 100 draws one frame; info() reads renderer.info with autoReset off across the frame (the mirror's pass included).
+- Tests 4-6; plant P2.
+- Must not touch the yard's numbers, the walker or the interface.` },
+    { id: 'yard', title: 'Yard, points and rounds', limit: 16000, duties: `- A3 exactly: the four routes as sampled polylines, at, heading and sAt; z(route, x); the points, the signal and siding(); the levers with their stand points; throw(id) (a point thrown while G.train.derails(id) derails the train); target(x, z, yaw) by A5's rule; the obstacles, with the train's vehicles while it stands.
+- The signal back to danger once the train's tail passes x = 50; the round of A3: its card from G.rng(G.SEED * 3 + 1), due 60 s after it starts, the outcome on the train's arrived or derailed with its waited seconds, and a new round 8 s after an outcome (newRound(), which round.new runs at once).
+- A reset that starts the first round afresh, the yard's generator at its start.
+- The readout "due in" (G.readout.provide, as A8 words it); the facts routes (4) and levers (4); G.checksum of the points, the signal and the round.
+- Tests 7-10; plants P3 and P4.
+- Must not touch three.js or the DOM.` },
+    { id: 'train', title: 'Train', limit: 14000, duties: `- A4 exactly, as system 40, on G.yard's routes: the route the points make with the branches the front has passed kept, the cap of every limit, the speed, s, the waited clock, arrived; the person check against G.walker's place; the horn; derails(id) and the derailing stop; cars() for the six vehicles; reset() to the start at 11 m/s, which a new round calls.
+- The readouts train (km/h) and "to the signal" (m, 0 once past it); the fact train (84.5 m, 6 vehicles); G.checksum of s, v and the route.
+- Tests 11-15; plants P5 and P6.
+- Must not touch three.js or the DOM.` },
+    { id: 'walker', title: 'Visitor', limit: 14000, duties: `- A5 exactly, as system 20: the input from the hold verbs (walk.forward, walk.back, walk.left, walk.right, walk.run, turn.left, turn.right; the hands' stick and the autopilot set input too), the eased velocity, the push out of every obstacle of G.yard.obstacles() with sliding; turn(dyaw, dpitch) within the pitch limits; eye() with the bob from the distance walked; view().
+- Use: the target by G.yard.target, walker.use held for 1.2 s throws it (hold counts up; a release or a new target starts it again); the lantern verb piece.lantern (toggles G.state.lantern).
+- A reset that places the visitor at H looking at yaw 60 (a new round does too).
+- The readout you (m/s, 1 digit); G.checksum of x, z, yaw and pitch.
+- Tests 16-18; plant P7.
+- Must not touch three.js or the DOM.` },
+    { id: 'pilot', title: 'Autopilot', limit: 14000, duties: `- A6 exactly, as system 15, through the visitor's verbs only (it sets G.walker.input and turns with G.walker.turn, at most 180 degrees a second, and holds use through G.commands.run('walker.use', ...)): its 1 s wait, the plan, the waypoint graph and its shortest paths (Dijkstra on the edges' lengths), running to each stand point, turning to the lever, holding use until it is thrown, then V and the watching view; the crossing rule; it runs while G.playing or G.state.auto and releases everything it holds when it stops.
+- The command pilot.auto (toggles G.state.auto).
+- Tests 19-21; plant P8.
+- Must not touch three.js or the DOM.` },
+    { id: 'world', title: 'Yard and train models', limit: 18000, art: true, duties: `- A9's world from the direction's materials, each texture drawn in code on a canvas: the rails on sleepers along each route inside the yard (instanced sleepers, rails merged), the points' blades turned as set, the signal (its head's red and green lamps, the lit one bright, a point light of its colour), the four levers in their frames with tags (each lever leaning as set), five sodium lamps (SpotLights downwards with soft edges and additive cones that never write depth), the hut with its lit window, the sleeper stacks, the container, the buffer stops, the fence, the crossing's boards.
+- The train: a locomotive (17 m; a headlight SpotLight ahead and a glow, amber cab windows) and five wagons (13.5 m), each placed on its route from G.train.cars() every frame, red tail lamps on the last; hidden parts of the train beyond the yard's fog need not draw.
+- The rain: one InstancedMesh of at most 4,000 streaks (the tier's count) moved in its vertex shader by uniforms.uTime about the eye, and ripples on the ground; hidden under reduced motion.
+- Updates at G.onRender order 20; at most 90 meshes; the facts meshes and rain (the streaks).
+- Tests 22-23.
+- Must not change the yard, the train or the visitor.` },
+    { id: 'hands', title: 'Hands and script', limit: 12000, duties: `- Every device: keys by event.code to the commands (a hold verb down on keydown, up on keyup, repeats ignored, nothing while an input, select or textarea has focus); a drag on the stage turns the view (look); touch: a stick under the left thumb (stick), a drag elsewhere turns, a Use button bottom right holds walker.use, all in G.ui.layer('touch'). Each of these calls G.touch(), and each trusted one (event.isTrusted) G.sound.unlock() until the sound runs.
+- look(dx, dy): G.walker.turn(dx * 0.25, -dy * 0.25); stick(dx, dy): G.walker.input forward -dy / 40 and strafe dx / 40, each within -1 and 1.
+- G.script is A7.
+- Tests 24-25.
+- Must not draw anything but the touch controls.` },
+    { id: 'sound', title: 'Sound', limit: 14000, art: true, duties: `- No AudioContext before unlock(), which the first gesture calls; then a master gain into a limiter, with buses for beds and effects; mute(on) and G.sound.muted; suspended while the page is hidden.
+- Every sound name of the direction synthesized from oscillators, one shared noise buffer (filled from G.rng) and filters, each recipe a function of (context, destination, time, options) so that play() and render() share it; envelopes always ramp; at most 24 voices, the beds counted among them, the oldest released first.
+- Beds, their levels eased: rain; the train's rumble by its speed and gainAt of its distance from the visitor; the ratchet while use is held. Effects: steps by the distance walked (louder running), clunk on thrown, relay on signal, horn on horn (by gainAt), clacks as each vehicle's bogies pass the rail joints every 18 m, the squeal while the train brakes harder than 0.5 m/s^2, radio on card, a tick on a command event a person caused (not while G.playing).
+- render(name, seconds): that sound alone in an OfflineAudioContext at 48,000 Hz, as a Float32Array; a muted render is silence.
+- Tests 26-27; plant P9.
+- Must not touch the DOM beyond its listeners.` },
+    { id: 'panel', title: 'Panel and readouts', limit: 18000, art: true, duties: `- Everything over the canvas, in G.ui.layer('panel'), from A1 and A8 and the direction's interface tokens: the masthead top left (kicker, title, subtitle, caption; it takes no pointer events), the specimen panel on the right (300 px) with the card, the yard diagram (an SVG drawn from G.yard), the levers and the buttons; the readouts and the hint bottom left with the footnote; the notes drawer bottom right (a details element with four short paragraphs: the yard, the train's braking, the rain and the light, sound; their counts from G.facts.get()); the status chip; the prompt with its ring while G.walker.target is set; the outcome card at a round's end.
+- The panel built from the registries: a button for every command with panel set (a hold verb works while pressed: pointerdown runs it true, pointerup, pointercancel and pointerleave run it false), toggles that show their state. Every control has a visible focus ring and a title with its key.
+- refresh() writes the readouts from G.readout.list() (called 8 times a second from G.onRender at order 30, and at once on a state event), the card and the diagram; status(text) sets the chip, which follows pause, mode, the round and the train.
+- free() is the stage's rectangle less the panel's and the masthead's columns; on resize and at init it calls G.render.resize(). Under 860 px wide the page stacks: the stage keeps the top 55 % and the rest scrolls under it.
+- fallback(reason): on fail, a centred panel with the reason in place of the stage. selftest() (F9): an overlay that runs G.tests.run() and lists every test and plant, green or red, with the counts.
+- Command piece.map (the diagram large over the stage); the stylesheet inserted once at init; transitions by the motion language (140 ms for a press, 200 ms for a panel), none under reduced motion.
+- Tests 28-29; plant P10.
+- Must not touch the canvas or the simulation.` },
+  ],
+};
+
 /** Keyed by case id, like PRODUCTION_WORKFLOWS, FLAGSHIP_WORKFLOWS and EPIC_WORKFLOWS. */
-export const SHOWPIECE_WORKFLOWS: Readonly<Record<string, OfficialWorkflow>> = Object.fromEntries([GATHER, MOSSGREEN].map(piece => [piece.id, showpiece(piece)]));
+export const SHOWPIECE_WORKFLOWS: Readonly<Record<string, OfficialWorkflow>> = Object.fromEntries([GATHER, MOSSGREEN, FREIGHT].map(piece => [piece.id, showpiece(piece)]));
 /** The pieces themselves, for the tests that read a piece's check and modules. */
-export const SHOWPIECES: ReadonlyArray<Showpiece> = [GATHER, MOSSGREEN];
+export const SHOWPIECES: ReadonlyArray<Showpiece> = [GATHER, MOSSGREEN, FREIGHT];
