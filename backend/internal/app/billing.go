@@ -320,6 +320,13 @@ func creditsJSON(p *activePlan, spent int64) map[string]any {
 	return map[string]any{"granted": p.granted(), "gift": p.Gift, "spent": spent, "carried": p.Carry, "remaining": max(0, p.remaining(spent))}
 }
 
+// billingCatalog answers GET /api/v1/billing/catalog: the plans on offer and whether they can be bought. It reads
+// nothing of the account and never asks the issuer, so a page may read it for every account (the launch notice does,
+// once each); what the account holds is GET /api/v1/billing's to say.
+func (a *App) billingCatalog(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, 200, map[string]any{"catalog": planCatalogJSON(), "checkoutEnabled": a.cfg.BillingCheckoutEnabled && a.clawHuntEnabled()})
+}
+
 func planCatalogJSON() []map[string]any {
 	out := []map[string]any{}
 	for _, id := range planOrder {
@@ -340,7 +347,7 @@ func (a *App) billingCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, ok := planCatalog[b.Plan]; !ok {
-		fail(w, 400, "invalid_input", "plan must be pro or max")
+		fail(w, 400, "invalid_input", "plan must be "+planNames())
 		return
 	}
 	if !a.cfg.BillingCheckoutEnabled {

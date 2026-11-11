@@ -9,7 +9,7 @@ import (
 )
 
 // The end of the free plan (owner 2026-11-07: 「免费账号停用，必须订阅」). From AWWO_FREE_PLAN_UNTIL on, a workspace on the
-// free plan runs nothing until its owner subscribes to Pro or Max: one with route limits (any workspace a plan can cover,
+// free plan runs nothing until its owner subscribes to Pro, Max or Ultra: one with route limits (any workspace a plan can cover,
 // as entitledPlanSQL reads it) whose owner has no entitled plan and that no platform administrator owns (the operator's
 // own, which planOnlyClosed exempts the same way). The moment is judged on the API's clock, as the promotion's is
 // (promo.go), and nothing is written to a workspace: a subscription that lands opens it at its next admission.
@@ -24,7 +24,7 @@ import (
 // The platform's own calls about a closed workspace (the assistant's router, learning) are not made (routeClosed).
 // Reading, editing, saving, export, deletion, billing, invites and the usage meter stay open.
 
-const freePlanEndedMessage = "The free trial has ended: this workspace runs again once its owner subscribes to Pro or Max."
+const freePlanEndedMessage = "The free trial has ended: this workspace runs again once its owner subscribes to Pro, Max or Ultra."
 
 var errFreePlanEnded = errors.New("free_plan_ended")
 

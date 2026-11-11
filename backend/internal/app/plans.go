@@ -34,16 +34,27 @@ type planLimits struct {
 	PriceUSD    int `json:"priceUsd"`
 }
 
-// planCatalog is the owner-approved v1 ladder (2026-10-06). Credits is what a full period's payment of PriceUSD
-// buys; the credits actually granted are converted from what was paid (planCredits). Daily counts the free
-// default model's calls, Concurrent the runs active at once (and so the model calls), and MediaPerDay the
-// generations, across all of the account's plan workspaces.
+// planCatalog is the owner-approved v1 ladder (2026-10-06); Ultra was added on 2026-11-11 at the owner's
+// 「价格改为三档20刀-100刀-299刀」 (migration 060 lets user_plans hold it). Credits is what a full period's payment of
+// PriceUSD buys, 1 credit for each cent on every plan; the credits actually granted are converted from what was paid
+// (planCredits). Daily counts the free default model's calls, Concurrent the runs active at once (and so the model
+// calls), and MediaPerDay the generations, across all of the account's plan workspaces.
 var planCatalog = map[string]planLimits{
-	"pro": {Credits: 2000, Daily: 300, Concurrent: 3, Workspaces: 3, MediaPerDay: 30, PriceUSD: 20},
-	"max": {Credits: 10000, Daily: 1000, Concurrent: 6, Workspaces: 10, MediaPerDay: 100, PriceUSD: 100},
+	"pro":   {Credits: 2000, Daily: 300, Concurrent: 3, Workspaces: 3, MediaPerDay: 30, PriceUSD: 20},
+	"max":   {Credits: 10000, Daily: 1000, Concurrent: 6, Workspaces: 10, MediaPerDay: 100, PriceUSD: 100},
+	"ultra": {Credits: 29900, Daily: 3000, Concurrent: 12, Workspaces: 30, MediaPerDay: 300, PriceUSD: 299},
 }
 
-var planOrder = []string{"pro", "max"}
+// planOrder is the catalog from the smallest plan to the largest, as the plans page lists them.
+var planOrder = []string{"pro", "max", "ultra"}
+
+// planNames are the plans as an error message lists them: "pro, max or ultra".
+func planNames() string {
+	if len(planOrder) < 2 {
+		return strings.Join(planOrder, "")
+	}
+	return strings.Join(planOrder[:len(planOrder)-1], ", ") + " or " + planOrder[len(planOrder)-1]
+}
 
 const (
 	microusdPerCredit = 10000

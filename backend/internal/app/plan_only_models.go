@@ -9,11 +9,11 @@ import (
 )
 
 // Plan-only models (owner 2026-10-13: Opus 5.5 改成只给付费用户). A model on AWWO_PLAN_ONLY_MODELS runs only for a
-// workspace whose owner has a paid plan (Pro or Max, on credits) or that a platform administrator owns (the
+// workspace whose owner has a paid plan (Pro, Max or Ultra, on credits) or that a platform administrator owns (the
 // operator's own, operator_workspace.go). For every other workspace it is outside the free allowance, the way a paid
 // route limited to 0 is (route_limits.go): the catalogue marks it requiresUpgrade (closedRoutes), the switch to a model
 // that sees pictures passes it over (vision.go), and admission refuses a call on it with premium_quota_exceeded
-// (reserveInvocation), the refusal the web already answers with the way to Pro and Max. The operator's planner calls
+// (reserveInvocation), the refusal the web already answers with the way to the paid plans. The operator's planner calls
 // are the operator's, never held by it.
 //
 // Empty or unset, the list is Claude Opus 5.5 (an empty value keeps the default, as every setting here does); "none"
@@ -56,7 +56,7 @@ func (a *App) planOnlyClosed(ctx context.Context, q querier, tid string, plan *a
 }
 
 // modelClosures are what a workspace cannot call on its current plan, so the catalogue marks those models
-// requiresUpgrade and a picker can say that Pro or Max is needed before a run is refused with premium_quota_exceeded:
+// requiresUpgrade and a picker can say that a paid plan is needed before a run is refused with premium_quota_exceeded:
 // a free workspace's paid routes limited to 0, and the plan-only models for one that planOnlyClosed holds.
 type modelClosures struct {
 	routes   map[string]bool

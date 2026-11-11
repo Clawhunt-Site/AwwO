@@ -330,6 +330,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST /api/v1/auth/clawhunt/link", a.authRate(a.clawHuntLink))
 	m.HandleFunc("POST /api/v1/auth/clawhunt/invites", a.auth(a.clawHuntInvites))
 	m.HandleFunc("GET /api/v1/billing", a.auth(a.billingView))
+	m.HandleFunc("GET /api/v1/billing/catalog", a.auth(a.billingCatalog))
 	m.HandleFunc("POST /api/v1/billing/checkout", a.auth(a.billingCheckout))
 	m.HandleFunc("POST /api/v1/billing/portal", a.auth(a.billingPortal))
 	m.HandleFunc("GET /api/v1/auth/options", a.authOptions)

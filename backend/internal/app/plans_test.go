@@ -69,11 +69,47 @@ func TestPlanCreditsAreWhatWasPaidForEachPlan(t *testing.T) {
 		{map[string]int64{}, 0},
 		{nil, 0},
 		{map[string]int64{"pro": -500}, 0},
-		{map[string]int64{"ultra": 5000}, 0},
+		{map[string]int64{"mega": 5000}, 0}, // no such plan
+		{map[string]int64{"ultra": 29900}, 29900},
+		// Max to Ultra part-way through the period: what Max kept and what Ultra charged, a credit for each cent.
+		{map[string]int64{"max": 4000, "ultra": 20000}, 24000},
+		{map[string]int64{"pro": 2000 - 67, "ultra": 997}, 2930},
+		{map[string]int64{"ultra": 29900, "mega": 5000}, 29900},
 	} {
 		if got := planCredits(c.paid); got != c.want {
 			t.Fatal(c.paid, "=", got, "want", c.want)
 		}
+	}
+}
+
+// The plans as GET /billing lists them and the plans page shows them: Pro, Max and Ultra, smallest first, each with its
+// price and allowances (Ultra since 2026-11-11). Every plan in the catalog is listed, and a credit is a cent on each.
+func TestPlanCatalogListsProMaxAndUltraInOrder(t *testing.T) {
+	want := []map[string]any{
+		{"id": "pro", "priceUsd": 20, "credits": 2000, "dailyCalls": 300, "concurrentAgents": 3, "workspaces": 3, "mediaPerDay": 30},
+		{"id": "max", "priceUsd": 100, "credits": 10000, "dailyCalls": 1000, "concurrentAgents": 6, "workspaces": 10, "mediaPerDay": 100},
+		{"id": "ultra", "priceUsd": 299, "credits": 29900, "dailyCalls": 3000, "concurrentAgents": 12, "workspaces": 30, "mediaPerDay": 300},
+	}
+	if got := planCatalogJSON(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("the catalog\n got %v\nwant %v", got, want)
+	}
+	if len(planCatalog) != len(planOrder) {
+		t.Fatal("a plan in the catalog is not listed, or one is listed twice", planOrder)
+	}
+	for i, id := range planOrder {
+		l, ok := planCatalog[id]
+		if !ok || l.Credits != l.PriceUSD*100 {
+			t.Fatal("a listed plan is not in the catalog, or its credits are not its price in cents", id, l)
+		}
+		if i > 0 {
+			if below := planCatalog[planOrder[i-1]]; l.PriceUSD <= below.PriceUSD || l.Credits <= below.Credits || l.Daily <= below.Daily ||
+				l.Concurrent <= below.Concurrent || l.Workspaces <= below.Workspaces || l.MediaPerDay <= below.MediaPerDay {
+				t.Fatal("a larger plan gives less than the one below it", id, l, below)
+			}
+		}
+	}
+	if got := planNames(); got != "pro, max or ultra" {
+		t.Fatal("the plans as a refusal names them", got)
 	}
 }
 
@@ -963,7 +999,7 @@ func TestPostgresBillingSyncsWhatWasPaidFromClawHunt(t *testing.T) {
 	plan, _ := out["plan"].(map[string]any)
 	credits, _ := out["credits"].(map[string]any)
 	if plan == nil || plan["id"] != "pro" || plan["entitled"] != true || credits["granted"] != 2000.0 || credits["spent"] != 0.0 ||
-		out["checkoutEnabled"] != false || out["stale"] != false || len(out["catalog"].([]any)) != 2 {
+		out["checkoutEnabled"] != false || out["stale"] != false || len(out["catalog"].([]any)) != 3 {
 		t.Fatal("billing view", out)
 	}
 	if req, _ := f.billingRequest.Load("plan"); req.(map[string]any)["grant_token"] != strings.Repeat("g", 43) || req.(map[string]any)["rebuild"] != false {
@@ -1012,11 +1048,11 @@ func TestPostgresBillingSyncsWhatWasPaidFromClawHunt(t *testing.T) {
 	// Answers that are not the documented shape, or not about this account, change nothing.
 	for _, bad := range []map[string]any{
 		{"active": true, "sub": "subject-other", "plan": paidPlan("pro", end, end+86400, map[string]int64{"pro": 2000})},
-		clawHuntPlanBody(f, paidPlan("ultra", end, end+86400, nil)),
+		clawHuntPlanBody(f, paidPlan("mega", end, end+86400, nil)),
 		clawHuntPlanBody(f, map[string]any{"id": "pro", "status": "free", "period_start": end, "period_end": end + 86400}),
 		clawHuntPlanBody(f, paidPlan("pro", end, start, nil)),
 		clawHuntPlanBody(f, paidPlan("pro", end, end+500*86400, nil)),
-		clawHuntPlanBody(f, paidPlan("pro", end, end+86400, map[string]int64{"ultra": 1})),
+		clawHuntPlanBody(f, paidPlan("pro", end, end+86400, map[string]int64{"mega": 1})),
 	} {
 		f.billingBody.Store("plan", bad)
 		if out = h.request(t, c, "GET", "/billing?refresh=1", nil, 200); out["stale"] != true || out["plan"].(map[string]any)["id"] != "max" {
@@ -1132,8 +1168,16 @@ func TestPostgresBillingCheckoutAndPortalGoThroughClawHunt(t *testing.T) {
 	h, f, c := clawHuntMember(t)
 	h.a.billingCalls.perMinute = 1000
 	requireCode(t, h.request(t, c, "POST", "/billing/checkout", map[string]string{"plan": "pro"}, 403), "checkout_closed")
+	// The catalog alone: the three plans, and whether they can be bought, as the launch notice reads them.
+	offer := h.request(t, c, "GET", "/billing/catalog", nil, 200)
+	if plans, _ := offer["catalog"].([]any); len(plans) != 3 || offer["checkoutEnabled"] != false || len(offer) != 2 {
+		t.Fatal("the catalog while checkout is closed", offer)
+	}
 	h.a.cfg.BillingCheckoutEnabled = true
-	requireCode(t, h.request(t, c, "POST", "/billing/checkout", map[string]string{"plan": "ultra"}, 400), "invalid_input")
+	if offer := h.request(t, c, "GET", "/billing/catalog", nil, 200); offer["checkoutEnabled"] != true {
+		t.Fatal("the catalog once checkout is open", offer)
+	}
+	requireCode(t, h.request(t, c, "POST", "/billing/checkout", map[string]string{"plan": "mega"}, 400), "invalid_input")
 	out := h.request(t, c, "POST", "/billing/checkout", map[string]string{"plan": "max"}, 200)
 	if out["url"] != "https://checkout.stripe.com/c/pay/cs_test_fixture" {
 		t.Fatal("checkout", out)
@@ -1141,6 +1185,13 @@ func TestPostgresBillingCheckoutAndPortalGoThroughClawHunt(t *testing.T) {
 	req, _ := f.billingRequest.Load("checkout")
 	if want := (map[string]any{"grant_token": strings.Repeat("g", 43), "plan": "max", "success_url": h.cfg.PublicOrigin + "/?account=plans&billing=success", "cancel_url": h.cfg.PublicOrigin + "/?account=plans&billing=cancel"}); !reflect.DeepEqual(req, want) {
 		t.Fatal("checkout request", req)
+	}
+	// Ultra, the third plan, opens a checkout the same way.
+	if out = h.request(t, c, "POST", "/billing/checkout", map[string]string{"plan": "ultra"}, 200); out["url"] != "https://checkout.stripe.com/c/pay/cs_test_fixture" {
+		t.Fatal("ultra checkout", out)
+	}
+	if req, _ = f.billingRequest.Load("checkout"); req.(map[string]any)["plan"] != "ultra" {
+		t.Fatal("ultra checkout request", req)
 	}
 	// The account is read again for a day, whether or not the browser comes back.
 	var until time.Time
