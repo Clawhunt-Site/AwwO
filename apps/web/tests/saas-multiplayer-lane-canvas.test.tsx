@@ -6,7 +6,8 @@ import type { CanvasRecord, Tenant } from '../src/saas/api';
 import { createSessionNode, emptyDocument, sanitizeDocument, type CanvasDocument } from '../src/canvas/canvasDoc';
 import { canvasStorage } from '../src/canvas/canvasStorage';
 import { DRAWER_CHOICES_KEY } from '../src/canvas/drawerChoices';
-import type { LiveParticipant, LiveState } from '../src/canvas/multiplayer/types';
+import { applyOps } from '../src/canvas/multiplayer/changes';
+import type { CanvasChange, CanvasOp, LiveParticipant, LiveState } from '../src/canvas/multiplayer/types';
 import { cardPressAllowed, endPassivePress, holdCardGesture, holdPassivePress } from '../src/canvas/cardGesture';
 
 // 多人同屏's live lane on the hosted canvas page (docs/awwo-canvas-live-collaboration.md, Presence): others' edits in
@@ -43,7 +44,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.removeAttribute('open'); } });
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 function openLive(tenant: Tenant) {
   const identity = { user: { id: 'user-self', email: 'self@example.test', name: 'Leon', platformRole: 'user' }, tenants: [tenant] };
@@ -58,7 +59,19 @@ function openLive(tenant: Tenant) {
       const body = init.body ? JSON.parse(String(init.body)) : null;
       writes.push({ method: init.method, url, body });
       if (init.method === 'POST' && url.endsWith('/live/presence')) return new Response(null, { status: 204 });
-      if (init.method === 'PATCH') return json({ version: cloud.version + 1, results: body.ops.map(() => 'ok'), changes: [] });
+      // A change is answered as the API answers it: applied to the server's document, at the next version (after the
+      // page's, should a case have pushed someone else's change on the stream, which this document never took), with
+      // the page's own change in the answer (`changes` holds every change after baseVersion). The page takes the
+      // server's value at each path it sent (canvasSync.ts rebaseFor), so an answer without its change puts a card
+      // this page dragged back where the server's document still had it. Autosave sends by the clock (autosavePace.ts:
+      // 450 ms after the last write once no pointer is held, 1.5 s after the first unsent one at the latest while
+      // someone else is on the canvas), so its answer can land between any two steps of a case.
+      if (init.method === 'PATCH') {
+        cloud = { ...cloud, version: Math.max(cloud.version, body.baseVersion) + 1, document: applyOps(cloud.document as object, body.ops as CanvasOp[]).doc };
+        const own: CanvasChange = { version: cloud.version, actor: { kind: 'human', name: identity.user.name, clientId: body.clientId, userId: identity.user.id },
+          label: 'edit', ops: body.ops, at: '2026-11-09T00:00:00Z' };
+        return json({ version: cloud.version, results: body.ops.map(() => 'ok'), changes: [own] });
+      }
       if (init.method === 'PUT') { cloud = { ...cloud, version: cloud.version + 1, document: body.document }; return json(cloud); }
       return json({});
     }
@@ -93,12 +106,20 @@ async function hello(page: ReturnType<typeof openLive>, others: LiveParticipant[
 }
 
 const tileOf = (id: string) => screen.getByTestId(`canvas-tile-${id}`);
+/** Holds the clock (Date.now) where it is for the rest of a case (afterEach lets it go); timers and animation frames
+ *  still run. Another person's edit in progress is shown for 2 s after it was last heard, by Date.now (liveLane.ts):
+ *  then it has ended, its card goes home, and the lane forgets that this page took the card over. A case whose steps
+ *  are all within one edit of theirs holds the clock, so a busy run that takes longer than that between two steps
+ *  never ends the edit under it. (Autosave goes by the same clock, autosavePace.ts: such a case sends no change.) */
+const holdClock = () => { const at = Date.now(); vi.spyOn(Date, 'now').mockReturnValue(at); };
 
 describe('the live lane on the canvas page', () => {
   it('draws another person’s drag where it puts the node, and sends this page’s own while it lasts', async () => {
     const page = openLive(owner);
     await screen.findByTestId('canvas-tile-b', {}, { timeout: 5000 });
     await hello(page, [ada()]);
+    // Ada's edit lasts until its card has been seen where she holds it.
+    holdClock();
     // Ada drags Build: it is carried where she holds it (a translate from its own place: no layout moves), the document
     // unchanged.
     await act(async () => { page.streams[0].push({ event: 'presence', data: { participant: ada({ preview: { nodes: [{ id: 'b', x: 900, y: 300 }] } }) } }); });
@@ -194,6 +215,8 @@ describe('the live lane on the canvas page', () => {
     const page = openLive(owner);
     await screen.findByTestId('canvas-tile-b', {}, { timeout: 5000 });
     await hello(page, [ada()]);
+    // Ada's edit is one edit from here to the end: heard again below, it is the one this page took the card over from.
+    holdClock();
     await act(async () => { page.streams[0].push({ event: 'presence', data: { participant: ada({ preview: { nodes: [{ id: 'b', x: 900, y: 300 }] } }) } }); });
     await waitFor(() => expect(tileOf('b').style.translate).toBe('480px 300px'), { timeout: 3000 });
     // This page grabs Build while Ada still holds it: it goes on from where it is drawn, its carry now its own place.
@@ -219,7 +242,8 @@ describe('the live lane on the canvas page', () => {
     const touch = (pointerId: number, isPrimary: boolean) => ({ pointerId, pointerType: 'touch', isPrimary });
     fireEvent.pointerDown(tileOf('a'), { button: 0, buttons: 1, clientX: 0, clientY: 0, ...touch(1, true) });
     fireEvent.pointerMove(window, { clientX: 40, clientY: 0, buttons: 1, ...touch(1, true) });
-    await waitFor(() => expect(dragging()).not.toBeNull());
+    // (Before this page's first post goes there is no preview to read at all, which is not a drag said yet.)
+    await waitFor(() => expect(dragging() ?? null).not.toBeNull());
     await waitFor(() => expect(tileOf('a').style.left).not.toBe('0px'));
     const held = tileOf('a').style.left;
     // A second finger comes on Build, moves and goes: a press, never a drag, it moves nothing, and the drag goes on,
@@ -445,7 +469,8 @@ describe('the live lane on the canvas page', () => {
     const page = openLive(owner);
     await screen.findByTestId('canvas-tile-b', {}, { timeout: 5000 });
     await hello(page, [ada()]);
-    // Ada carries Plan 40 to the left and Build 20 to the right.
+    // Ada carries Plan 40 to the left and Build 20 to the right, and still does when this page grabs them.
+    holdClock();
     await act(async () => { page.streams[0].push({ event: 'presence', data: { participant: ada({ preview: { nodes: [{ id: 'a', x: -40, y: 0 }, { id: 'b', x: 440, y: 0 }] } }) } }); });
     // Both have come to rest where Ada has them (a card goes on from where it is drawn, mid-glide too).
     await waitFor(() => expect(tileOf('b').style.translate).toBe('20px 0px'), { timeout: 3000 });
