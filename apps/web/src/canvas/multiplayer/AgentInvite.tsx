@@ -105,6 +105,30 @@ export function tregSnippets(): TregSnippets {
   };
 }
 
+/** You.com (you.com): a third-party web search API with a hosted MCP server. Its free profile answers searches with no
+ *  account; the full server signs a person in with OAuth (dynamic client registration, PKCE) and bills their own You.com
+ *  account. AwwO only links to the hosted service and shows lines that carry no credential. Checked on 2026-11-12 with
+ *  Claude Code 2.1.238 (the free line connects at once; the full one stays "Needs authentication" until /mcp signs in)
+ *  and Codex 0.162.1 (`codex mcp add --url` starts You.com's sign-in at once, for the free profile too, so Codex gets the
+ *  full line only). */
+export const YOU_MCP_URL = 'https://api.you.com/mcp';
+export const YOU_FREE_MCP_URL = 'https://api.you.com/mcp?profile=free';
+export const YOU_SITE_URL = 'https://you.com/';
+
+export interface YouSnippets { claudeFree: string; cursorFree: string; claude: string; codex: string }
+
+/** The lines that give the Agent connected here You.com's search too: the free profile for Claude Code and Cursor, the
+ *  full server (page reads as well, with a sign-in) for Claude Code and Codex. None names a key. */
+export function youSnippets(): YouSnippets {
+  return {
+    // Quoted: a bare ? is a glob in zsh, which would refuse the whole line.
+    claudeFree: `claude mcp add --transport http you-free "${YOU_FREE_MCP_URL}"`,
+    cursorFree: `"you-free": { "url": "${YOU_FREE_MCP_URL}" }`,
+    claude: `claude mcp add --transport http you ${YOU_MCP_URL}`,
+    codex: `codex mcp add you --url ${YOU_MCP_URL}`,
+  };
+}
+
 /** Whether a reader may revoke a token, as the server judges it (canvas_agent_tokens.go): its maker, or an admin. */
 export function mayRevokeToken(item: AgentTokenItem, viewer: AgentInviteViewer | undefined): boolean {
   if (!viewer) return true;
@@ -176,37 +200,89 @@ function InviteBody({ id, tokens, onCreate, onRevoke, mcpUrl, apiBase, tenantId,
       : <TokenForm id={id} onCreate={onCreate} onMade={made} formRef={focus.formRef} createRef={focus.createRef} />}
     <TokenList tokens={{ ...tokens, items: listed }} onRevoke={onRevoke} now={now} viewer={viewer} />
     <TregConnect />
+    <YouConnect />
   </div>;
 }
 
-/** 加上 treg: a disclosure of its own, closed unless asked. Its lines name no secret, so it is open to every reader of
- *  this section, a token made or not. */
-function TregConnect() {
-  const { t } = useMultiplayerText();
+/** A third-party tool a person adds to their own Agent: what it is, who pays, the steps, the lines to copy (none names a
+ *  secret, so the panel is open to every reader of this section, a token made or not) and a link to its site. */
+interface ToolPanel {
+  className: string;
+  toggle: string;
+  paragraphs: readonly string[];
+  stepsLabel: string;
+  steps: readonly string[];
+  /** Each line's `id` keys it: labels are translated text, which a locale change or a repeated label must not remount. */
+  lines: ReadonlyArray<{ id: string; label: string; value: string }>;
+  caution: string;
+  site: { href: string; text: string; label: string };
+}
+
+/** A tool's disclosure of its own, closed unless asked. */
+function ToolConnect({ panel }: { panel: ToolPanel }) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
-  const lines = tregSnippets();
-  return <section className="awwo-multiplayer-treg" data-open={open || undefined}>
-    <h4 className="awwo-multiplayer-treg-title">
+  return <section className={`awwo-multiplayer-tool ${panel.className}`} data-open={open || undefined}>
+    <h4 className="awwo-multiplayer-tool-title">
       <button type="button" className="awwo-multiplayer-disclosure" aria-expanded={open} aria-controls={open ? bodyId : undefined} onClick={() => setOpen(was => !was)}>
-        <Globe size={15} aria-hidden="true" /><span>{t('treg.toggle')}</span><ChevronDown size={14} aria-hidden="true" className="awwo-multiplayer-chevron" />
+        <Globe size={15} aria-hidden="true" /><span>{panel.toggle}</span><ChevronDown size={14} aria-hidden="true" className="awwo-multiplayer-chevron" />
       </button>
     </h4>
-    {open && <div id={bodyId} className="awwo-multiplayer-treg-body">
-      <p className="awwo-multiplayer-hint">{t('treg.intro')}</p>
-      <p className="awwo-multiplayer-hint">{t('treg.billing')}</p>
-      <p className="awwo-multiplayer-label">{t('treg.stepsLabel')}</p>
-      <ol className="awwo-multiplayer-steps"><li>{t('treg.step1')}</li><li>{t('treg.step2')}</li><li>{t('treg.step3')}</li></ol>
-      <CopyBlock label={t('treg.forClaude')} value={lines.claude} />
-      <CopyBlock label={t('treg.forCodex')} value={lines.codex} />
-      <CopyBlock label={t('treg.forCursor')} value={lines.cursor} />
-      <CopyBlock label={t('treg.forTask')} value={t('treg.task')} />
-      <p className="awwo-multiplayer-hint">{t('treg.caution')}</p>
-      <a className="awwo-multiplayer-link" href={TREG_SITE_URL} target="_blank" rel="noopener noreferrer" aria-label={t('treg.siteLabel')}>
-        {t('treg.site')}<ExternalLink size={12} aria-hidden="true" />
+    {open && <div id={bodyId} className="awwo-multiplayer-tool-body">
+      {/* Fixed lists, never reordered: their places key them. */}
+      {panel.paragraphs.map((text, i) => <p key={i} className="awwo-multiplayer-hint">{text}</p>)}
+      <p className="awwo-multiplayer-label">{panel.stepsLabel}</p>
+      <ol className="awwo-multiplayer-steps">{panel.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
+      {panel.lines.map(line => <CopyBlock key={line.id} label={line.label} value={line.value} />)}
+      <p className="awwo-multiplayer-hint">{panel.caution}</p>
+      <a className="awwo-multiplayer-link" href={panel.site.href} target="_blank" rel="noopener noreferrer" aria-label={panel.site.label}>
+        {panel.site.text}<ExternalLink size={12} aria-hidden="true" />
       </a>
     </div>}
   </section>;
+}
+
+/** 加上 treg. */
+function TregConnect() {
+  const { t } = useMultiplayerText();
+  const lines = tregSnippets();
+  return <ToolConnect panel={{
+    className: 'awwo-multiplayer-treg',
+    toggle: t('treg.toggle'),
+    paragraphs: [t('treg.intro'), t('treg.billing')],
+    stepsLabel: t('treg.stepsLabel'),
+    steps: [t('treg.step1'), t('treg.step2'), t('treg.step3')],
+    lines: [
+      { id: 'claude', label: t('treg.forClaude'), value: lines.claude },
+      { id: 'codex', label: t('treg.forCodex'), value: lines.codex },
+      { id: 'cursor', label: t('treg.forCursor'), value: lines.cursor },
+      { id: 'task', label: t('treg.forTask'), value: t('treg.task') },
+    ],
+    caution: t('treg.caution'),
+    site: { href: TREG_SITE_URL, text: t('treg.site'), label: t('treg.siteLabel') },
+  }} />;
+}
+
+/** 加上 You.com: the free lines first (no account), then the full server's. */
+function YouConnect() {
+  const { t } = useMultiplayerText();
+  const lines = youSnippets();
+  return <ToolConnect panel={{
+    className: 'awwo-multiplayer-you',
+    toggle: t('you.toggle'),
+    paragraphs: [t('you.intro'), t('you.free'), t('you.billing')],
+    stepsLabel: t('you.stepsLabel'),
+    steps: [t('you.step1'), t('you.step2'), t('you.step3')],
+    lines: [
+      { id: 'claude-free', label: t('you.forClaudeFree'), value: lines.claudeFree },
+      { id: 'cursor-free', label: t('you.forCursorFree'), value: lines.cursorFree },
+      { id: 'claude', label: t('you.forClaude'), value: lines.claude },
+      { id: 'codex', label: t('you.forCodex'), value: lines.codex },
+      { id: 'task', label: t('you.forTask'), value: t('you.task') },
+    ],
+    caution: t('you.caution'),
+    site: { href: YOU_SITE_URL, text: t('you.site'), label: t('you.siteLabel') },
+  }} />;
 }
 
 /** Where the keyboard goes as a token's secret comes and goes (the form it replaces goes with the focus in it), and

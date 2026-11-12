@@ -428,13 +428,13 @@
   cursor: pointer;
 }
 .awwo-multiplayer-chevron { margin-left: auto; color: var(--mp-muted); transition: transform 140ms; }
-/* Each disclosure turns its own chevron: the open 邀请 Agent section holds treg's, which stays down until treg opens. */
+/* Each disclosure turns its own chevron: the open 邀请 Agent section holds the tools', which stay down until each opens. */
 .awwo-multiplayer-invite[data-open] > .awwo-multiplayer-section-title .awwo-multiplayer-chevron,
-.awwo-multiplayer-treg[data-open] > .awwo-multiplayer-treg-title .awwo-multiplayer-chevron { transform: rotate(180deg); }
-/* 加上 treg, under the canvas's tokens. */
-.awwo-multiplayer-treg { margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--mp-line); }
-.awwo-multiplayer-treg-title { margin: 0; }
-.awwo-multiplayer-treg-body { display: flex; flex-direction: column; gap: 6px; }
+.awwo-multiplayer-tool[data-open] > .awwo-multiplayer-tool-title .awwo-multiplayer-chevron { transform: rotate(180deg); }
+/* 加上 treg and 加上 You.com, under the canvas's tokens. */
+.awwo-multiplayer-tool { margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--mp-line); }
+.awwo-multiplayer-tool-title { margin: 0; }
+.awwo-multiplayer-tool-body { display: flex; flex-direction: column; gap: 6px; }
 .awwo-multiplayer-steps { margin: 0; padding-left: 18px; color: var(--mp-text); font-size: 12px; line-height: 1.5; }
 .awwo-multiplayer-steps > li + li { margin-top: 2px; }
 .awwo-multiplayer-panel .awwo-multiplayer-link {

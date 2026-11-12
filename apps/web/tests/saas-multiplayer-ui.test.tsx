@@ -919,9 +919,11 @@ describe('邀请 Agent', () => {
     expect((link.getAttribute('rel') ?? '').split(/\s+/)).toEqual(expect.arrayContaining(['noopener', 'noreferrer']));
     fireEvent.click(within(body).getByRole('button', { name: '复制：Codex · 会马上打开浏览器登录（以后可用 codex mcp login treg）' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('codex mcp add treg --url https://treg.to/mcp/'));
-    // A token made meanwhile never reaches treg's lines, and treg's disclosure stays as it was.
+    // A token made meanwhile never reaches treg's lines, and treg's disclosure stays as it was: the same nodes, still on
+    // the page (a remount would leave these references detached and every check below passing vacuously).
     fireEvent.click(screen.getByRole('button', { name: '生成令牌' }));
     await screen.findByRole('group', { name: '「Claude Code」的令牌' });
+    expect(toggle.isConnected && body.isConnected).toBe(true);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     for (const line of blocks()) expect(line).not.toContain(TOKEN);
     fireEvent.click(toggle);
@@ -934,8 +936,76 @@ describe('邀请 Agent', () => {
     expect(screen.getByText('treg charges per call, to your own treg team, and shows the price before a call. AwwO takes no part of that money and never sees or keeps your treg sign-in. What you send to treg leaves AwwO.')).toBeInTheDocument();
     expect(screen.getByText('Claude Code · then /mcp, pick treg and sign in')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open treg.to (a third-party site) in a new tab' })).toHaveAttribute('href', 'https://treg.to/');
-    // No Chinese in the English section.
-    expect(document.querySelector('.awwo-multiplayer-treg')?.textContent ?? '').not.toMatch(/[㐀-鿿]/);
+    // No Chinese in the English section (which must be there for this to mean anything).
+    const section = document.querySelector('.awwo-multiplayer-treg');
+    expect(section).not.toBeNull();
+    expect(section!.textContent).not.toMatch(/[㐀-鿿]/);
+  });
+
+  it('offers You.com’s lines, the free ones first, in a disclosure of their own that stays closed until asked', async () => {
+    const writeText = vi.fn(async () => undefined);
+    clipboard(writeText);
+    render(<AgentInvite {...inviteProps({ defaultOpen: true })} />);
+    const toggle = screen.getByRole('button', { name: '加上 You.com：让 Agent 联网搜索' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(document.body).not.toHaveTextContent('api.you.com');
+    // Opening one tool's panel leaves the other's as it was.
+    const tregToggle = screen.getByRole('button', { name: '加上 treg：让 Agent 查实时数据' });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(tregToggle).toHaveAttribute('aria-expanded', 'false');
+    const body = document.getElementById(toggle.getAttribute('aria-controls') ?? '')!;
+    expect(body).not.toBeNull();
+    const blocks = () => [...body.querySelectorAll('pre')].map(block => block.textContent ?? '');
+    expect(blocks()).toEqual([
+      // Quoted: zsh would read a bare ? as a glob and refuse the line.
+      'claude mcp add --transport http you-free "https://api.you.com/mcp?profile=free"',
+      '"you-free": { "url": "https://api.you.com/mcp?profile=free" }',
+      'claude mcp add --transport http you https://api.you.com/mcp',
+      'codex mcp add you --url https://api.you.com/mcp',
+      '用 You.com 查「<主题>」的最新资料，每条事实附上来源链接，再用 AwwO 画布工具写进「<节点>」。',
+    ]);
+    // No line names a key: the free profile needs none, and You.com's own sign-in handles the full server.
+    for (const line of blocks()) expect(line).not.toMatch(/token|bearer|authorization|header|x-api-key|ydc/i);
+    expect(within(body).getByText('免注册的几行不用账户：每天 100 次搜索，只能搜索（不能读全文）。')).toBeInTheDocument();
+    expect(within(body).getByText('完整版要登录你自己的 You.com 账户，每次调用都记在这个账户上。AwwO 不收这笔钱，也不经手、不保存你的 You.com 登录。发给 You.com 的内容会离开 AwwO。')).toBeInTheDocument();
+    // The full line's calls cost money and Codex may make them unasked (You.com marks its tools read-only).
+    expect(within(body).getByText(/Codex 可能不问你就调用.*先在 You\.com 设好花费上限/)).toBeInTheDocument();
+    // Each step names the Agents it is for: Codex has no free line, Cursor no full one.
+    expect([...body.querySelectorAll('ol > li')].map(item => item.textContent)).toEqual([
+      'Claude Code 或 Cursor：把下面对应的免注册一行加进同一个 Agent，不用账户，马上能用。',
+      '要读全文，或者用的是 Codex（它连免费版也要登录），改用完整版那一行，按提示登录 You.com。',
+      '让 Agent 用 You.com 查资料，再用画布工具把结果写进节点。',
+    ]);
+    const link = within(body).getByRole('link', { name: '在新标签页打开 you.com（第三方网站）' });
+    expect(link).toHaveAttribute('href', 'https://you.com/');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect((link.getAttribute('rel') ?? '').split(/\s+/)).toEqual(expect.arrayContaining(['noopener', 'noreferrer']));
+    fireEvent.click(within(body).getByRole('button', { name: '复制：Claude Code · 免注册' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('claude mcp add --transport http you-free "https://api.you.com/mcp?profile=free"'));
+    // A token made meanwhile never reaches You.com's lines, and its disclosure stays as it was: the same nodes, still on
+    // the page.
+    fireEvent.click(screen.getByRole('button', { name: '生成令牌' }));
+    await screen.findByRole('group', { name: '「Claude Code」的令牌' });
+    expect(toggle.isConnected && body.isConnected).toBe(true);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    for (const line of blocks()) expect(line).not.toContain(TOKEN);
+    fireEvent.click(toggle);
+    expect(document.body).not.toHaveTextContent('api.you.com');
+  });
+
+  it('says what You.com is and who pays for it, in English', () => {
+    english(<AgentInvite {...inviteProps({ defaultOpen: true })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add You.com: web search for your Agent' }));
+    expect(screen.getByText('The free lines need no account: 100 searches a day, search only (no page reads).')).toBeInTheDocument();
+    expect(screen.getByText('A full line signs you in to your own You.com account, which pays for each call. AwwO takes no part of that money and never sees or keeps your You.com sign-in. What you send to You.com leaves AwwO.')).toBeInTheDocument();
+    expect(screen.getByText('Codex · full, it opens the sign-in at once (later: codex mcp login you)')).toBeInTheDocument();
+    expect(screen.getByText(/Codex may make them without asking.*set a spending limit at You\.com first/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open you.com (a third-party site) in a new tab' })).toHaveAttribute('href', 'https://you.com/');
+    // No Chinese in the English section (which must be there for this to mean anything).
+    const section = document.querySelector('.awwo-multiplayer-you');
+    expect(section).not.toBeNull();
+    expect(section!.textContent).not.toMatch(/[㐀-鿿]/);
   });
 });
 

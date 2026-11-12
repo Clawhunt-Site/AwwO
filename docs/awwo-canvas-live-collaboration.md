@@ -756,6 +756,49 @@ The home's composer recommends the same pairing when a request may need live dat
 apps/web/src/canvas/liveDataNeed.ts), and a canvas's Next card says so when its newest request may: see the
 CHANGELOG entry "treg for a person's own Agent".
 
+### Web search for a connected Agent: You.com
+
+Beside treg's, 邀请 Agent has a second disclosure, 加上 You.com：让 Agent 联网搜索, with the lines that add
+[You.com](https://you.com)'s hosted MCP server to the same Claude Code, Codex or Cursor. You.com is a third-party web
+search API. Its free profile, `https://api.you.com/mcp?profile=free`, answers searches with no account (100 a day by
+You.com's pricing page, api.you.com/plans, read 2026-11-12; search only: its tool list is `you-search` and
+`you-discover`); its full server, `https://api.you.com/mcp`, adds page reads (`you-contents`) and signs the person in to
+their own You.com account, which pays for each call. Codex has no free line (below) and Cursor no full one. The free
+lines come first:
+
+```
+claude mcp add --transport http you-free "https://api.you.com/mcp?profile=free"
+```
+
+```
+"you-free": { "url": "https://api.you.com/mcp?profile=free" }
+```
+
+```
+claude mcp add --transport http you https://api.you.com/mcp
+```
+
+```
+codex mcp add you --url https://api.you.com/mcp
+```
+
+The free line is quoted because zsh reads a bare `?` as a glob and refuses the line. Like treg's, the lines carry no
+key, AwwO only links to the hosted service and never sees or keeps a You.com sign-in, and the panel says that what is
+sent to You.com leaves AwwO and that public things only should go there.
+
+How the lines behave (checked on 2026-11-12 with Claude Code 2.1.238 and Codex 0.162.1, each in a throwaway config
+folder, no sign-in completed):
+- `claude mcp add` of the free profile connects at once (`claude mcp list`: Connected); the full server stays "Needs
+  authentication" until `/mcp` → you signs in.
+- The full server answers a call without credentials with 401 and `WWW-Authenticate: Bearer resource_metadata=…`; its
+  authorization server registers clients dynamically and takes PKCE (S256), so both CLIs can sign in.
+- `codex mcp add --url` starts You.com's sign-in at once for the free profile too ("Detected OAuth support"), and waits
+  for it, so the panel gives Codex the full line only.
+- You.com marks every tool read-only (`readOnlyHint: true`, `destructiveHint: false`), so Codex runs them without asking
+  (as it did for the canvas's read-only tools), and each call on a full line is billed: the panel says so and asks for a
+  spending limit at You.com first. Claude Code asks before any MCP tool unless the person allows it.
+- Cursor's line was not run (no Cursor here).
+
 ## The canvas page
 
 - **The people bar** in the canvas header: the participants' avatars in their colours (an Agent with an Agent mark),
