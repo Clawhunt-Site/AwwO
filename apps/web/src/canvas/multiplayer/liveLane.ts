@@ -163,8 +163,9 @@ export function createLiveLane(source: LaneSource, selfId: string, nodeBox: (id:
   let lastFrame = 0;
   let expiry: ReturnType<typeof setTimeout> | null = null;
   let holdTimer: ReturnType<typeof setTimeout> | null = null;
-  // Nodes this page's own gesture took over, with the edit that had them then (its participant and place; null once it
-  // had ended): that edit at that place is not drawn again; a new place, or anyone else's edit, is.
+  // Nodes this page's own gesture took over, with the edit that carried them (its participant and place; null when its
+  // page had said it ended): that edit at that place is not drawn again, however long its page was not heard before or
+  // since; a new place, an edit begun after its page said that one ended, or anyone else's edit, is.
   const released = new Map<string, LaneBox | null>();
   // When each page's screen last moved (its viewport changed): a followed person is shown by the page whose screen moved
   // last, never by one that only went quiet (a stream closing sends its page again, its old screen kept).
@@ -173,6 +174,11 @@ export function createLiveLane(source: LaneSource, selfId: string, nodeBox: (id:
   let shownBy: string | null = null;
   let stopped = false;
   const emit = () => { for (const listener of [...listeners]) listener(); };
+  /** Where a page's edit puts nodes as the page last said it, whether it was heard lately or not. */
+  const saidBy = (participants: readonly LiveParticipant[], pageId: string, now: number): Map<string, LaneBox> => {
+    const by = participants.find(participant => participant.id === pageId);
+    return by ? previewTargets([by], selfId, new Map([[pageId, now]]), now) : new Map();
+  };
   const publish = () => {
     const nextMoves = new Map<string, LaneBox>();
     for (const [id, item] of drawn) nextMoves.set(id, { ...item.box });
@@ -286,7 +292,20 @@ export function createLiveLane(source: LaneSource, selfId: string, nodeBox: (id:
         ...(sized && doc?.h !== undefined ? { h: doc.h } : {}), ...(target.color ? { color: target.color } : {}), ...(sized ? { resize: true as const } : {}) },
       speed: {}, target, last: target, endedAt: null });
     }
-    for (const id of [...released.keys()]) if (!targets.has(id)) released.delete(id);
+    // A take-over is forgotten once the edit it took the node from is over: its page says so, or is gone. A page only
+    // not heard for a while (a tab asleep, a link stalled) still says its edit: heard again at that place, it is the
+    // same edit, and the node stays this page's.
+    const said = new Map<string, Map<string, LaneBox>>();
+    for (const [id, taken] of [...released]) {
+      if (targets.has(id)) continue;
+      if (taken?.by !== undefined) {
+        // (Worked out once a read for each page.)
+        let boxes = said.get(taken.by);
+        if (!boxes) { boxes = saidBy(participants, taken.by, now); said.set(taken.by, boxes); }
+        if (sameBox(taken, boxes.get(id))) continue;
+      }
+      released.delete(id);
+    }
     for (const [id, item] of drawn) {
       if (!targets.has(id) && item.target !== null) {
         // An edit whose page went quiet ended at its last update (it is let go 2 s after that, not 2 s after it was
@@ -366,7 +385,12 @@ export function createLiveLane(source: LaneSource, selfId: string, nodeBox: (id:
       for (const id of ids) {
         const item = drawn.get(id);
         if (!item) continue;
-        released.set(id, item.target);
+        // The edit that carried it: the one in progress, or the one that put it where it glides home from when its
+        // page was only not heard for 2 s and still says it (see read). One its page said ended is no edit any more:
+        // whatever that page says next, at that place too, is a new one.
+        const last = item.last;
+        const quiet = last?.by !== undefined && sameBox(last, saidBy(source.snapshot().participants, last.by, Date.now()).get(id));
+        released.set(id, item.target ?? (quiet ? last : null));
         drawn.delete(id);
         changed = true;
       }

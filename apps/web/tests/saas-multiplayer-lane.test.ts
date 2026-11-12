@@ -347,6 +347,70 @@ describe('others’ edits in progress and editing marks', () => {
     lane.stop();
   });
 
+  it('keeps a take-over while the edit’s page is only quiet, and forgets it once the page says the edit ended', () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.setSystemTime(1_000_000);
+    const tick = frames();
+    const doc = new Map([['n1', { x: 0, y: 0, w: 260, h: 128 }]]);
+    const held = () => [page('a', 'u1', { state: state({ preview: { nodes: [{ id: 'n1', x: 100, y: 0 }] } }) })];
+    const feed = fakeSource(held());
+    const lane = createLiveLane(feed.source, 'self', id => doc.get(id) ?? null);
+    tick.step(150);
+    expect(lane.moves().get('n1')?.x).toBe(100);
+    lane.release(['n1']);
+    // Her page is not heard for more than 2 s (a tab asleep, a link stalled) and still says its edit: the lane looks
+    // again when the edit is stale, and the same place heard after that is the edit this page took the card from.
+    vi.advanceTimersByTime(PREVIEW_SHOWN_MS + 100);
+    tick.step(5);
+    expect(lane.moves().has('n1')).toBe(false);
+    feed.set(held());
+    tick.step(5);
+    expect(lane.moves().has('n1')).toBe(false);
+    // Quiet again, then heard at a new place: that is drawn.
+    vi.advanceTimersByTime(PREVIEW_SHOWN_MS + 100);
+    feed.set([page('a', 'u1', { state: state({ preview: { nodes: [{ id: 'n1', x: 140, y: 0 }] } }) })]);
+    tick.step(1);
+    expect(lane.moves().has('n1')).toBe(true);
+    // Taken over again; she says her edit ended, then starts one at that very place: a new edit, drawn.
+    lane.release(['n1']);
+    feed.set([page('a', 'u1')]);
+    tick.step(2);
+    expect(lane.moves().has('n1')).toBe(false);
+    feed.set([page('a', 'u1', { state: state({ preview: { nodes: [{ id: 'n1', x: 140, y: 0 }] } }) })]);
+    tick.step(1);
+    expect(lane.moves().has('n1')).toBe(true);
+    // She says that edit ended while its card waits for the change, this page takes the card over then, and she
+    // starts an edit at that very place before anything else is heard: a new edit, drawn.
+    tick.step(150);
+    feed.set([page('a', 'u1')]);
+    tick.step(2);
+    expect(lane.moves().has('n1')).toBe(true);
+    lane.release(['n1']);
+    feed.set([page('a', 'u1', { state: state({ preview: { nodes: [{ id: 'n1', x: 140, y: 0 }] } }) })]);
+    tick.step(1);
+    expect(lane.moves().has('n1')).toBe(true);
+    // Taken over once more; her page goes quiet, leaves, and comes back saying that place: a new edit too.
+    lane.release(['n1']);
+    vi.advanceTimersByTime(PREVIEW_SHOWN_MS + 100);
+    feed.set([]);
+    feed.set([page('a', 'u1', { state: state({ preview: { nodes: [{ id: 'n1', x: 140, y: 0 }] } }) })]);
+    tick.step(1);
+    expect(lane.moves().has('n1')).toBe(true);
+    tick.step(150);
+    expect(lane.moves().get('n1')?.x).toBe(140);
+    // Her page goes quiet first this time: her edit is stale, its card on its way home, when this page takes the card
+    // over. Heard again at that place, it is still the edit the card was taken from.
+    vi.advanceTimersByTime(PREVIEW_SHOWN_MS + 100);
+    tick.step(2);
+    expect(lane.moves().get('n1')?.x).toBeLessThan(140);
+    lane.release(['n1']);
+    feed.set([page('a', 'u1', { state: state({ preview: { nodes: [{ id: 'n1', x: 140, y: 0 }] } }) })]);
+    tick.step(5);
+    expect(lane.moves().has('n1')).toBe(false);
+    lane.stop();
+    vi.useRealTimers();
+  });
+
   it('lets a card go home 2 s after the last update of an edit whose page went quiet', () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     vi.setSystemTime(1_000_000);
