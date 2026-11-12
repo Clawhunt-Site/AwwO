@@ -67,6 +67,16 @@ describe('the plan button on a canvas page', () => {
     expect(button()!.getAttribute('aria-label')).toMatch(/^这个工作区的套餐 Max（由所有者订阅）.*查看我自己的套餐$/);
   });
 
+  it('shows a reader the level alone: the server sends a reader no plan, only its level', async () => {
+    server(() => ({ limited: true, interested: false, daily: { limit: 300, used: 0 }, planLevel: 'ultra' }));
+    dock({ ...identity, tenants: [{ ...tenant, role: 'reader' }] });
+    await waitFor(() => expect(button()?.querySelector('.saas-plan-dock-badge')).toHaveTextContent('Ultra'));
+    expect(button()).toHaveAttribute('data-plan-dock', 'ultra');
+    expect(button()!.querySelector('.saas-plan-dock-credits')).toBeNull();
+    expect(button()).toHaveAccessibleName('这个工作区的套餐 Ultra（由所有者订阅）。查看我自己的套餐');
+    expect(button()).toHaveAttribute('href', expect.stringContaining('account=plans'));
+  });
+
   it('offers the plans where the workspace is on none, and says its person would pay when pressed', async () => {
     const calls = server(() => trial);
     dock();
@@ -138,6 +148,12 @@ describe('where there is no plan button', () => {
     await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
     expect(button()).toBeNull();
     third.unmount();
+    // A level that is no plan's (a newer server's) draws nothing.
+    server(() => ({ ...trial, freePlan: undefined, planLevel: 'mega' }));
+    const odd = dock({ ...identity, tenants: [{ ...tenant, role: 'reader' }] });
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
+    expect(button()).toBeNull();
+    odd.unmount();
     const local = server(() => paid('pro', 2000, 2000));
     dock({ ...identity, edition: 'local' } as Identity);
     await waitFor(() => expect(local).toHaveLength(0));

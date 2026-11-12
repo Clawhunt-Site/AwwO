@@ -40,6 +40,8 @@ export function InviteAcceptance({ token, identity, controls, navigate = url => 
     revoked: t('邀请已撤销，请联系管理员。', 'This invitation has been revoked. Contact an administrator.'),
     unavailable: t('邀请创建者已无权授予此角色，请联系工作区所有者。', 'The inviter can no longer grant this role. Contact the workspace owner.'),
     suspended: t('工作区已暂停，暂时不能加入。', 'This workspace is suspended and cannot be joined.'),
+    // The free trial's end has the workspace closed (invitations.go previewInvite): nobody joins until its owner subscribes.
+    closed: t('这个工作区的免费试用已结束，所有者订阅 Pro、Max 或 Ultra 后才能加入。邀请在有效期内仍然可用。', 'This workspace’s free trial has ended: it can be joined once its owner subscribes to Pro, Max or Ultra. The invitation stays good until it expires.'),
     accepted: t('链接已被领取。若由当前账号领取，可确认查看原有成员身份。', 'This link has been claimed. If you claimed it, confirm to return to your membership.'),
   }[status] || '');
   const errorText = error instanceof SaaSApiError ? ({
@@ -48,13 +50,14 @@ export function InviteAcceptance({ token, identity, controls, navigate = url => 
     invite_wrong_account: t('这个邀请是发给另一个邮箱的：请用收到邀请的那个邮箱的账号登录，再打开链接。', 'This invitation was sent to another email: sign in with the account of the email it was sent to, then open the link again.'),
     not_found: t('找不到此邀请，请核对链接。', 'Invitation not found. Check the link.'),
     invite_expired: reason('expired'), invite_revoked: reason('revoked'), invite_unavailable: reason('unavailable'), tenant_suspended: reason('suspended'),
+    free_plan_ended: reason('closed'),
   }[error.code] || error.message) : error instanceof Error ? error.message : t('邀请暂时无法读取。', 'The invitation could not be loaded.');
   const roleLabel = (role: string) => ({ reader: t('只读成员', 'Reader'), member: t('成员', 'Member'), admin: t('管理员', 'Administrator'), owner: t('所有者', 'Owner') }[role] || role);
   // A bound invitation for another email: while it waits for its person it says whose it is and is not offered to this
   // account. One already taken is offered, as the server lets the account that took it confirm again (invitations.go
   // acceptInvite, which asks no email of it) and tells any other account it is used.
   const otherEmail = preview?.email !== undefined && preview.emailMatches === false;
-  const otherAccount = otherEmail && preview?.status === 'active';
+  const otherAccount = otherEmail && (preview?.status === 'active' || preview?.status === 'closed');
   const opensCanvas = Boolean(preview?.canvasId && preview.canvasName);
   return <main className="saas-dashboard"><header><a href="/" className="saas-logo">AwwO</a>{controls}</header><section className="saas-page-intro"><h1>{t('加入工作区', 'Join a workspace')}</h1><p>{t(`当前账号：${identity.user.email}`, `Signed in as ${identity.user.email}`)}</p></section>
     <section className="saas-card saas-invite-acceptance">
@@ -69,7 +72,7 @@ export function InviteAcceptance({ token, identity, controls, navigate = url => 
           : otherEmail ? t(`这个邀请是发给 ${preview.email} 的。`, `This invitation was sent to ${preview.email}.`)
             : t(`这个邀请是发给你的邮箱（${preview.email}）的。`, `This invitation was sent to your email (${preview.email}).`)}</p>}
         {reason(preview.status) && <p role="status">{reason(preview.status)}</p>}
-        <p>{t('确认后将加入此工作区，能打开其中所有画布。已有成员身份会保留原角色，不会因链接自动提权。', 'Confirm to join this workspace and open all its canvases. Existing members keep their current role; this link will not automatically elevate it.')}</p>
+        {preview.status !== 'closed' && <p>{t('确认后将加入此工作区，能打开其中所有画布。已有成员身份会保留原角色，不会因链接自动提权。', 'Confirm to join this workspace and open all its canvases. Existing members keep their current role; this link will not automatically elevate it.')}</p>}
         <button className="saas-primary" disabled={busy || otherAccount || !['active', 'accepted'].includes(preview.status)} onClick={async () => {
           setBusy(true); setError(null);
           try {

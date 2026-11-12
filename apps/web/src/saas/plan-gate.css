@@ -6,6 +6,12 @@
 .saas-plan-wall-intro p { margin: 0 0 6px; }
 .saas-plan-wall-who { color: var(--saas-subtle); font-size: var(--saas-text-sm); }
 .saas-plan-wall-plans { max-width: 1120px; padding-bottom: 96px; }
+/* The account's own actions, closed until asked for: a quiet line under the plans. */
+.saas-plan-wall-account { margin-top: 28px; color: var(--saas-subtle); font-size: var(--saas-text-sm); }
+.saas-plan-wall-account > summary { width: fit-content; padding: 6px 0; cursor: pointer; }
+.saas-plan-wall-account > summary:focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 3px; border-radius: 4px; }
+.saas-plan-wall-account[open] > summary { margin-bottom: 12px; }
+.saas-plan-wall-account .saas-settings-stack { color: var(--saas-text); font-size: var(--saas-text-md); }
 .saas-plan-wall-actions { display: flex; align-items: center; gap: 10px; }
 .saas-plan-wall-actions button { display: inline-flex; align-items: center; gap: 6px; }
 .saas-plan-wall-wait { min-height: 60dvh; }

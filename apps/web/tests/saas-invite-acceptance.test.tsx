@@ -69,6 +69,30 @@ describe('accepting an invitation', () => {
     expect(screen.getByRole('button', { name: '重新读取邀请' })).toBeInTheDocument();
   });
 
+  it('says a workspace whose free trial has ended takes nobody in, and offers no joining', async () => {
+    const fetch = serve(preview({ status: 'closed' }), () => json({ tenantId: 'tenant-team', role: 'member' }));
+    show();
+    expect(await screen.findByText('这个工作区的免费试用已结束，所有者订阅 Pro、Max 或 Ultra 后才能加入。邀请在有效期内仍然可用。')).toBeVisible();
+    expect(screen.getByRole('button', { name: '确认加入' })).toBeDisabled();
+    expect(screen.queryByText(/确认后将加入此工作区/)).toBeNull();
+    expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/accept'))).toBe(false);
+  });
+
+  it('still tells another account whose a bound invitation into a closed workspace is', async () => {
+    serve(preview({ status: 'closed', email: 'c***@example.test', emailMatches: false }), () => json({ tenantId: 'tenant-team', role: 'member' }));
+    show();
+    expect(await screen.findByRole('alert')).toHaveTextContent('这个邀请是发给 c***@example.test 的，不是当前账号');
+    expect(screen.getByRole('button', { name: '确认加入' })).toBeDisabled();
+  });
+
+  it('says the same where the server refuses the joining itself (the workspace closed meanwhile)', async () => {
+    serve(preview(), () => json({ error: { code: 'free_plan_ended', message: 'The free trial has ended' } }, 402));
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: '确认加入' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('这个工作区的免费试用已结束，所有者订阅 Pro、Max 或 Ultra 后才能加入。');
+    expect(screen.queryByRole('heading', { name: '已加入工作区' })).toBeNull();
+  });
+
   it('offers an invitation already taken to confirm again, as the server lets the account that took it', async () => {
     serve(preview({ status: 'accepted', email: 'c***@example.test', emailMatches: false }), () => json({ tenantId: 'tenant-team', role: 'member' }));
     show();

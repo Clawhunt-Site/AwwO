@@ -15,6 +15,8 @@ import { signOut } from './signOut';
 import './plan-gate.css';
 
 const PlansPage = lazy(() => import('./PlansPage').then(module => ({ default: module.PlansPage })));
+// The account's own actions (settings/data.tsx): read only once their section is opened, so the wall asks for nothing more.
+const WallAccountData = lazy(() => import('./settings/data').then(module => ({ default: module.WallAccountData })));
 
 /** The workspace a page is about: the address's, else the first active one (the same pick for every page of the app). */
 export function shownTenant(identity: Identity, search: string = window.location.search): Tenant | undefined {
@@ -107,6 +109,7 @@ export function PlanGate({ identity, children }: { identity: Identity; children:
 function PlanWall({ identity, tenant }: { identity: Identity; tenant: Tenant }) {
   const { t } = useSaaSPreferences();
   const [failure, setFailure] = useState('');
+  const [account, setAccount] = useState(false);
   const owner = tenant.role === 'owner';
   const who = identity.user.email || identity.user.name;
   return <main className="saas-dashboard saas-plan-wall" data-plan-wall>
@@ -137,6 +140,15 @@ function PlanWall({ identity, tenant }: { identity: Identity; tenant: Tenant }) 
       <Suspense fallback={<section className="saas-card saas-plans-note" role="status">{t('正在读取套餐…', 'Loading plans…')}</section>}>
         <PlansPage identity={identity} keepReturn />
       </Suspense>
+      {/* The settings are not reachable here, so what is the account's own stays within reach: its export, a deletion
+          request and, for a member, leaving. Drawn (and asked for) only once opened. */}
+      <details className="saas-plan-wall-account" onToggle={event => { if (event.currentTarget.open) setAccount(true); }}>
+        <summary>{owner ? t('账号与数据：导出数据、申请删除账号', 'Account and data: export your data, ask for your account to be deleted')
+          : t('账号与数据：导出数据、退出这个工作区、申请删除账号', 'Account and data: export your data, leave this workspace, ask for your account to be deleted')}</summary>
+        {account && <Suspense fallback={<p role="status">{t('正在读取…', 'Loading…')}</p>}>
+          <WallAccountData identity={identity} tenant={tenant} />
+        </Suspense>}
+      </details>
     </div>
   </main>;
 }

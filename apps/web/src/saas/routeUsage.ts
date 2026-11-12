@@ -32,6 +32,8 @@ export type RouteUsage = { limited: boolean; daily: RouteAllowance; routes?: Par
    *  (AWWO_FREE_PLAN_UNTIL): from `until` on (ended), nothing in it that calls a model or makes media starts until its
    *  owner subscribes (402 free_plan_ended). Absent where the free plan does not end, and from a server older than it. */
   freePlan?: FreePlanView;
+  /** The owner's plan level, sent to a reader in place of the plan (no credits, no dates). */
+  planLevel?: PlanId;
   /** Set for a member who may run things, while check-ins are offered to this workspace. */
   checkin?: CheckinState };
 

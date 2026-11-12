@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Crown } from 'lucide-react';
 import type { Identity } from './api';
-import { formatCredits, planName } from './billing';
+import { formatCredits, isPlanId, planName } from './billing';
 import { useLauncherPlacement } from './feedbackPlacement';
 import { planView } from './home/accountPlan';
 import { accountURL } from './PersonalAccount';
@@ -62,10 +62,21 @@ export function PlanDock({ identity }: { identity: Identity }) {
   const button = useRef<HTMLAnchorElement>(null);
   const { place, covered } = useLauncherPlacement(button, true);
   const view = off || !tenant ? null : planView(usage, tenant.role);
+  // A reader is sent the plan's level alone (route-usage planLevel): the badge, with no credits.
+  const level = !off && tenant && usage && !usage.plan && isPlanId(usage.planLevel) ? usage.planLevel : null;
   // Nothing to say: an unlimited workspace, no answer yet, or a reader of a workspace on no plan (offered nothing).
-  if (!view || (view.standing !== 'paid' && !view.call)) return null;
+  if (!level && (!view || (view.standing !== 'paid' && !view.call))) return null;
   const style = place ? { '--plan-dock-left': `${place.left}px`, '--plan-dock-bottom': `${place.bottom}px` } as CSSProperties : undefined;
   const hidden = place === null || covered;
+  if (level) {
+    const name = planName(level);
+    const label = t(`这个工作区的套餐 ${name}（由所有者订阅）。查看我自己的套餐`, `This workspace’s plan: ${name} (its owner’s). See my own plans`);
+    return <a ref={button} className={`saas-plan-dock is-paid is-${level}`} style={style} data-hidden={hidden ? '' : undefined}
+      data-feedback-avoid="beside" data-plan-dock={level} href={accountURL('plans')} aria-label={label} title={label}>
+      <span className="saas-plan-dock-badge"><Crown size={13} aria-hidden="true" />{name}</span>
+    </a>;
+  }
+  if (!view) return null;
   if (view.standing === 'paid') {
     const name = planName(view.plan);
     const left = view.credits ? t(`剩 ${formatCredits(view.credits.remaining, locale)} 点`, `${formatCredits(view.credits.remaining, locale)} credits left`) : '';

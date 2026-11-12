@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
-import { api, API_BASE, SaaSApiError, saasErrorMessage, type Identity } from '../api';
+import { api, API_BASE, SaaSApiError, saasErrorMessage, type Identity, type Tenant } from '../api';
 import { isLocalEdition } from '../edition';
 import { accountURL } from '../PersonalAccount';
 import { useSaaSPreferences } from '../preferences';
 import { SettingsCard, SettingsIntro } from './general';
 import { ImportCard } from './importCard';
 import { LearningCard } from './learning';
+import './settings-center.css';
 
 // A handled request belongs to an account the operator deleted, so a signed-in person never reads one.
 type DeletionStatus = 'pending' | 'withdrawn' | 'declined';
@@ -129,6 +130,46 @@ function LocalDeletionCard() {
     description={t('AwwO 本地版的账号和数据只保存在这台电脑上，不需要申请删除。要全部删除：先停止 AwwO 本地版，再删除它的数据目录。删除后无法恢复。要留一份，先停止 AwwO 本地版，再复制整个数据目录：上面导出的 JSON 只有设置、工作区和画布，不含生成与上传的文件、运行记录和已保存的 Key。', 'AwwO Local keeps its account and data on this computer only, so there is no deletion request. To delete everything, stop AwwO Local, then delete its data folder. It cannot be restored. To keep a copy, stop AwwO Local and copy the whole data folder: the JSON export above holds only settings, workspaces and canvases, not generated or uploaded files, run records or saved keys.')}>
     <a href={accountURL('local')}>{t('在「本机」查看数据目录', 'See the data folder in This computer')}</a>
   </SettingsCard>;
+}
+
+/** Leaving a workspace one was invited to (POST …/leave: the account's own route, open while the workspace is closed).
+ *  Asked twice; once left, the page opens the account's first workspace. */
+function LeaveWorkspaceCard({ tenant, leave = () => window.location.assign('/') }: { tenant: Tenant; leave?: () => void }) {
+  const { t, locale } = useSaaSPreferences();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  return <SettingsCard title={t('退出这个工作区', 'Leave this workspace')}
+    description={t(`退出「${tenant.name}」后，你不再是它的成员；你在里面做的画布和运行留在工作区。要再加入，需要所有者重新邀请。`,
+      `Once you leave “${tenant.name}” you are no longer a member; the canvases and runs you made stay in the workspace. To join again, its owner has to invite you.`)}>
+    {error !== null && <p role="alert" className="saas-error">{saasErrorMessage(error, locale)}</p>}
+    {!confirming ? <button type="button" onClick={() => setConfirming(true)}>{t('退出工作区', 'Leave workspace')}</button>
+      : <div className="saas-connection-actions">
+        <button type="button" disabled={busy} onClick={() => setConfirming(false)}>{t('取消', 'Cancel')}</button>
+        <button type="button" className="saas-danger-button" disabled={busy} onClick={async () => {
+          setBusy(true); setError(null);
+          try { await api(`/tenants/${encodeURIComponent(tenant.id)}/leave`, { method: 'POST' }); leave(); }
+          catch (cause) { setError(cause); setBusy(false); }
+        }}>{busy ? t('请稍候…', 'Please wait…') : t('确认退出', 'Leave')}</button>
+      </div>}
+  </SettingsCard>;
+}
+
+/** The account's own actions, for the page of a workspace the free trial's end has closed (PlanGate.tsx), where the
+ *  settings are not reachable: the export (it carries no canvas of a closed workspace: the server leaves them out), a
+ *  deletion request, and, for anyone but the owner, leaving the workspace. None of them asks the closed workspace for
+ *  anything but the leaving itself. */
+export function WallAccountData({ identity, tenant, leave }: { identity: Identity; tenant: Tenant; leave?: () => void }) {
+  const { t } = useSaaSPreferences();
+  return <div className="saas-settings-stack">
+    <SettingsCard title={t('导出我的数据', 'Export my data')}
+      description={t('下载一个 JSON 文件：账号资料、设置、配色、所在的工作区，以及仍在使用中的工作区里的画布。试用已结束的工作区里的画布不在其中，订阅后才能导出。每小时最多导出 6 次。',
+        'Downloads one JSON file: your profile, settings, colour scheme, the workspaces you belong to, and the canvases of those still in use. The canvases of a workspace whose trial has ended are not in it: they can be exported once it is subscribed. At most six exports an hour.')}>
+      <ExportButton />
+    </SettingsCard>
+    {tenant.role !== 'owner' && <LeaveWorkspaceCard tenant={tenant} leave={leave} />}
+    <DeletionRequestCard identity={identity} />
+  </div>;
 }
 
 export function DataSettings({ identity }: { identity: Identity }) {

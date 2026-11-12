@@ -3,9 +3,10 @@
 // answer before anything else is drawn; where that says the trial has ended the page is the plans and nothing else,
 // and the moment a plan lands it is the app again.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { PlanGate, gateSkipped, shownTenant, LOCKED_POLL_MS } from '../src/saas/PlanGate';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
+import { WallAccountData } from '../src/saas/settings/data';
 import { ROUTE_USAGE_CHANGED } from '../src/saas/routeUsage';
 import type { Identity, Tenant } from '../src/saas/api';
 
@@ -25,11 +26,13 @@ const open = { limited: false, interested: false, daily: { limit: 300, used: 0 }
 /** The server: `usage()` answers GET route-usage each time it is asked (a Response, or a value to send as JSON). */
 function server(usage: () => unknown) {
   const calls: string[] = [];
-  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+  vi.stubGlobal('fetch', vi.fn(async (input: string, init: RequestInit = {}) => {
     const url = new URL(input, 'http://localhost');
-    calls.push(url.pathname);
+    calls.push((init.method && init.method !== 'GET' ? init.method + ' ' : '') + url.pathname);
     if (url.pathname.endsWith('/route-usage')) { const answer = usage(); return answer instanceof Response ? answer : json(answer); }
     if (url.pathname.endsWith('/billing')) return json(billing);
+    if (url.pathname.endsWith('/auth/deletion-request')) return json({ request: null });
+    if (url.pathname.endsWith('/leave')) return new Response(null, { status: 204 });
     return json({ items: [] });
   }));
   return calls;
@@ -174,6 +177,57 @@ describe('a workspace the trial’s end has closed', () => {
     await screen.findByRole('heading', { level: 1, name: '免费试用已结束，订阅后继续使用 AwwO' });
     expect(screen.getByRole('option', { name: 'Team B（已暂停）' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Team A' })).toBeInTheDocument();
+  });
+});
+
+describe('the account’s own actions on the closed workspace’s page', () => {
+  const heading = { level: 1, name: '免费试用已结束，订阅后继续使用 AwwO' } as const;
+
+  it('are closed until asked for, and ask for nothing until then', async () => {
+    const calls = server(() => ended);
+    gate();
+    await screen.findByRole('heading', heading);
+    const summary = screen.getByText('账号与数据：导出数据、申请删除账号');
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+    expect(screen.queryByRole('button', { name: '下载 JSON' })).toBeNull();
+    expect(calls.some(path => path.endsWith('/auth/deletion-request'))).toBe(false);
+    // Opened: the export and the deletion request, the account's own; the owner is offered no leaving.
+    const details = summary.closest('details')!;
+    details.open = true;
+    fireEvent(details, new Event('toggle'));
+    expect(await screen.findByRole('button', { name: '下载 JSON' })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: '申请删除账号' })).toBeEnabled();
+    expect(screen.getByText(/试用已结束的工作区里的画布不在其中，订阅后才能导出/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: '退出工作区' })).toBeNull();
+    // Nothing of the closed workspace was asked for: its usage answer alone.
+    expect(calls.filter(path => path.includes('/tenants/')).every(path => path.endsWith('/route-usage'))).toBe(true);
+  });
+
+  it('let a member leave the workspace, asked twice, by the account’s own route', async () => {
+    const calls = server(() => ended);
+    const left = vi.fn();
+    render(<SaaSPreferencesProvider><WallAccountData identity={{ ...identity, tenants: [tenant, other] }} tenant={other} leave={left} /></SaaSPreferencesProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: '退出工作区' }));
+    expect(calls.some(path => path.endsWith('/leave'))).toBe(false);
+    // Cancelled: nothing sent. Asked again and confirmed: the one POST, then the page moves on.
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    fireEvent.click(screen.getByRole('button', { name: '退出工作区' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认退出' }));
+    await waitFor(() => expect(left).toHaveBeenCalledTimes(1));
+    expect(calls.filter(path => path.startsWith('POST '))).toEqual(['POST /api/v1/tenants/team-b/leave']);
+  });
+
+  it('say why where leaving is refused, and stay', async () => {
+    server(() => ended);
+    vi.mocked(fetch).mockImplementation(async (input: string | URL | Request) => String(input).endsWith('/leave')
+      ? json({ error: { code: 'owner_cannot_leave', message: 'The owner cannot leave' } }, 409) : json({ request: null }));
+    const left = vi.fn();
+    render(<SaaSPreferencesProvider><WallAccountData identity={identity} tenant={other} leave={left} /></SaaSPreferencesProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: '退出工作区' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认退出' }));
+    expect(await screen.findByRole('alert')).toBeVisible();
+    expect(left).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '确认退出' })).toBeEnabled();
   });
 });
 
