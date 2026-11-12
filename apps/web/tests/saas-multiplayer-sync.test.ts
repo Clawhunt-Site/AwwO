@@ -197,6 +197,70 @@ describe('the rebase a page applies', () => {
     expect(unsentOps(readableConfirmed(after), undone)).toEqual([set(['nodes', 'a', 'title'], 'Plan')]);
   });
 
+  it('keeps such an undo though someone else’s change of that field reached the server just before the save', () => {
+    const before = base();
+    const sent = [set(['nodes', 'a', 'title'], 'Mine')];
+    // Someone else's title and place for a reached the server first; this page's save went over the title.
+    const changes = [change(3, [set(['nodes', 'a', 'title'], 'Theirs'), set(['nodes', 'a', 'x'], 55)]), mine(4, sent)];
+    const after = advanceConfirmed({ version: 2, document: before }, changes).next.document;
+    expect(title(after as CanvasDocument, 'a')).toBe('Mine');
+    const rebase = rebaseFor({ before, after, changes, sent, own });
+    // The person pressed undo before the answer came (or put the old title back by hand): the page holds the title
+    // from before both changes. It is the page's newer edit, not a field never touched: their title, which the
+    // save had gone over at the server already, does not come onto it. Their place, which the page never sent, does.
+    const undone = rebase.working(before);
+    expect(title(undone, 'a')).toBe('Plan');
+    expect(undone.nodes.find(node => node.id === 'a')?.x).toBe(55);
+    expect(unsentOps(readableConfirmed(after), undone)).toEqual([set(['nodes', 'a', 'title'], 'Plan')]);
+    // A page that left the title as it sent it holds what the server holds.
+    const kept = rebase.working(applyOps(before, sent).doc);
+    expect(diffDocuments(readableConfirmed(after), kept)).toEqual([]);
+    // The undo steps take their title as before (an undo after the answer goes by multiplayer/history.ts).
+    expect(title(rebase.history(before), 'a')).toBe('Theirs');
+    // Their change after the page's own still reaches a title the page has not changed since, and not one it has.
+    const later = [mine(3, sent), change(4, [set(['nodes', 'a', 'title'], 'Theirs later')])];
+    const afterLater = advanceConfirmed({ version: 2, document: before }, later).next.document;
+    const rebaseLater = rebaseFor({ before, after: afterLater, changes: later, sent, own });
+    expect(title(rebaseLater.working(applyOps(before, sent).doc), 'a')).toBe('Theirs later');
+    expect(title(rebaseLater.working(before), 'a')).toBe('Plan');
+  });
+
+  it('lets someone else’s later change into a node this page made and has moved since, and their earlier conversations back over ones it set whole', () => {
+    const before = base();
+    // A new node, moved again while its save was out; someone renames it after the save.
+    const made: CanvasOp[] = [set(['nodes', 'c'], session('c', 'New', { x: 800 }))];
+    const changes = [mine(3, made), change(4, [set(['nodes', 'c', 'title'], 'Renamed')])];
+    const after = advanceConfirmed({ version: 2, document: before }, changes).next.document;
+    const moved = applyOps(applyOps(before, made).doc, [set(['nodes', 'c', 'x'], 900)]).doc;
+    const next = rebaseFor({ before, after, changes, sent: made, own }).working(moved);
+    expect(title(next, 'c')).toBe('Renamed');
+    expect(next.nodes.find(node => node.id === 'c')?.x).toBe(900);
+    // Conversations this page set whole and has put back as they were (a draft typed, then cleared): someone else's,
+    // which the save went over, come back rather than be lost.
+    const thread = getNodeThreads(before.nodes[0] as SessionNode)[0];
+    const sent = [set(['nodes', 'a', 'threads'], [{ ...thread, draft: 'My draft' }])];
+    const lists = [change(3, [set(['nodes', 'a', 'threads'], [{ ...thread, draft: 'Their draft' }])]), mine(4, sent)];
+    const afterLists = advanceConfirmed({ version: 2, document: before }, lists).next.document;
+    const back = rebaseFor({ before, after: afterLists, changes: lists, sent, own }).working(before);
+    expect((back.nodes[0] as SessionNode).threads?.[0]?.draft).toBe('Their draft');
+    // A list of choices (a node's skills) is a field like any other: put back, it stays as this page has it.
+    const chosen = [set(['nodes', 'a', 'skills'], ['builtin:mine'])];
+    const choices = [change(3, [set(['nodes', 'a', 'skills'], ['builtin:theirs'])]), mine(4, chosen)];
+    const afterChoices = advanceConfirmed({ version: 2, document: before }, choices).next.document;
+    const unchosen = rebaseFor({ before, after: afterChoices, changes: choices, sent: chosen, own }).working(before);
+    expect((unchosen.nodes[0] as { skills?: string[] }).skills).toBeUndefined();
+  });
+
+  it('brings a deleted node back with what someone else made of it before the deletion, when the deletion is undone while its save is out', () => {
+    const before = base();
+    const sent: CanvasOp[] = [{ op: 'del', path: ['nodes', 'b'] }];
+    const changes = [change(3, [set(['nodes', 'b', 'title'], 'Their B')]), mine(4, sent)];
+    const after = advanceConfirmed({ version: 2, document: before }, changes).next.document;
+    // The page deleted b, sent that, and undid it before the answer: it holds b again, as it was.
+    const undone = rebaseFor({ before, after, changes, sent, own }).working(before);
+    expect(title(undone, 'b')).toBe('Their B');
+  });
+
   it('carries others’ changes on either side of its own, and not its own', () => {
     const before = base();
     const sent = [set(['nodes', 'a', 'title'], 'Mine')];

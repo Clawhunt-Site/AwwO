@@ -5,7 +5,7 @@
 
 import { keepAgentWritten, keepCurrentAgentWritten } from '../canvas/agentPages';
 import { sanitizeDocument, type CanvasDocument } from '../canvas/canvasDoc';
-import { applyOps, CanvasOpError, diffDocuments, othersOps, rebaseAfterAck, rebaseWorking, sameValue } from '../canvas/multiplayer/changes';
+import { applyOps, CanvasOpError, diffDocuments, othersOps, rebaseAfterAck, rebaseWorking, sameValue, valueAt } from '../canvas/multiplayer/changes';
 import { getNodeThreads } from '../canvas/nodeThreads';
 import type { CanvasChange, CanvasOp, OpResult } from '../canvas/multiplayer/types';
 
@@ -135,17 +135,21 @@ export interface ConfirmedMove {
  * stay. The page's own change is never carried: its working document already holds it, and its undo and redo steps keep
  * what they held, so an undo after a save still takes the save's edit back. The working document also takes the
  * server's answer to that change: each path it sent takes the server's value unless the page changed it again since
- * (an undo pressed while the save was out stays, unsent).
+ * (an undo pressed while the save was out stays, unsent). Such a field is the page's whatever it holds now: someone
+ * else's change of it that reached the server before the page's own went over it is not carried onto it either, though
+ * the page's value there is the one from before both (the undo's), which would otherwise read as never edited. (A list
+ * of records set whole, or a record deleted and brought back, still takes theirs: none is lost by a coincidence.)
  */
 export function rebaseFor({ before, after, changes = [], sent = [], own = () => false }: ConfirmedMove): CanvasRebase {
   // Others' parts of the move, each from one confirmed document to another: a change of the page's own between two of
   // them ends one and starts the next, so its effect is carried by neither.
-  const steps: { from: CanvasDocument; to: CanvasDocument; moved: CanvasOp[] }[] = [];
-  const step = (from: unknown, to: unknown, mine: readonly CanvasOp[] = []) => {
+  // `beforeOwn`: the page's own change came after it, over whatever it did at the paths the page sent.
+  const steps: { from: CanvasDocument; to: CanvasDocument; moved: CanvasOp[]; beforeOwn: boolean }[] = [];
+  const step = (from: unknown, to: unknown, mine: readonly CanvasOp[] = [], beforeOwn = false) => {
     const fromRead = readableConfirmed(from), toRead = readableConfirmed(to);
     const all = diffDocuments(fromRead as unknown as Record<string, unknown>, toRead as unknown as Record<string, unknown>);
     const moved = mine.length ? othersOps(all, fromRead, toRead, mine) : all;
-    if (moved.length) steps.push({ from: fromRead, to: toRead, moved });
+    if (moved.length) steps.push({ from: fromRead, to: toRead, moved, beforeOwn });
   };
   if (changes.length) {
     let raw = before as Record<string, unknown>;
@@ -153,7 +157,7 @@ export function rebaseFor({ before, after, changes = [], sent = [], own = () => 
     for (const change of changes) {
       const next = applyOps(raw, change.ops).doc;
       if (own(change)) {
-        if (start) step(start, raw);
+        if (start) step(start, raw, [], true);
         start = null;
       } else if (!start) start = raw;
       raw = next;
@@ -168,9 +172,16 @@ export function rebaseFor({ before, after, changes = [], sent = [], own = () => 
   const beforeRead = readableConfirmed(before);
   const carry = (doc: CanvasDocument, ack: boolean): CanvasDocument => {
     let next = withoutThreadsAsRead(doc, beforeRead) as unknown as Record<string, unknown>;
+    // The fields the page set in its change and has changed again since (as rebaseAfterAck reads it): they are the
+    // page's. Not a record it deleted and has brought back, which takes what others made of it meanwhile; nor a list
+    // of records it set whole (a node's conversations), where someone else's comes back rather than be lost.
+    const records = (value: unknown) => Array.isArray(value) && value.some(item => typeof item === 'object' && item !== null);
+    const again = ack ? sent.filter(op => op.op === 'set' && op.value !== undefined && !records(op.value)
+      && !sameValue(valueAt(next, op.path), op.value)).map(op => op.path) : [];
     if (ack && sent.length) next = rebaseAfterAck(next, sent, afterRead as unknown as Record<string, unknown>) as Record<string, unknown>;
-    for (const { from, to, moved } of steps) {
-      next = rebaseWorking(next, from as unknown as Record<string, unknown>, to as unknown as Record<string, unknown>, moved) as Record<string, unknown>;
+    for (const { from, to, moved, beforeOwn } of steps) {
+      const ops = beforeOwn && again.length ? moved.filter(op => op.op === 'order' || !again.some(path => path.length <= op.path.length && path.every((part, i) => part === op.path[i]))) : moved;
+      if (ops.length) next = rebaseWorking(next, from as unknown as Record<string, unknown>, to as unknown as Record<string, unknown>, ops) as Record<string, unknown>;
     }
     // Every fingerprint the server keeps of what invited Agents wrote comes onto the page's documents, its own change's
     // included, which is never carried (agentPages.ts): only the server writes them, so none is the page's to keep out.
