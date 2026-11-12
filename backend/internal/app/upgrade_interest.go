@@ -97,7 +97,8 @@ func (a *App) routeUsageWithStored(ctx context.Context, tid, uid string) (routeA
 // limits reports limited:false and only its daily allowance; one whose owner has a paid plan reports the
 // plan and this period's credits instead of routes. The credits are the account's, shared by everyone who
 // runs things in its workspaces; the renewal date and a pending cancellation are shown to the owner alone,
-// and a reader, who runs nothing, is not shown the plan. While a promotion raises the workspace (promo.go) it
+// and a reader, who runs nothing, is not shown the plan: only its level (planLevel: pro, max or ultra), in a field of
+// its own so that a page reading plan still finds credits there or no plan. While a promotion raises the workspace (promo.go) it
 // reports the promotion's floors (promo) and, to a member who may run things, today's check-in (checkin). Where the
 // free plan ends (free_plan.go) a workspace the end holds reports when and whether it has (freePlan), to everyone.
 func (a *App) routeUsageView(w http.ResponseWriter, r *http.Request) {
@@ -120,13 +121,20 @@ func (a *App) routeUsageView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	member := roleLevel(role) >= 2
+	level := ""
 	if !member {
+		if plan != nil {
+			level = plan.Plan
+		}
 		plan = nil
 	}
 	out := map[string]any{"limited": routes != nil, "daily": daily, "interested": interested,
 		"resetsAt": time.Now().UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)}
 	if freePlan != nil {
 		out["freePlan"] = freePlan
+	}
+	if level != "" {
+		out["planLevel"] = level
 	}
 	if routes != nil {
 		limits := readRouteLimits(stored.routes)

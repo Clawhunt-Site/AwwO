@@ -89,6 +89,18 @@ func TestPostgresFreePlanEndLocksTheWorkspaceWhole(t *testing.T) {
 	if got := exportedCanvases(t, h, lt.member); got[lt.tid] != 1 {
 		t.Fatal("a member's export before the end", got)
 	}
+	// An invitation sent from the canvas before the end, to someone who has not answered it yet.
+	guest, _, _ := h.register(t, "lock-guest@example.test")
+	invite := h.request(t, lt.owner, "POST", base+"/invites", map[string]any{"role": "member", "canvasId": lt.cid}, 201)["token"].(string)
+	if open := h.request(t, guest, "GET", "/invites/"+invite, nil, 200); open["status"] != "active" || open["canvasName"] != "Live" {
+		t.Fatal("the invitation before the end", open)
+	}
+	// And one the member answered before the end (already a member: it joins nothing).
+	taken := h.request(t, lt.owner, "POST", base+"/invites", map[string]any{"role": "member", "canvasId": lt.cid}, 201)["token"].(string)
+	h.request(t, lt.member, "POST", "/invites/"+taken+"/accept", nil, 200)
+	if old := h.request(t, lt.member, "GET", "/invites/"+taken, nil, 200); old["status"] != "accepted" || old["canvasName"] != "Live" {
+		t.Fatal("the answered invitation before the end", old)
+	}
 	before := state()
 
 	// After it the workspace is closed whole.
@@ -132,6 +144,23 @@ func TestPostgresFreePlanEndLocksTheWorkspaceWhole(t *testing.T) {
 		if refused := h.request(t, lt.owner, "POST", base+path, map[string]any{}, 402); errorCode(refused) != "free_plan_ended" {
 			t.Fatal("POST", path, refused)
 		}
+	}
+	// An invitation into the closed workspace reads closed, names no canvas, and takes nobody in; one the member
+	// answered before the end names no canvas either, and is confirmed again as ever (it joins nothing).
+	if old := h.request(t, lt.member, "GET", "/invites/"+taken, nil, 200); old["status"] != "accepted" || old["canvasName"] != nil {
+		t.Fatal("an answered invitation's preview in a closed workspace", old)
+	}
+	if again := h.request(t, lt.member, "POST", "/invites/"+taken+"/accept", nil, 200); again["tenantId"] != lt.tid {
+		t.Fatal("confirming an answered invitation again in a closed workspace", again)
+	}
+	if shut := h.request(t, guest, "GET", "/invites/"+invite, nil, 200); shut["status"] != "closed" || shut["canvasName"] != nil || shut["canvasId"] != nil {
+		t.Fatal("the invitation's preview in a closed workspace", shut)
+	}
+	if refused := h.request(t, guest, "POST", "/invites/"+invite+"/accept", nil, 402); errorCode(refused) != "free_plan_ended" {
+		t.Fatal("accepting an invitation into a closed workspace", refused)
+	}
+	if after := state(); after != before {
+		t.Fatal("a refused invitation changed the workspace", before, after)
 	}
 	// The account's export names the closed workspace and carries none of its canvases, for its owner or a member.
 	for name, c := range map[string]*http.Cookie{"the owner's": lt.owner, "a member's": lt.member} {
@@ -179,6 +208,13 @@ func TestPostgresFreePlanEndLocksTheWorkspaceWhole(t *testing.T) {
 	}
 	if got := exportedCanvases(t, h, lt.owner); got[lt.tid] != 1 {
 		t.Fatal("the owner's export after the subscription", got)
+	}
+	// The invitation is good again: it names its canvas and takes its person in.
+	if open := h.request(t, guest, "GET", "/invites/"+invite, nil, 200); open["status"] != "active" || open["canvasName"] != "Live" {
+		t.Fatal("the invitation after the subscription", open)
+	}
+	if joined := h.request(t, guest, "POST", "/invites/"+invite+"/accept", nil, 200); joined["tenantId"] != lt.tid {
+		t.Fatal("accepting the invitation after the subscription", joined)
 	}
 }
 

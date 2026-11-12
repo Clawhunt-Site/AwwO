@@ -1274,8 +1274,20 @@ func TestPostgresUsageViewShowsTheOwnersBillingToTheOwnerAlone(t *testing.T) {
 	if _, ok := member["periodEnd"]; ok || member["credits"].(map[string]any)["remaining"] != 2000.0 {
 		t.Fatal("member view", member)
 	}
-	if reader := h.request(t, cr, "GET", "/tenants/"+tid+"/route-usage", nil, 200); reader["plan"] != nil {
+	// A reader is shown the plan's level alone, in its own field: no plan record, so no credits or dates.
+	if reader := h.request(t, cr, "GET", "/tenants/"+tid+"/route-usage", nil, 200); reader["plan"] != nil || reader["planLevel"] != "pro" {
 		t.Fatal("reader view", reader)
+	}
+	for who, c := range map[string]*http.Cookie{"owner": co, "member": cm} {
+		if v := h.request(t, c, "GET", "/tenants/"+tid+"/route-usage", nil, 200); v["planLevel"] != nil {
+			t.Fatal(who, "is sent the level beside the plan", v)
+		}
+	}
+	// A reader of a workspace on no plan is sent no level.
+	_, free, _ := h.register(t, "view-free-owner@example.test")
+	execSQL(t, h, "INSERT INTO memberships(tenant_id,user_id,role) SELECT $1,id,'reader' FROM users WHERE email=$2", free, "view-reader@example.test")
+	if v := h.request(t, cr, "GET", "/tenants/"+free+"/route-usage", nil, 200); v["plan"] != nil || v["planLevel"] != nil {
+		t.Fatal("a reader of a workspace on no plan", v)
 	}
 }
 

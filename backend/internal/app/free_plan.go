@@ -37,7 +37,8 @@ import (
 // What reaches a workspace's content by another road asks planLocked too: a canvas's live stream and an agent's
 // canvas_wait at each of their checks (liveAccessRole: a stream open since before the end is told to go), a run's
 // event stream at each of its checks (events, runs.go), the account's export (exportAccount leaves a closed workspace's
-// canvases out), and the market's drafts (freezeMarketSkills takes no skill out of one).
+// canvases out), the market's drafts (freezeMarketSkills takes no skill out of one), and an invitation into one
+// (previewInvite reads closed and names no canvas; acceptInvite takes nobody in).
 // The account itself is no workspace route and stays whole: signing in and out, billing and its checkout, the
 // account's own data export (profile, preferences, appearance, its workspaces by name, and the canvases of the ones
 // that are open) and deletion request, leaving a workspace, invitations to another, and the feedback assistant

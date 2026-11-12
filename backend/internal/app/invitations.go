@@ -360,10 +360,21 @@ func (a *App) previewInvite(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, e)
 		return
 	}
+	// A workspace the free plan's end has closed takes nobody in until its owner subscribes (free_plan.go planLocked):
+	// an invitation still open reads closed, and none, open or not, tells anything of the workspace's content (its
+	// canvas's name).
+	closed, e := a.planLocked(r.Context(), tid)
+	if e != nil {
+		a.dbError(w, e)
+		return
+	}
+	if closed && status == "active" {
+		status = "closed"
+	}
 	out := map[string]any{"tenantId": tid, "tenantName": tenantName, "role": role, "expiresAt": expires, "status": status}
 	// A bound link that reached another account (a forwarded or leaked one) does not tell it the canvas's name.
 	matches := email == nil || inviteEmailMatches(*email, currentUser(r))
-	if canvasID != nil && canvasName != nil && matches {
+	if canvasID != nil && canvasName != nil && matches && !closed {
 		out["canvasId"], out["canvasName"] = *canvasID, *canvasName
 	}
 	if email != nil {
@@ -452,6 +463,13 @@ func (a *App) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		}
 		if !grantAllowed(issuerRole, role) {
 			fail(w, 403, "invite_unavailable", "Invitation issuer no longer has permission")
+			return
+		}
+		// A workspace the free plan's end has closed takes nobody in (free_plan.go): its members are as they were until
+		// its owner subscribes, and an invitation still open is good again from then. Asked last, in this transaction,
+		// so an invitation that is used up, revoked, expired or another account's says so first; an account that
+		// accepted before the end confirms again as ever (it joins nothing).
+		if !a.freePlanAdmitsOwner(w, r, tx, tid) {
 			return
 		}
 		added, err := tx.Exec(r.Context(), "INSERT INTO memberships(tenant_id,user_id,role) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", tid, uid, role)
