@@ -3,6 +3,7 @@ import { saasErrorMessage, type Identity } from './api';
 import { billingNavigation, fetchBilling, formatCredits, isPlanId, openBillingPortal, planName, startCheckout, stripePage, type Billing, type PlanId } from './billing';
 import { PlanVoucher } from './PlanVoucher';
 import { useSaaSPreferences } from './preferences';
+import { announceRouteUsageChanged } from './routeUsage';
 import './plans.css';
 
 // After Stripe sends the browser back, the plan reaches AwwO within moments (ClawHunt reads the finished
@@ -14,7 +15,7 @@ const SUBSCRIBED = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incompl
 
 /** The account's plan and credits, and Pro / Max / Ultra to buy or change (?account=plans). Someone without a plan is
  *  shown the vouchers first: choosing one is what the page is for then. A subscriber is shown their plan first. */
-export function PlansPage({ identity }: { identity: Identity }) {
+export function PlansPage({ identity, keepReturn = false }: { identity: Identity; keepReturn?: boolean }) {
   const { t, locale } = useSaaSPreferences();
   const [billing, setBilling] = useState<Billing | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -22,11 +23,15 @@ export function PlansPage({ identity }: { identity: Identity }) {
   const [actionError, setActionError] = useState<unknown>(null);
   const returned = useRef(new URLSearchParams(location.search).get('billing'));
   const [syncing, setSyncing] = useState(returned.current === 'success');
+  /** The entitled plan's id as last read ('' for none); null before the first answer. */
+  const heldPlan = useRef<string | null>(null);
   const linked = identity.authentication === 'clawhunt';
-  // The payment page's answer is read once: a reload or a later visit does not show it again.
+  // The payment page's answer is read once: a reload or a later visit does not show it again. keepReturn: the page of
+  // a closed workspace (PlanGate) leaves it in the address, since that page is replaced by the app the moment the plan
+  // lands, and the plans page that opens there is the one to say that it has.
   useEffect(() => {
     const query = new URLSearchParams(location.search);
-    if (!query.has('billing')) return;
+    if (keepReturn || !query.has('billing')) return;
     query.delete('billing');
     window.history.replaceState(window.history.state, '', location.pathname + (query.size ? '?' + query : '') + location.hash);
   }, []);
@@ -46,6 +51,15 @@ export function PlansPage({ identity }: { identity: Identity }) {
         if (controller.signal.aborted) return;
         setBilling(value);
         setError(null);
+        // The plan this account holds, as the page now knows it: when it is one, or has changed since the page last
+        // read (a purchase landed, an upgrade, a plan that ended), everything on the page that shows the workspace's
+        // plan reads again at once: the corner's plan button, the home's card, and the gate of a closed workspace.
+        const holds = value.plan?.entitled ? value.plan.id : '';
+        if (holds !== heldPlan.current) {
+          const first = heldPlan.current === null;
+          heldPlan.current = holds;
+          if (!first || holds) announceRouteUsageChanged();
+        }
         // Back from a paid checkout: keep asking until the plan arrives.
         if (returned.current === 'success' && !value.plan?.entitled && ++polls < RETURN_POLLS) {
           timer = window.setTimeout(() => load(true), returnPoll.ms);

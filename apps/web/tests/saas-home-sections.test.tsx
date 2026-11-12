@@ -161,7 +161,7 @@ describe('a case opened from elsewhere', () => {
 });
 
 describe('the top bar on the home', () => {
-  it('has no meter there: the account card has the page’s one, and one route-usage request', async () => {
+  it('has no meter there: the account card has the page’s one, and route-usage is asked by the gate and the card alone', async () => {
     const calls = server();
     localStorage.setItem('awwo.workmode.v1:user-h', 'completed');
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -171,6 +171,8 @@ describe('the top bar on the home', () => {
     const header = document.querySelector('main.saas-home > header')!;
     expect(header.querySelector('.saas-route-usage-trigger')).toBeNull();
     expect(within(header as HTMLElement).getByRole('button', { name: '账号与工作区' })).toBeVisible();
-    expect(calls.filter(call => call.includes('/route-usage'))).toHaveLength(1);
+    // Two reads: the plan gate's, before anything is drawn (whether the trial's end has the workspace closed,
+    // PlanGate.tsx), and the account card's; none for a meter in the top bar.
+    expect(calls.filter(call => call.includes('/route-usage'))).toHaveLength(2);
   });
 });

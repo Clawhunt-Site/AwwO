@@ -30,6 +30,8 @@ import { BootSurface } from './BootSurface';
 import { navigateTo } from './navigation';
 import { StaleBuildNotice } from './StaleBuildNotice';
 import { FeedbackAssistant } from './FeedbackAssistant';
+import { PlanDock } from './PlanDock';
+import { PlanGate, shownTenant } from './PlanGate';
 import { noteLoadFailure } from './staleBuild';
 import { InviteAcceptance } from './InviteAcceptance';
 import { forgetPendingInvite, rememberPendingInvite, restorePendingInvite } from './pendingInvite';
@@ -167,7 +169,7 @@ function AuthenticatedApp() {
   const content = inviteToken ? <InviteAcceptance key={inviteToken + identity.user.id} token={inviteToken} identity={identity} controls={controls} />
     : window.location.pathname === '/admin' ? <AdminPanel identity={identity} controls={controls} />
     : <Workspace identity={identity} onProfile={onProfile} />;
-  return <LocalEdition.Provider value={isLocalEdition(identity)}><PolicySite.Provider value={identity.clawhuntSiteURL || ''}><AppearanceScope key={identity.user.id} userId={identity.user.id}><AccountPreferencesProvider userId={identity.user.id}>{sessionEnded && <SessionEndedNotice identity={identity} />}<SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity} onProfile={onProfile}>{content}</PersonalEngineGate></SaaSOnboarding><LaunchNoticeHost key={`${identity.user.id}:launch`} identity={identity} /></AccountPreferencesProvider></AppearanceScope></PolicySite.Provider></LocalEdition.Provider>;
+  return <LocalEdition.Provider value={isLocalEdition(identity)}><PolicySite.Provider value={identity.clawhuntSiteURL || ''}><AppearanceScope key={identity.user.id} userId={identity.user.id}><AccountPreferencesProvider userId={identity.user.id}>{sessionEnded && <SessionEndedNotice identity={identity} />}<PlanGate identity={identity}><SaaSOnboarding identity={identity}><PersonalEngineGate identity={identity} onProfile={onProfile}>{content}</PersonalEngineGate></SaaSOnboarding><PlanDock identity={identity} /><LaunchNoticeHost key={`${identity.user.id}:launch`} identity={identity} /></PlanGate></AccountPreferencesProvider></AppearanceScope></PolicySite.Provider></LocalEdition.Provider>;
 }
 /** The page stays as it is, so nothing typed is lost; leaving through sign-in keeps the unsaved-canvas warning. */
 function SessionEndedNotice({ identity }: { identity: Identity }) {
@@ -346,7 +348,7 @@ function Workspace({ identity, onProfile }: { identity: Identity; onProfile: (na
   const { t } = useSaaSPreferences();
   const params = new URLSearchParams(window.location.search);
   const requested = params.get('tenant');
-  const tenant = identity.tenants.find(item => item.id === requested) || (!requested ? identity.tenants.find(item => item.status === 'active') || identity.tenants[0] : undefined);
+  const tenant = shownTenant(identity);
   const canvasId = params.get('canvas');
   const controls = <WorkspaceControls key={tenant?.id || 'none'} identity={identity} tenant={tenant} onProfile={onProfile} />;
   // The home pages' top bar has the Academy's button too; a canvas page's header keeps it in More options. The home's

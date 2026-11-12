@@ -1,0 +1,29 @@
+/* The plan button in the bottom-left corner (PlanDock.tsx): the plan's level as a badge with the credits left, or the
+   way to the plans where there is none. As tall as the feedback button, which sits to its right; where it sits comes
+   from feedbackPlacement.ts as --plan-dock-left / --plan-dock-bottom. Theme tokens only; the badge takes its plan's
+   tone from the vouchers (plan-voucher.css). */
+.saas-plan-dock {
+  --plan-dock-tone: var(--saas-bio);
+  position: fixed; z-index: 560; left: var(--plan-dock-left, 16px); bottom: var(--plan-dock-bottom, 16px);
+  display: inline-flex; align-items: center; gap: 8px; box-sizing: border-box; height: 40px; padding: 0 14px 0 5px;
+  border-radius: var(--saas-radius-pill); background: var(--saas-card); color: var(--saas-text); text-decoration: none; white-space: nowrap;
+  box-shadow: 0 0 0 1px var(--saas-border) inset, var(--saas-shadow-lg); font: 650 var(--saas-text-sm)/1 var(--saas-font);
+  transition: box-shadow var(--saas-dur-1) var(--saas-ease), background-color var(--saas-dur-1) var(--saas-ease);
+}
+.saas-plan-dock:hover { box-shadow: 0 0 0 1px color-mix(in srgb, var(--plan-dock-tone) 55%, var(--saas-border)) inset, var(--saas-shadow-xl); }
+.saas-plan-dock:focus-visible { outline: 2px solid var(--saas-focus); outline-offset: 3px; }
+.saas-plan-dock[data-hidden] { visibility: hidden; pointer-events: none; }
+.saas-plan-dock.is-max { --plan-dock-tone: var(--saas-warning-dot); }
+.saas-plan-dock.is-ultra { --plan-dock-tone: var(--saas-bio-lilac, var(--saas-accent)); }
+.saas-plan-dock-badge {
+  display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 11px; border-radius: var(--saas-radius-pill);
+  background: color-mix(in srgb, var(--plan-dock-tone) 18%, var(--saas-card));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--plan-dock-tone) 45%, var(--saas-border)) inset;
+  color: color-mix(in srgb, var(--plan-dock-tone) 58%, var(--saas-text)); font-weight: 750; letter-spacing: 0.01em;
+}
+.saas-plan-dock-credits { color: var(--saas-muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+.saas-plan-dock.is-low .saas-plan-dock-credits { color: color-mix(in srgb, var(--saas-danger, var(--saas-warning-dot)) 80%, var(--saas-text)); }
+/* No plan: the way to the plans, as the page's primary button. */
+.saas-plan-dock.is-call { padding: 0 16px 0 13px; background: var(--saas-primary); color: var(--saas-on-primary); box-shadow: var(--saas-shadow-lg); }
+.saas-plan-dock.is-call:hover { background: var(--saas-primary-hover); box-shadow: var(--saas-shadow-xl); }
+@media (max-width: 420px) { .saas-plan-dock-credits { display: none; } .saas-plan-dock.is-paid { padding-right: 5px; } }

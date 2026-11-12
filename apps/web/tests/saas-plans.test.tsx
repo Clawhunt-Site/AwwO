@@ -401,3 +401,36 @@ it('leaves out a plan it has no name for, rather than drawing it without one', a
   expect(screen.queryByText('undefined')).toBeNull();
   expect(document.querySelectorAll('.saas-voucher')).toHaveLength(3);
 });
+
+// Owner 2026-11-12: 「买好的也能实时的看到自己的套餐等级」. The moment the page reads that the account holds a plan (back from
+// the checkout, or one that changed while the page was open), it says so on the page (ROUTE_USAGE_CHANGED): the corner's
+// plan button, the home's card and the gate of a closed workspace read the workspace's plan again without a reload.
+it('says on the page that a plan has landed, once, and nothing where there is none', async () => {
+  const said = vi.fn();
+  window.addEventListener('awwo:route-usage-changed', said);
+  try {
+    // No plan: nothing to say.
+    serve(() => response(free));
+    page();
+    await screen.findByRole('region', { name: 'Pro' });
+    expect(said).not.toHaveBeenCalled();
+    cleanup();
+    // Back from a paid checkout: the plan arrives on the second answer, and is said once.
+    window.history.replaceState({}, '', '/?account=plans&billing=success');
+    returnPoll.ms = 5;
+    let reads = 0;
+    serve(() => response(++reads < 2 ? free : pro));
+    page();
+    await waitFor(() => expect(said).toHaveBeenCalledTimes(1));
+    expect(reads).toBe(2);
+    cleanup();
+    // A subscriber opening the page: said once too (the plan may be newer than what the page around it shows).
+    said.mockClear();
+    window.history.replaceState({}, '', '/?account=plans');
+    serve(() => response(pro));
+    page();
+    await waitFor(() => expect(said).toHaveBeenCalledTimes(1));
+  } finally {
+    window.removeEventListener('awwo:route-usage-changed', said);
+  }
+});

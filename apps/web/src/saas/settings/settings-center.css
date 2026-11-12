@@ -19,13 +19,15 @@
   border: 1px solid var(--saas-border);
   border-radius: 16px;
   background: var(--saas-card);
-  max-height: calc(100dvh - 108px);
+  /* It ends above the window's bottom-left corner, which the plan button and the feedback button share (PlanDock.tsx,
+     FeedbackAssistant.tsx: 40px tall, 16px from the edges): its last entry, 退出登录, is never under them. */
+  max-height: calc(100dvh - 164px);
   overflow-y: auto;
   scroll-timeline: --saas-settings-nav block;
   /* An entry the keyboard reaches, or the open page's (SettingsCenter.tsx), stops above the fade below. */
   scroll-padding-bottom: 48px;
 }
-/* The list is taller than its box on most screens (about 860px of entries; the box ends 16px above the window's bottom)
+/* The list is taller than its box on most screens (about 860px of entries; the box ends 72px above the window's bottom)
    and scrolls inside it. While more is below, its last lines fade into the card, so the entry the edge cuts reads as more
    to scroll, not as cut off; the fade lifts at the list's end. Scroll-driven: where that is unsupported, or the list
    fits, nothing fades. */

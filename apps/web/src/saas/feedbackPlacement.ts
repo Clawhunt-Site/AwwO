@@ -55,10 +55,11 @@ export function modalOpen(): boolean {
   return false;
 }
 
-/** The page's slot and obstacles as they are drawn now. */
-export function measurePage(): { slot: Box | null; obstacles: Obstacle[] } {
+/** The page's slot and obstacles as they are drawn now. `own`: the element being placed when it is itself something
+ *  the feedback button keeps clear of (the plan button, PlanDock.tsx): it takes no slot and is no obstacle to itself. */
+export function measurePage(own?: Element | null): { slot: Box | null; obstacles: Obstacle[] } {
   let slot: Box | null = null;
-  const kept = document.querySelector('[data-feedback-slot]');
+  const kept = own ? null : document.querySelector('[data-feedback-slot]');
   const rect = kept ? shown(kept) : null;
   if (kept && rect && rect.top >= 0 && rect.bottom <= window.innerHeight) {
     // In a column that scrolls, the slot counts only while that column shows it whole.
@@ -68,6 +69,7 @@ export function measurePage(): { slot: Box | null; obstacles: Obstacle[] } {
   }
   const obstacles: Obstacle[] = [];
   for (const element of document.querySelectorAll('[data-feedback-avoid]')) {
+    if (element === own) continue;
     const box = shown(element);
     if (box) obstacles.push({ box, mode: element.getAttribute('data-feedback-avoid') === 'above' ? 'above' : 'beside' });
   }
@@ -76,15 +78,16 @@ export function measurePage(): { slot: Box | null; obstacles: Obstacle[] } {
 
 /** The button's place, kept up with the page: on resize and scroll, and twice a second for what the page itself moves
  *  (a column opened or closed, a dialog shown). `place` is undefined until it is first measured; `covered` says one of
- *  the app's modal dialogs is open. */
-export function useLauncherPlacement(button: RefObject<HTMLElement | null>): { place: Placement | undefined; covered: boolean } {
+ *  the app's modal dialogs is open. `own`: the button placed is the plan button, which takes the corner first and
+ *  which the feedback button then sits beside (measurePage). */
+export function useLauncherPlacement(button: RefObject<HTMLElement | null>, own = false): { place: Placement | undefined; covered: boolean } {
   const [place, setPlace] = useState<Placement | undefined>(undefined);
   const [covered, setCovered] = useState(false);
   const measure = () => {
     const element = button.current;
     // Its size as it floats: docked, it takes the slot's width, which says nothing of the room it needs elsewhere.
     const size = { width: element?.dataset.docked === undefined ? element?.offsetWidth || FLOATING_WIDTH : FLOATING_WIDTH, height: element?.offsetHeight || 40 };
-    const { slot, obstacles } = measurePage();
+    const { slot, obstacles } = measurePage(own ? element : null);
     const next = placeLauncher({ width: window.innerWidth, height: window.innerHeight }, size, slot, obstacles);
     setPlace(current => (current === undefined || current === null || next === null) ? (current === next ? current : next)
       : current.left === next.left && current.bottom === next.bottom && current.width === next.width ? current : next);
