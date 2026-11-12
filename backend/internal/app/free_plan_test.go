@@ -271,8 +271,22 @@ func TestPostgresFreePlanEndClosesNewWorkAndLetsRunningWorkFinish(t *testing.T) 
 		t.Fatal("the canvas run was admitted no sooner than the end it was to come before")
 	}
 	time.Sleep(time.Until(until) + 20*time.Millisecond)
+	// Stopping the run is closed with the rest of the workspace (a stop answers with the run it stopped, output and
+	// all): it is refused while the run is still going, and the run goes on to complete below.
+	if refused := h.request(t, free.c, "POST", canvasRuns+"/"+gid+"/cancel", map[string]any{}, 402); errorCode(refused) != "free_plan_ended" {
+		t.Fatal("stopping the run in the closed workspace", refused)
+	}
 	close(release)
-	awaitGraph(t, h, free.c, canvasRuns+"/"+gid, "completed", 15*time.Second)
+	// The run is followed in the database: since 2026-11-12 the closed workspace's own routes answer 402, reads too
+	// (planLocked), while the run it admitted before the end goes on to its end.
+	awaitFreePlanWork(t, h, free.tid, map[string]string{"canvas run": gid})
+	var ended string
+	if e := h.db.QueryRow(context.Background(), "SELECT status FROM graph_runs WHERE tenant_id=$1 AND id=$2", free.tid, gid).Scan(&ended); e != nil || ended != "completed" {
+		t.Fatal("the canvas run admitted before the end", ended, e)
+	}
+	if refused := h.request(t, free.c, "GET", canvasRuns+"/"+gid, nil, 402); errorCode(refused) != "free_plan_ended" {
+		t.Fatal("reading the run in the closed workspace", refused)
+	}
 	freePlanRefusesAll(t, h, relay, free)
 	// A plan's workspace, the operator's own and one without route limits run everything as before.
 	for name, s := range map[string]freePlanSpace{"a plan's": paid, "the operator's": operator, "an unlimited": unlimited} {
@@ -403,9 +417,9 @@ func TestPostgresRouteUsageSaysWhenTheFreePlanEnds(t *testing.T) {
 	}
 }
 
-// A workspace the free plan's end closed runs nothing, so the platform asks no model for it: the canvas assistant routes
-// its messages without the router's call (to the planner, which then refuses them), and learning skips its runs, with
-// the reason routeClosed gives. A subscription that lands opens it at once.
+// A workspace the free plan's end closed runs nothing, so the platform asks no model for it: the canvas assistant's
+// route is refused with the rest of the workspace (402, planLocked, since 2026-11-12) before the router's call, and
+// learning skips its runs, with the reason routeClosed gives. A subscription that lands opens it at once.
 func TestPostgresTheFreePlanEndAsksNoModelForAClosedWorkspace(t *testing.T) {
 	worker, calls := routeWorker(t, func(w http.ResponseWriter, _ map[string]any) {
 		json.NewEncoder(w).Encode(content(`{"route":"execute"}`))
@@ -434,7 +448,10 @@ func TestPostgresTheFreePlanEndAsksNoModelForAClosedWorkspace(t *testing.T) {
 	route(routeExecute, "model", 1)
 	closed("")
 	h.a.cfg.FreePlanUntil = time.Now().Add(-time.Second)
-	route(routePlan, "fallback", 1)
+	if refused := h.request(t, c, "POST", path, map[string]any{"message": "帮我调研一下竞品", "routes": []string{routePlan, routeExecute},
+		"canvas": map[string]any{"nodes": 0, "titles": []string{}, "results": false}, "recent": []any{}}, 402); errorCode(refused) != "free_plan_ended" || *calls != 1 {
+		t.Fatalf("the closed workspace's route: %v after %d model calls", refused, *calls)
+	}
 	closed("free_plan_ended")
 	// A workspace that exists only under a plan it lacks says so first, as before.
 	execSQL(t, h, "UPDATE tenants SET requires_plan=true WHERE id=$1", tid)
@@ -473,7 +490,9 @@ func TestPostgresNoCheckinOnceTheFreePlanHasEnded(t *testing.T) {
 	if view, _ := u["freePlan"].(map[string]any); view == nil || view["ended"] != true {
 		t.Fatal("the meter after the end", u)
 	}
-	if got := h.request(t, c, "POST", "/tenants/"+tid+"/checkin", map[string]any{}, 409); errorCode(got) != "checkin_unavailable" {
+	// The check-in's route is closed with the rest of the workspace (planLocked, since 2026-11-12); its own rule, which
+	// the usage answer above read (no check-in offered), stands behind it.
+	if got := h.request(t, c, "POST", "/tenants/"+tid+"/checkin", map[string]any{}, 402); errorCode(got) != "free_plan_ended" {
 		t.Fatal("a check-in after the end", got)
 	}
 	var n int

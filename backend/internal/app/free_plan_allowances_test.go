@@ -88,37 +88,21 @@ func TestPostgresFreePlanEndClosesRendersAndWebReads(t *testing.T) {
 	if after := counts(free); after != before || renderer.calls.Load() != sent {
 		t.Fatal("a refused render or read was recorded, counted or sent", before, after, sent, renderer.calls.Load())
 	}
-	// What it started before the end still answers from its stored result, and is neither rendered nor read again.
-	if replay := h.request(t, free.c, "POST", renders(free), render("trial-render"), 200); replay["id"] != renderID {
-		t.Fatal("the earlier render's replay", replay)
-	}
-	if replay := h.request(t, free.c, "POST", reads(free), read("trial-read"), 201); replay["id"] != sourceID {
-		t.Fatal("the earlier read's replay", replay)
+	// Since 2026-11-12 the closed workspace answers nothing of its own (planLocked): the replay of what it started
+	// before the end, reading the earlier render and its capabilities are refused too, and nothing is rendered or read
+	// again. What it made is kept, and answers once its owner subscribes (below).
+	for name, refused := range map[string]map[string]any{
+		"the earlier render's replay": h.request(t, free.c, "POST", renders(free), render("trial-render"), 402),
+		"the earlier read's replay":   h.request(t, free.c, "POST", reads(free), read("trial-read"), 402),
+		"the earlier render":          h.request(t, free.c, "GET", renders(free)+"/"+renderID, nil, 402),
+		"its capabilities":            h.request(t, free.c, "GET", "/tenants/"+free.tid+"/capabilities", nil, 402),
+	} {
+		if errorCode(refused) != "free_plan_ended" {
+			t.Fatal(name, refused)
+		}
 	}
 	if after := counts(free); after != before || renderer.calls.Load() != sent {
-		t.Fatal("a replay was recorded, counted or sent", before, after, sent, renderer.calls.Load())
-	}
-	// The workspace's capabilities read both daily numbers as 0, so its panels offer nothing they would refuse; a
-	// plan's workspace reads the deployment's numbers, as the free one did before the end.
-	perDay := func(s space) [2]any {
-		t.Helper()
-		v := h.request(t, s.c, "GET", "/tenants/"+s.tid+"/capabilities", nil, 200)
-		return [2]any{v["webReader"].(map[string]any)["perDay"], v["render"].(map[string]any)["perDay"]}
-	}
-	if got := perDay(free); got != [2]any{float64(0), float64(0)} {
-		t.Fatal("the held workspace's daily numbers", got)
-	}
-	if got := perDay(paid); got != [2]any{float64(5), float64(5)} {
-		t.Fatal("a plan's workspace's daily numbers", got)
-	}
-	h.a.cfg.FreePlanUntil = time.Now().Add(time.Hour)
-	if got := perDay(free); got != [2]any{float64(5), float64(5)} {
-		t.Fatal("the free workspace's daily numbers before the end", got)
-	}
-	h.a.cfg.FreePlanUntil = time.Now().Add(-time.Minute)
-	// Its own renders and sources stay readable: the end closes new work, not what the workspace holds.
-	if job := h.request(t, free.c, "GET", renders(free)+"/"+renderID, nil, 200); job["status"] != "completed" {
-		t.Fatal("the earlier render", job)
+		t.Fatal("a refused request was recorded, counted or sent", before, after, sent, renderer.calls.Load())
 	}
 	// A plan's workspace, the operator's own and one without route limits render and read as before.
 	for name, s := range map[string]space{"a plan's": paid, "the operator's": operator, "an unlimited": unlimited} {
@@ -128,6 +112,17 @@ func TestPostgresFreePlanEndClosesRendersAndWebReads(t *testing.T) {
 	givePlan(t, h, "free-allowance-free@example.test", "pro", "active", now.Add(-time.Hour), now.Add(30*24*time.Hour), 2000)
 	execSQL(t, h, "UPDATE tenants SET route_limits=$2::jsonb WHERE id=$1", free.tid, planRoutes)
 	works("the free workspace once its owner subscribes", free, "subscribed", 200)
+	// And what it made before the end is there: the earlier render reads, the earlier operations answer from their
+	// stored results.
+	if job := h.request(t, free.c, "GET", renders(free)+"/"+renderID, nil, 200); job["status"] != "completed" {
+		t.Fatal("the earlier render", job)
+	}
+	if replay := h.request(t, free.c, "POST", renders(free), render("trial-render"), 200); replay["id"] != renderID {
+		t.Fatal("the earlier render's replay", replay)
+	}
+	if replay := h.request(t, free.c, "POST", reads(free), read("trial-read"), 201); replay["id"] != sourceID {
+		t.Fatal("the earlier read's replay", replay)
+	}
 }
 
 // GET /billing says when the deployment's free plan ends and whether it has, by the API's clock, to every account (the

@@ -137,6 +137,16 @@ func (a *App) admitCanvasToken(w http.ResponseWriter, r *http.Request, token str
 		fail(w, 403, "tenant_suspended", "Workspace is suspended")
 		return nil, false
 	}
+	// A workspace the free plan's end holds is closed to its agents as to its people (free_plan.go, planLocked): a token
+	// reads and changes nothing there until the owner subscribes.
+	switch locked, err := a.planLocked(r.Context(), agent.TenantID); {
+	case err != nil:
+		a.dbError(w, err)
+		return nil, false
+	case locked:
+		failFreePlanEnded(w)
+		return nil, false
+	}
 	agent.Port = port
 	// The token's maker, never with platform powers: a token is no administrator.
 	u.PlatformRole = "user"

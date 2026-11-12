@@ -578,9 +578,15 @@ func (a *App) liveAccess(r *http.Request, tid, cid string) (bool, error) {
 	return ok, err
 }
 
-// liveAccessRole is liveAccess with a person's role in the workspace now (empty for an agent).
+// liveAccessRole is liveAccess with a person's role in the workspace now (empty for an agent). A workspace the free
+// plan's end has closed since the caller was admitted (the end came, or its owner's plan lapsed) is reached by nobody
+// (free_plan.go planLocked): a stream open since before is told to go at its next check, and an agent's wait answers
+// nothing of the canvas; the caller's next request is refused with the rest of the workspace.
 func (a *App) liveAccessRole(r *http.Request, tid, cid string) (string, bool, error) {
 	ctx := r.Context()
+	if locked, err := a.planLocked(ctx, tid); err != nil || locked {
+		return "", false, err
+	}
 	var ok bool
 	if agent := agentOf(r); agent != nil {
 		err := a.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM canvas_agent_tokens t JOIN memberships m ON m.tenant_id=t.tenant_id AND m.user_id=t.created_by

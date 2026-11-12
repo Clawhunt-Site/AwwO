@@ -20,16 +20,30 @@ import (
 // canvas run as a whole (createGraphRun) and each relayed call (openRelayGate). The two daily allowances that cost no
 // model call ask too (owner 2026-11-11: 「明天暂停试用后，所有用户都必须要购买才能使用awwo，没有任何免费额度」): a render as
 // video (createRender) and a web page read into the workspace's knowledge (reserveWebRead), each after its replay of an
-// operation already answered and before it counts anything, and GET /capabilities reads both daily numbers as 0 for
-// such a workspace. Where a plan read without its lock has
+// operation already answered and before it counts anything. Where a plan read without its lock has
 // lapsed by the locked read, a new run's admission falls back to the free plan's limits (workspaceLimits.admit), which
 // ask again, so no race admits a free run past the moment. A run admitted before the moment finishes as it would have:
 // the steps of a run already admitted (its model calls, a canvas run's nodes as their turns come) are not asked again.
 // The platform's own calls about a closed workspace (the assistant's router, learning) are not made (routeClosed).
-// Reading, editing, saving, uploads, export, deletion, billing, invites and the usage meter stay open, and so does the
-// feedback assistant (feedback.go: how a person reports a fault, with its own small limits per caller). Jev
-// (typesafe.go) and OpenMaus bot tasks run only where the operator named the workspace or set up the connection, which
-// is the operator's own decision for that workspace, as freeing one of its route limits is.
+//
+// Since 2026-11-12 the end closes such a workspace WHOLE (owner: 「确保现在没有付费的用户使用不了任何awwo的功能」, and, asked
+// how far, "locked completely, only the plans page left"). Every route of the workspace asks planLocked where it admits
+// the caller (a.tenant for a person's session, admitCanvasToken for an agent's token, the MCP endpoint among them) and
+// answers 402 free_plan_ended, reads included: its canvases, results, files, knowledge and members cannot be opened,
+// changed, exported or deleted there until its owner subscribes, and nothing of it is removed. Two routes of the
+// workspace stay open (planLockOpen), which carry nothing of its content: GET /route-usage, by which the page knows to
+// show the plans alone, and the note that its person would pay (upgrade-interest). Stopping work is NOT one of them:
+// a stop answers with the run it stopped, output and all, and work admitted before the end finishes by itself.
+// What reaches a workspace's content by another road asks planLocked too: a canvas's live stream and an agent's
+// canvas_wait at each of their checks (liveAccessRole: a stream open since before the end is told to go), a run's
+// event stream at each of its checks (events, runs.go), the account's export (exportAccount leaves a closed workspace's
+// canvases out), and the market's drafts (freezeMarketSkills takes no skill out of one).
+// The account itself is no workspace route and stays whole: signing in and out, billing and its checkout, the
+// account's own data export (profile, preferences, appearance, its workspaces by name, and the canvases of the ones
+// that are open) and deletion request, leaving a workspace, invitations to another, and the feedback assistant
+// (feedback.go: how a person reports a fault). The admissions above still ask for themselves, so a route added outside
+// the two wrappers starts nothing either. Jev (typesafe.go) and OpenMaus bot tasks sit behind a.tenant and are closed
+// with the rest.
 
 const freePlanEndedMessage = "The free trial has ended: this workspace runs again once its owner subscribes to Pro, Max or Ultra."
 
@@ -97,6 +111,28 @@ func freePlanClosed(ctx context.Context, q querier, tid string, until time.Time,
 
 func failFreePlanEnded(w http.ResponseWriter) {
 	fail(w, 402, "free_plan_ended", freePlanEndedMessage)
+}
+
+// planLocked reports whether the free plan's end has closed the workspace whole: the end has come and holds it
+// (freePlanHolds: route limits, no entitled owner plan, not a platform administrator's). Before the end, and without
+// one, it asks the database nothing; a subscription that lands opens the workspace at its next request.
+func (a *App) planLocked(ctx context.Context, tid string) (bool, error) {
+	if !a.cfg.freePlanEnded(time.Now()) {
+		return false, nil
+	}
+	plan, err := ownerPlan(ctx, a.db, tid, false)
+	if err != nil {
+		return false, err
+	}
+	return freePlanHolds(ctx, a.db, tid, a.cfg.FreePlanUntil, plan)
+}
+
+// planLockOpen reports whether a workspace route stays open while the free plan's end has the workspace closed; path
+// is the request's path after /api/v1/tenants/{tenantId}, compared whole (no prefix, suffix or pattern: a path is one
+// of the two or it is closed). Both answer nothing of the workspace's content: the usage answer (the page reads
+// freePlan.ended there and shows the plans alone) and the note that its person would pay.
+func planLockOpen(method, path string) bool {
+	return (method == http.MethodGet && path == "/route-usage") || (method == http.MethodPost && path == "/upgrade-interest")
 }
 
 // freePlanAdmits answers a new admission that the free plan's end closes (402 free_plan_ended, or the database's

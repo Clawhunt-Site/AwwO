@@ -380,6 +380,18 @@ func (a *App) tenant(next http.HandlerFunc, minRole int) http.HandlerFunc {
 			fail(w, 403, "tenant_suspended", "Workspace is suspended")
 			return
 		}
+		// A workspace the free plan's end holds is closed whole (free_plan.go, planLocked): everything but the two routes
+		// that carry none of its content (planLockOpen) answers 402 free_plan_ended, reads included.
+		if !planLockOpen(r.Method, strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/"+r.PathValue("tenantId"))) {
+			switch locked, err := a.planLocked(r.Context(), r.PathValue("tenantId")); {
+			case err != nil:
+				a.dbError(w, err)
+				return
+			case locked:
+				failFreePlanEnded(w)
+				return
+			}
+		}
 		next(w, r.WithContext(context.WithValue(r.Context(), tenantRoleKey{}, role)))
 	})
 }

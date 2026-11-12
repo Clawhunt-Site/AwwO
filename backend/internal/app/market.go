@@ -470,7 +470,10 @@ func (in marketDraftInput) validate(maxPrice int) (marketVersion, string, error)
 
 // freezeMarketSkills copies each named skill's current text. A workspace skill must belong to a workspace the
 // author is a member of, and one imported from skills.sh without a known open license cannot be republished.
-func freezeMarketSkills(ctx context.Context, q querier, userID string, refs []marketSkillIn) ([]marketSkill, error) {
+// closed says whether the free plan's end has a workspace closed (free_plan.go planLocked): such a workspace gives up
+// none of its skills to a draft, and is asked after the membership (only a member learns that it is closed) and before
+// the skill is read (so a refusal says nothing of the skill: its name, its size, whether it is there).
+func freezeMarketSkills(ctx context.Context, q querier, userID string, refs []marketSkillIn, closed func(context.Context, string) (bool, error)) ([]marketSkill, error) {
 	out := []marketSkill{}
 	seen := map[string]bool{}
 	total := 0
@@ -487,6 +490,12 @@ func freezeMarketSkills(ctx context.Context, q querier, userID string, refs []ma
 			}
 			if !member {
 				return nil, marketError{409, "market_skill_unavailable", "A skill comes from a workspace you are not a member of: " + in.Ref}
+			}
+			switch locked, err := closed(ctx, in.TenantID); {
+			case err != nil:
+				return nil, err
+			case locked:
+				return nil, marketError{402, "free_plan_ended", freePlanEndedMessage}
 			}
 			tid = in.TenantID
 		}

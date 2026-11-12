@@ -1984,6 +1984,11 @@ func (a *App) events(w http.ResponseWriter, r *http.Request) {
 		if e != nil || !valid {
 			return false
 		}
+		// A workspace the free plan's end has closed since the stream opened sends no more of the run down it
+		// (free_plan.go planLocked): the run, admitted before, finishes by itself and is read once the owner subscribes.
+		if locked, lockErr := a.planLocked(r.Context(), tid); lockErr != nil || locked {
+			return false
+		}
 		var issuer, subject string
 		var grant []byte
 		e = a.db.QueryRow(r.Context(), "SELECT COALESCE(sso_issuer,''),COALESCE(sso_subject,''),sso_grant FROM auth_sessions WHERE token_hash=$1", tokenHash(c.Value)).Scan(&issuer, &subject, &grant)

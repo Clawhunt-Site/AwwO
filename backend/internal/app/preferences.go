@@ -382,9 +382,43 @@ func (a *App) adminDecideDeletion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, item)
 }
 
+// exportableWorkspaces lists the active workspaces the account belongs to whose canvases its export may carry: all of
+// them but the ones the free plan's end has closed (planLocked).
+func (a *App) exportableWorkspaces(ctx context.Context, q querier, userID string) ([]string, error) {
+	rows, err := q.Query(ctx, "SELECT m.tenant_id FROM memberships m JOIN tenants t ON t.id=m.tenant_id WHERE m.user_id=$1 AND t.status='active' ORDER BY 1", userID)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	open := []string{}
+	for _, id := range ids {
+		locked, err := a.planLocked(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if !locked {
+			open = append(open, id)
+		}
+	}
+	return open, nil
+}
+
 // exportAccount streams what this account can read: its profile, settings, colour scheme, workspaces, and every
-// canvas of each active workspace it belongs to, as one JSON document. Canvases are written one row at a time, so
-// a large workspace never sits in memory whole. Keys, sessions and other members' details are not part of it.
+// canvas of each active workspace it belongs to that the free plan's end has not closed, as one JSON document.
+// Canvases are written one row at a time, so a large workspace never sits in memory whole. Keys, sessions and other
+// members' details are not part of it.
 func (a *App) exportAccount(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	u := currentUser(r)
@@ -425,7 +459,14 @@ func (a *App) exportAccount(w http.ResponseWriter, r *http.Request) {
 	if workspaces == nil {
 		workspaces = []json.RawMessage{}
 	}
-	rows, err := tx.Query(ctx, "SELECT "+canvasJSON+" FROM canvases WHERE tenant_id IN (SELECT m.tenant_id FROM memberships m JOIN tenants t ON t.id=m.tenant_id WHERE m.user_id=$1 AND t.status='active') ORDER BY tenant_id, created_at, id", u.ID)
+	// A workspace the free plan's end has closed gives up none of its canvases here either (free_plan.go planLocked: it
+	// cannot be opened or exported until its owner subscribes); the export still names it among the workspaces.
+	open, err := a.exportableWorkspaces(ctx, tx, u.ID)
+	if err != nil {
+		a.dbError(w, err)
+		return
+	}
+	rows, err := tx.Query(ctx, "SELECT "+canvasJSON+" FROM canvases WHERE tenant_id = ANY($1::text[]) ORDER BY tenant_id, created_at, id", open)
 	if err != nil {
 		a.dbError(w, err)
 		return

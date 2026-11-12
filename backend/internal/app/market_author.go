@@ -47,7 +47,9 @@ func (a *App) marketDraftVersion(ctx context.Context, tx pgx.Tx, u User, in mark
 		}
 	}
 	v.AuthorName = author
-	if v.Skills, err = freezeMarketSkills(ctx, tx, u.ID, in.Skills); err != nil {
+	// The market's routes are the account's, not a workspace's, so the freeze asks whether the free plan's end has a
+	// skill's workspace closed (free_plan.go planLocked).
+	if v.Skills, err = freezeMarketSkills(ctx, tx, u.ID, in.Skills, a.planLocked); err != nil {
 		return v, err
 	}
 	v.ContentHash = marketContentHash(v)
