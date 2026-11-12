@@ -37,7 +37,8 @@ func TestFetchCheckURLHoldsOnEveryHop(t *testing.T) {
 	if _, err := Fetch(context.Background(), "http://site.test/.git/config", opt); !errors.As(err, &refused) || refused.Code != "caller_refused" || probed != 0 {
 		t.Fatalf("the first address is checked too: %v", err)
 	}
-	if result, err := Fetch(context.Background(), "http://site.test/fine", opt); err != nil || !strings.Contains(result.Text, "plain page") {
+	// A page read records which extractor made its text: the one that keeps a page of several lists whole.
+	if result, err := Fetch(context.Background(), "http://site.test/fine", opt); err != nil || !strings.Contains(result.Text, "plain page") || result.Extractor != "awwo-reader/2" {
 		t.Fatalf("an allowed page still reads: %v", err)
 	}
 	// Without the check the reader follows the same redirect, as a member's import does.

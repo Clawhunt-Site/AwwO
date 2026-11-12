@@ -193,7 +193,9 @@ func Fetch(ctx context.Context, rawURL string, opt Options) (*Result, error) {
 		return nil, err
 	}
 	client := newClient(opt)
-	result := &Result{RequestedURL: current.String(), Redirects: []string{}, Extractor: "awwo-reader/1"}
+	// awwo-reader/2 (2026-11-12): a page whose text is several lists or sections side by side is kept whole
+	// (extract.go wholeText); /1 kept its best-scoring block alone.
+	result := &Result{RequestedURL: current.String(), Redirects: []string{}, Extractor: "awwo-reader/2"}
 	for hop := 0; ; hop++ {
 		if opt.Robots != nil {
 			verdict, err := opt.Robots.check(ctx, client, current, opt)

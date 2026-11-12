@@ -239,7 +239,8 @@ func (w *markdownWriter) list(n *html.Node, depth int) string {
 		var text strings.Builder
 		var nested []string
 		for c := li.FirstChild; c != nil; c = c.NextSibling {
-			if c.Type == html.ElementNode && (c.DataAtom == atom.Ul || c.DataAtom == atom.Ol) {
+			// A hidden list inside an item is left to inlineNode, which keeps nothing of it.
+			if c.Type == html.ElementNode && (c.DataAtom == atom.Ul || c.DataAtom == atom.Ol) && !skipped(c, true) {
 				if sub := w.list(c, depth+1); sub != "" {
 					nested = append(nested, sub)
 				}
@@ -259,7 +260,8 @@ func (w *markdownWriter) list(n *html.Node, depth int) string {
 
 func (w *markdownWriter) table(n *html.Node) string {
 	var rows [][]string
-	for _, tr := range findAll(n, element(atom.Tr)) {
+	// Rows a reader of the page sees: none inside a hidden row group or a form in a cell.
+	for _, tr := range findVisible(n, element(atom.Tr)) {
 		var cells []string
 		for c := tr.FirstChild; c != nil; c = c.NextSibling {
 			if c.Type == html.ElementNode && (c.DataAtom == atom.Td || c.DataAtom == atom.Th) && !skipped(c, true) {
