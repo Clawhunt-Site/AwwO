@@ -121,7 +121,7 @@ func TestPageReadNoteStaysWithinItsBound(t *testing.T) {
 	reason, longest := "", 0
 	for _, code := range []string{"robots_disallowed", "blocked_by_site_protection", "empty_content", "unsupported_type", "too_large", "timeout",
 		"model_query", "model_url_too_long", "model_probe_path", "invalid_url", "too_many_pages", "web_read_quota", "free_plan_ended", "no_room",
-		"web_reader_busy", "not_a_member", "workspace_suspended", "run_ended", "unavailable", "not_saved"} {
+		"web_reader_busy", "not_a_member", "workspace_suspended", "run_ended", "unavailable", "not_saved", "model_host_not_named"} {
 		if r := pageReadReason(code); len(r) > longest {
 			reason, longest = code, len(r)
 		}
@@ -146,9 +146,92 @@ func TestPageReadNoteStaysWithinItsBound(t *testing.T) {
 // An address asked for twice is taken once, read or not: a looped list of refused addresses makes one line each.
 func TestReadRunPagesTakesEachAddressOnce(t *testing.T) {
 	urls := []string{"ftp://a.example/x", "http://site.test/search?q=1", "ftp://a.example/x", " ftp://a.example/x", "http://site.test/search?q=1"}
-	reads := (&App{}).readRunPages(context.Background(), "tenant", "run", urls, "", 1<<20, maxKnowledgeRunReferences)
+	reads := (&App{}).readRunPages(context.Background(), "tenant", "run", nil, urls, "", 1<<20, maxKnowledgeRunReferences)
 	if len(reads) != 2 || reads[0].Code == "" || reads[1].Code != "model_query" {
 		t.Fatalf("each refused address once: %#v", reads)
+	}
+	// A plan that names sites refuses every other one before anything is counted or fetched (no database here).
+	plan := &webReadPlan{Pages: modelReadPagesMax, Hosts: []string{"site.test"}}
+	reads = (&App{}).readRunPages(context.Background(), "tenant", "run", plan, []string{"http://other.test/a", "http://docs.site.test/b", "http://site.test.other.test/c"}, "", 1<<20, maxKnowledgeRunReferences)
+	if len(reads) != 3 || reads[0].Code != "model_host_not_named" || reads[1].Code != "model_host_not_named" || reads[2].Code != "model_host_not_named" {
+		t.Fatalf("addresses on sites the plan does not name: %#v", reads)
+	}
+}
+
+// A named site is itself and its www. form, whatever the case: no subdomain, no name that only ends or starts like it.
+func TestNamedReadSitesAreTheSiteAndItsWwwForm(t *testing.T) {
+	if key := readHostKey(" WWW.Site.Test. "); key != "site.test" {
+		t.Fatalf("key %q", key)
+	}
+	named := []string{"site.test", "docs.example.org"}
+	for host, want := range map[string]bool{
+		"site.test": true, "www.site.test": true, "SITE.TEST": true, "docs.example.org": true, "www.docs.example.org": true,
+		"docs.site.test": false, "example.org": false, "site.test.evil.example": false, "evilsite.test": false, "wwwsite.test": false,
+		"www.www.site.test": false, "": false,
+	} {
+		if hostNamed(host, named) != want {
+			t.Fatalf("%q named: %v, want %v", host, !want, want)
+		}
+	}
+	plan := &webReadPlan{Pages: modelReadPagesMax, Hosts: named}
+	for address, code := range map[string]string{
+		"http://site.test/a": "", "https://www.docs.example.org/guide/": "", "http://other.test/a": "model_host_not_named",
+		// The address rules come first: a named site's address is still held to them.
+		"http://site.test/a?q=1": "model_query", "http://site.test/.env": "model_probe_path",
+	} {
+		got := ""
+		if _, err := checkRunReadURL(address, plan); err != nil {
+			got = webReadCode(err)
+		}
+		if got != code {
+			t.Fatalf("%s: refused as %q, want %q", address, got, code)
+		}
+	}
+	// No plan, or a plan that names no site, is any site, as before.
+	for _, any := range []*webReadPlan{nil, {Pages: modelReadPagesMax}} {
+		if _, err := checkRunReadURL("http://other.test/a", any); err != nil {
+			t.Fatalf("a plan that names no site refused a site: %v", err)
+		}
+		if got := webReadSystemPrompt("Be brief.", any); got != "Be brief.\n\n"+webReadFrame {
+			t.Fatal("a plan that names no site changes the frame")
+		}
+	}
+	if got := webReadSystemPrompt("Be brief.", plan); !strings.HasPrefix(got, "Be brief.\n\n"+webReadFrame+"\n") || !strings.Contains(got, "only on these sites") || !strings.Contains(got, "site.test, docs.example.org.") {
+		t.Fatalf("the frame names the sites: %s", got)
+	}
+	// At execution: named sites only offers nothing to a run whose plan names none; a plan that names sites keeps them
+	// whatever the switch says now.
+	a := &App{}
+	a.cfg.WebReaderEnabled, a.cfg.ModelWebReads, a.cfg.ModelWebReadsNamedOnly = true, true, true
+	open, held := executionSnapshot{WebReads: &webReadPlan{Pages: modelReadPagesMax}}, executionSnapshot{WebReads: plan}
+	if a.offersWebReads(open, "node") || !a.offersWebReads(held, "node") {
+		t.Fatal("named sites only: a plan without sites offers nothing, one with sites offers")
+	}
+	a.cfg.ModelWebReadsNamedOnly = false
+	if !a.offersWebReads(open, "node") || !a.offersWebReads(held, "node") {
+		t.Fatal("any site: both plans offer")
+	}
+	if a.cfg.modelReadSites() != "any" || (Config{}).modelReadSites() != "" {
+		t.Fatal("the capability names the mode")
+	}
+}
+
+func TestModelWebReadsSwitchIsNamedOnOrOff(t *testing.T) {
+	for raw, want := range map[string][2]bool{"": {false, false}, "off": {false, false}, "named": {true, true}, "on": {true, false}} {
+		t.Setenv("AWWO_MODEL_WEB_READS", raw)
+		var c Config
+		if err := c.capabilityFromEnv(); err != nil || c.ModelWebReads != want[0] || c.ModelWebReadsNamedOnly != want[1] {
+			t.Fatalf("%q: %v %v %v", raw, c.ModelWebReads, c.ModelWebReadsNamedOnly, err)
+		}
+		c.WebReaderEnabled = true
+		if sites := c.modelReadSites(); sites != map[string]string{"": "", "off": "", "named": "named", "on": "any"}[raw] {
+			t.Fatalf("%q: sites %q", raw, sites)
+		}
+	}
+	t.Setenv("AWWO_MODEL_WEB_READS", "hosts")
+	var c Config
+	if err := c.capabilityFromEnv(); err == nil {
+		t.Fatal("an unknown value was taken")
 	}
 }
 
@@ -202,7 +285,13 @@ func TestPageAnswerFitsTheRoomItWasOffered(t *testing.T) {
 		s.TaskFrame = &taskFrame{Version: 1, Source: "manual", Constraints: []string{"FRAME-CONSTRAINT: at most 200 words."}, AcceptanceCriteria: []string{"Cites the release notes."}}
 		return s
 	}
-	edge := strings.Repeat("x", 32768-utf16Len(a.sentInstructions(webReadSystemPrompt(""), plain)))
+	edge := strings.Repeat("x", 32768-utf16Len(a.sentInstructions(webReadSystemPrompt("", plain.WebReads), plain)))
+	// A run whose plan names as many sites as a plan keeps, each as long as a host may be: the frame is that much longer.
+	sited := withAll(known)
+	sited.WebReads = &webReadPlan{Pages: modelReadPagesMax}
+	for i := range modelReadHostsMax {
+		sited.WebReads.Hosts = append(sited.WebReads.Hosts, fmt.Sprintf("site-%d.%s.test", i, strings.Repeat("a", modelReadHostBytes-12)))
+	}
 	// Words and white space at the estimator's limits (context_estimate.go): 32 letters is a prose word, more than 32
 	// white space characters is strict, so the joins the second call makes can move them across.
 	limits := strings.Repeat(" ", 32) + strings.Repeat("abcdefghijklmnopqrstuvwxyzabcdef ", 600) + strings.Repeat(" ", 31)
@@ -221,6 +310,7 @@ func TestPageAnswerFitsTheRoomItWasOffered(t *testing.T) {
 		{"a run with knowledge of its own", "What changed in the release? " + strings.Repeat("word ", 4000), raw, known, 60000, 0, true},
 		{"every other context, no knowledge of its own", "What changed in the release? " + strings.Repeat("word ", 4000), raw, withAll(plain), 60000, 4, true},
 		{"every context", limits, raw, withAll(known), 40000, 4, true},
+		{"every context and eight named sites", limits, raw, sited, 40000, 4, true},
 		{"instructions the boundary would take past their bound", "What changed?", edge, plain, 1 << 30, 0, false},
 	}
 	for _, c := range cases {
@@ -237,8 +327,11 @@ func TestPageAnswerFitsTheRoomItWasOffered(t *testing.T) {
 				}
 				return
 			}
-			if room < webFitLeastRoom || offered != a.sentInstructions(webReadSystemPrompt(base), s) {
+			if room < webFitLeastRoom || offered != a.sentInstructions(webReadSystemPrompt(base, s.WebReads), s) {
 				t.Fatalf("no reads offered (room %d)", room)
+			}
+			if s.WebReads.Hosts != nil && !strings.Contains(offered, webReadSitesNote(s.WebReads)) {
+				t.Fatal("the first call's instructions lack the named sites")
 			}
 			items := fillItems(t, modelReadPagesMax, room)
 			var reads []pageRead

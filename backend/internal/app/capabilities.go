@@ -52,9 +52,10 @@ func (a *App) capabilities(w http.ResponseWriter, r *http.Request) {
 		"memory":        map[string]any{"enabled": true, "maxRunItems": maxMemoryRunItems, "maxRunBytes": maxMemoryRunBytes, "maxPerScope": maxMemoryPerScope},
 		// fit: POST …/knowledge/sources/web cuts a page to its share of a task's quoted knowledge, which reading the pages
 		// a message names needs; a page meeting a server without it reads none of them (and sends it no fit).
-		// modelReads: a node's model may ask for up to three pages a run (model_web_reads.go), out of the same allowance.
+		// modelReads: a node's model may ask for up to three pages a run (model_web_reads.go), out of the same allowance;
+		// modelReadSites says of which sites: "named" (the ones a member named for the run) or "any".
 		"webReader": map[string]any{"enabled": a.cfg.WebReaderEnabled, "perDay": webPerDay, "usedToday": reads, "fit": true,
-			"modelReads": a.cfg.WebReaderEnabled && a.cfg.ModelWebReads},
+			"modelReads": a.cfg.WebReaderEnabled && a.cfg.ModelWebReads, "modelReadSites": a.cfg.modelReadSites()},
 		"render": map[string]any{"enabled": a.cfg.RenderURL != "", "perDay": rendersPerDay, "usedToday": renders,
 			"limits": map[string]any{"maxSeconds": maxRenderSeconds, "maxFps": 60, "maxWidth": 1920, "maxHeight": 1920, "maxFrames": maxRenderFrames, "maxHtmlBytes": maxRenderHTMLBytes}},
 		// Edit nodes (edits.go) render on the same worker.

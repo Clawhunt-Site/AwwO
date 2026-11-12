@@ -724,15 +724,17 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		history := []json.RawMessage{}
 		snapshot.History = &history
 	}
-	// A node's own message may let its model ask for pages (model_web_reads.go): frozen with the run, so a switch turned
-	// on later changes no run admitted before it.
-	if a.webReadsEligible(kind, team, market, snapshot) {
-		snapshot.WebReads = &webReadPlan{Pages: modelReadPagesMax}
-	}
 	budget, overhead := snapshot.Budget, snapshot.Overhead
 	snapshot.Knowledge, e = freezeKnowledgeContext(r.Context(), tx, tid, b.KnowledgeRevisionIDs)
 	if e != nil {
 		a.knowledgeFailure(w, e)
+		return
+	}
+	// A node's own message may let its model ask for pages (model_web_reads.go): frozen with the run, so a switch turned
+	// on later changes no run admitted before it. After the knowledge is frozen: where the deployment reads named sites
+	// only, the sites are the ones the run's quoted sources were read from at a member's word.
+	if snapshot.WebReads, e = a.freezeWebReads(r.Context(), tx, tid, kind, team, market, snapshot); e != nil {
+		a.dbError(w, e)
 		return
 	}
 	// The files the message names go with it, frozen now: their text is quoted after the user's words (and kept
@@ -1385,7 +1387,7 @@ calls:
 						return
 					}
 					urls, problem := parsePageRequest(output.String())
-					reads := a.readRunPages(ctx, tid, id, urls, problem, readRoom, knowledgeSlotsLeft(snapshot))
+					reads := a.readRunPages(ctx, tid, id, snapshot.WebReads, urls, problem, readRoom, knowledgeSlotsLeft(snapshot))
 					if status, code, ended := runContextOutcome(ctx); ended {
 						a.finish(tid, id, status, "", code)
 						return

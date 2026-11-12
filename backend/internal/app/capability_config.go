@@ -14,11 +14,14 @@ import (
 // reader needs AWWO_WEB_READER=on, the registry AWWO_SKILL_REGISTRY=on, the renderer and edits the worker's URL and token.
 type capabilitySettings struct {
 	WebReaderEnabled bool
-	// ModelWebReads (AWWO_MODEL_WEB_READS=on, with the reader on) lets a node's model ask the API to read up to three
-	// pages a run (model_web_reads.go), counted in the same daily allowances as a member's imports.
-	ModelWebReads      bool
-	WebReadsPerDay     int
-	WebReadsSitePerDay int
+	// ModelWebReads (AWWO_MODEL_WEB_READS=named or on, with the reader on) lets a node's model ask the API to read up
+	// to three pages a run (model_web_reads.go), counted in the same daily allowances as a member's imports.
+	// ModelWebReadsNamedOnly (named) keeps those pages to the sites a member named for the run: the ones its quoted
+	// sources were read from at a member's word. on reads any public site a model names.
+	ModelWebReads          bool
+	ModelWebReadsNamedOnly bool
+	WebReadsPerDay         int
+	WebReadsSitePerDay     int
 	// WebReaderProxy is a proxy on this computer that the web reader and the skill registry read through
 	// (AWWO_WEB_READER_PROXY, exactly http://127.0.0.1:<port>, development only, as the local edition runs); empty
 	// connects to the sites directly. No proxy variable is ever read.
@@ -62,10 +65,12 @@ func (c *Config) capabilityFromEnv() error {
 	}
 	switch os.Getenv("AWWO_MODEL_WEB_READS") {
 	case "", "off":
+	case "named":
+		c.ModelWebReads, c.ModelWebReadsNamedOnly = true, true
 	case "on":
 		c.ModelWebReads = true
 	default:
-		return errors.New("AWWO_MODEL_WEB_READS must be on or off")
+		return errors.New("AWWO_MODEL_WEB_READS must be named, on or off")
 	}
 	switch os.Getenv("AWWO_SKILL_REGISTRY") {
 	case "", "off":
@@ -144,9 +149,21 @@ func (c Config) webReaderProxy() *url.URL {
 	return u
 }
 
+// modelReadSites is which sites a node's model may ask the API to read: "" when it may ask for none, "named" for the
+// ones a member named for the run, "any" for any public site (GET /capabilities, webReader.modelReadSites).
+func (c Config) modelReadSites() string {
+	switch {
+	case !c.WebReaderEnabled || !c.ModelWebReads:
+		return ""
+	case c.ModelWebReadsNamedOnly:
+		return "named"
+	}
+	return "any"
+}
+
 func (c Config) validateCapabilities() error {
 	if c.ModelWebReads && !c.WebReaderEnabled {
-		return errors.New("AWWO_MODEL_WEB_READS=on reads through the web reader, which needs AWWO_WEB_READER=on")
+		return errors.New("AWWO_MODEL_WEB_READS reads through the web reader, which needs AWWO_WEB_READER=on")
 	}
 	if c.WebReaderProxy != "" && (c.Env != "development" || !loopbackOrigin(c.WebReaderProxy)) {
 		return errors.New("AWWO_WEB_READER_PROXY is a development setting and must be http://127.0.0.1:<port>")

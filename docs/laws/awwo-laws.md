@@ -312,11 +312,13 @@ Evidence paths are repo-relative and were checked against this tree on 2026-10-1
   unless a person has approved that exact target and scope, and without such an approval it MUST refuse.
 - **Why.** Probing systems AwwO does not own is abuse that lands on AwwO's addresses and accounts. Since
   2026-11-12 (the owner's 「就让模型现在能够自己抓网页吧」) a node's model may name pages for the API to read
-  (`backend/internal/app/model_web_reads.go`, off unless `AWWO_MODEL_WEB_READS=on`), but only as page reads
+  (`backend/internal/app/model_web_reads.go`, off unless `AWWO_MODEL_WEB_READS` is `named` or `on`), but only as page reads
   through the web reader (http and https on the default ports, public addresses checked at connect time,
   robots.txt), at most three a run, counted in the workspace's and the site's daily allowances, with no query,
   short hosts and paths, and no path a scanner tries (dot files, `wp-admin`, `cgi-bin`, backups and keys), on
-  every address a read requests, its redirects' and its robots.txt's included. A
+  every address a read requests, its redirects' and its robots.txt's included. With `named`, a model may ask only
+  for the sites a member named for the run (the hosts of the addresses a member had AwwO read whose pages the run
+  quotes), held on every such address too, so a model reaches no site of its own choosing. A
   sandbox run's commands reach public sites through the egress proxy where it is configured
   (`apps/openai-agents-worker/workspace-sandbox.ts`). Each new network feature must keep scanning impossible.
 - **Evidence.** Structural only: the tool allowlists of AWWO-LAW-011;
@@ -327,7 +329,10 @@ Evidence paths are repo-relative and were checked against this tree on 2026-10-1
   probe-shaped path is refused before anything is counted or fetched); `backend/internal/webread/checkurl_test.go`
   (`TestFetchCheckURLHoldsOnEveryHop`: a redirect, or a robots.txt redirect, to a refused address is never
   requested); `backend/internal/app/model_web_reads_test.go` (`TestPostgresModelPageReadsReadThenAnswer`: a
-  model's reads are counted in `web_reads`, robots.txt holds, and a redirect to a probe path is not followed).
+  model's reads are counted in `web_reads`, robots.txt holds, and a redirect to a probe path is not followed);
+  `backend/internal/app/model_web_sites_test.go` (`TestPostgresModelPageReadsNamedSitesOnly`: with `named`, another
+  site and a subdomain are refused before anything is counted and a redirect off the named site is never requested;
+  `TestPostgresModelPageReadsNamedSitesNeedAMembersRead`: a page only a model's read saved names no site).
   The managed-execution sandbox's lack of network is stated in `apps/openmaus-worker/transport.ts` but not tested
   in this repository. No approval gate exists, because nothing may scan; no automated check yet for scanning
   intent.
