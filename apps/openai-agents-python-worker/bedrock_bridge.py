@@ -622,8 +622,8 @@ def _stream_exception(event: Any) -> BridgeError | None:
 
 def bedrock_fact_line(service: str, run_id: Any, fact: Any) -> str | None:
     """One JSON log line for a call's content-free fact (a fallback to the model's other profile, a failure by AWS error
-    type; and this worker's own, a change in SummaryWatch), or None for anything else, as bedrockFactLine in
-    apps/bedrock-bridge.ts: closed labels and a status only."""
+    type; and this worker's own, a change in SummaryWatch and a cached client replaced at its age), or None for anything
+    else, as bedrockFactLine in apps/bedrock-bridge.ts: closed labels, a status and a whole number of seconds only."""
     if not isinstance(fact, dict):
         return None
 
@@ -645,6 +645,10 @@ def bedrock_fact_line(service: str, run_id: Any, fact: Any) -> str | None:
             and fact.get("state") in ("silent", "streams")):
         return json.dumps({"service": service, **run, "event": "bedrock_summary_watch", "model": fact["model"], "effort": fact["effort"],
                            "state": fact["state"]})
+    # default_client: this call got a new client because the cached one was older than BEDROCK_CLIENT_MAX_AGE_SECONDS.
+    age = fact.get("age")
+    if fact.get("event") == "client_replaced" and isinstance(age, int) and not isinstance(age, bool) and 0 <= age <= 10**9:
+        return json.dumps({"service": service, **run, "event": "bedrock_client_replaced", "ageSeconds": age})
     return None
 
 
@@ -874,8 +878,62 @@ def valid_auth(auth: Any) -> bool:
     return auth.get("aws") is True
 
 
+# How long a cached client is handed to new calls: after that the next call gets a new one, and the old one is let go
+# of once the calls still on it have ended. A client keeps its connections to Bedrock open between calls, and on the
+# path from the production host one left idle for more than about an hour is dead without a word. Probed from that host
+# with unsigned requests on 2026-10-21 and 2026-11-12: every connection idle for 60 s to 61 minutes (21 of them)
+# answered at once; every one idle for 65, 70, 80 or 90 minutes (5) never had its request acknowledged (6
+# retransmissions in 45 s, no reply, no close from either side). Three connections kept awake with TCP keepalive probes
+# (every 60 s, or every 10 minutes) were closed by Bedrock 3,720 to 3,735 s after their last request; a silent
+# connection never sees that close on the host and stays open there. (Each probe connection made one request as it
+# opened, so 62 minutes idle and 62 minutes old are the same thing in these numbers.)
+# A call sent on such a connection hangs until its read timeout, and for a model that thinks silently (THINKS_SILENTLY)
+# nothing tells that from thinking: on 2026-11-11 and 11-12 the first Claude Fable 5.2 call after the worker had sent
+# Bedrock nothing for 2 h 19 min, and then for about 7 h, hung its whole 15 minutes (ReadTimeoutError before any
+# answer), and the retry answered in 6 s. The host's kernel does not notice sooner: it would send a first keepalive
+# probe after two hours (tcp_keepalive_time 7200, and botocore's tcp_keepalive, which this client does not set, can ask
+# for no other time), and it retransmits unanswered data for about 15 minutes (tcp_retries2 15).
+# The limit is on the client's age, not on the time since its last call: the pool hands out the connection used most
+# recently (urllib3's LifoQueue), so in a worker that is never idle the connections opened for a burst of calls lie
+# under it unused, and the next burst reaches them. (9 of the 17 requests lost by 2026-10-21 were sent in bursts of node
+# starts; at least one of those was on a new connection, so this does not explain them all.) No connection of a client
+# is idle for longer than the client has lived, nor older. Five minutes is about a twelfth of the 61 seen to be safe. A
+# new client takes about 0.1 s to build (measured on Linux, 600 in a row; the process's memory rose by about 115 MB
+# over them, 90 of it in the first hundred) and 0.34-0.44 s to connect (TCP and TLS 1.3 from the host), once for all
+# the calls of those minutes. apps/bedrock-bridge.ts builds a client for every call and destroys it after, so its calls
+# never meet an idle connection.
+BEDROCK_CLIENT_MAX_AGE_SECONDS = 5 * 60
+
+
+class _Lease:
+    """A cached client: when it was built, the calls on it now, whether it was retired (no new call gets it), and the
+    age of the client it replaced, until a call has reported that (replaced_client_age)."""
+
+    def __init__(self, client: Any, built: float, replaced: float | None) -> None:
+        self.client = client
+        self.built = built
+        self.calls = 0
+        self.retired = False
+        self.replaced = replaced
+
+
+# The client new calls get, by region, key and read timeout; and every client default_client handed out that is not
+# closed yet, by id (a lease keeps its client alive, so the id is its own).
 _CLIENTS: dict = {}
+_LEASES: dict = {}
 _CLIENTS_LOCK = threading.Lock()
+_client_clock: Callable[[], float] = time.monotonic
+
+
+def _close_client(client: Any) -> None:
+    """Lets go of a retired client that no call is on. What close() does to its idle connections is urllib3's: 1.26
+    closes them at once; 2.x drops the pool, whose sockets close when it is collected (seen with urllib3 2.4.0 and
+    botocore 1.43.75, 2026-11-12: the socket stayed open until a garbage collection). Either way no call gets one of
+    them again, which is the point; and the bridge never closes a client under a call, whatever the library does then."""
+    try:
+        client.close()
+    except Exception:  # noqa: BLE001 - best effort: the client is used by nobody and serves no call again
+        pass
 
 
 def default_client(region: str, auth: dict, read_timeout: float):
@@ -884,16 +942,64 @@ def default_client(region: str, auth: dict, read_timeout: float):
     A Bedrock API key is sent as a bearer header on an unsigned request (botocore otherwise
     reads such a key only from the process environment); without one the client signs with
     the worker's AWS credential chain, such as an EC2 instance role, which botocore refreshes.
-    Clients are thread-safe and reused per region, key and timeout, so a model call neither
-    rebuilds the service model nor fetches credentials again.
+    Clients are thread-safe and reused per region, key and timeout for BEDROCK_CLIENT_MAX_AGE_SECONDS, so a model call
+    seldom rebuilds the service model or fetches credentials again, and is never given a connection idle for longer
+    (a call's second request, to the model's other profile, goes out on the same client after the first was refused:
+    later by the wait for that refusal, which its read timeout bounds twice over, for the headers and for the first
+    event).
+    The caller gives the client back when its call has ended (release_client): a client past its age is let go of then
+    (_close_client), never under a call. The age of a client whose replacement could not be built (no credentials) is
+    not reported: the next call finds nothing cached.
     """
     key = (region, auth.get("bearer_token") or "", read_timeout)
+    unused = None
+    try:
+        with _CLIENTS_LOCK:
+            now = _client_clock()
+            lease = _CLIENTS.get(key)
+            replaced = None
+            if lease is not None and now - lease.built > BEDROCK_CLIENT_MAX_AGE_SECONDS:
+                del _CLIENTS[key]
+                lease.retired = True
+                replaced = now - lease.built
+                if lease.calls == 0:
+                    del _LEASES[id(lease.client)]
+                    unused = lease.client
+                lease = None
+            if lease is None:
+                # Built (and so cached) only once credentials resolve; a failure is retried next call.
+                client = _new_client(region, auth, read_timeout)
+                lease = _CLIENTS[key] = _LEASES[id(client)] = _Lease(client, _client_clock(), replaced)
+            lease.calls += 1
+            return lease.client
+    finally:
+        if unused is not None:
+            _close_client(unused)
+
+
+def release_client(client: Any) -> None:
+    """The call that got `client` from default_client has ended (its stream was read to the end, failed, or was closed).
+    A retired client is closed when its last call ends. Any other client (a test's, another factory's) is left alone."""
     with _CLIENTS_LOCK:
-        client = _CLIENTS.get(key)
-        if client is None:
-            # Built (and so cached) only once credentials resolve; a failure is retried next call.
-            client = _CLIENTS[key] = _new_client(region, auth, read_timeout)
-    return client
+        lease = _LEASES.get(id(client))
+        if lease is None or lease.client is not client:
+            return
+        lease.calls = max(0, lease.calls - 1)
+        if not lease.retired or lease.calls:
+            return
+        del _LEASES[id(client)]
+    _close_client(client)
+
+
+def replaced_client_age(client: Any) -> float | None:
+    """How old the cached client was that `client` replaced (seconds), for the first call that asks; None for a client
+    that replaced none, for every later call, and for a client default_client did not build."""
+    with _CLIENTS_LOCK:
+        lease = _LEASES.get(id(client))
+        if lease is None or lease.client is not client:
+            return None
+        age, lease.replaced = lease.replaced, None
+        return age
 
 
 def _new_client(region: str, auth: dict, read_timeout: float):
@@ -1110,8 +1216,12 @@ class BedrockConverseTransport(AsyncBaseTransport):
             return events, head
 
         def worker():
+            client = None
             try:
                 client = self.client_factory(self.region, self.auth, read_timeout)
+                age = replaced_client_age(client)
+                if age is not None:
+                    self._tell({"event": "client_replaced", "age": int(age)})
                 try:
                     events, head = open_stream(client, self.model, bool(self.fallback_model))
                 except Exception as error:  # noqa: BLE001 - a profile's refusal turns to the model's other profile
@@ -1138,6 +1248,12 @@ class BedrockConverseTransport(AsyncBaseTransport):
                 put(("end", None))
             except BaseException as error:  # noqa: BLE001 - every failure crosses as a value
                 put(("error", error))
+            finally:
+                # This thread alone asks the client for anything: when it ends, the call takes no connection from the
+                # client's pool again. A stream it leaves open (a failure, a cancelled call) keeps the one connection it
+                # holds until cancel() closes it, and that one does not go back to the pool.
+                if client is not None:
+                    release_client(client)
 
         threading.Thread(target=worker, name="awwo-bedrock-converse", daemon=True).start()
         try:

@@ -369,6 +369,36 @@ test('the fetch serves only the pinned endpoint and pins the real Bedrock client
   assert.equal(sent[0].destroyed, true);
 });
 
+test('every call has a client of its own, destroyed when the call ends: no connection waits between calls', async () => {
+  // A connection left idle on the way from the production host dies without a word (alive after 61 minutes, dead after
+  // 65), and a call sent on one hangs until the stream's idle limit: 15 minutes for the first Claude Fable 5.2 call
+  // after hours without one on the Python worker, whose client was kept (2026-11-11). Here nothing is kept.
+  const turn = [{ messageStart: { role: 'assistant' } }, { contentBlockDelta: { delta: { text: 'OK' } } }, { messageStop: { stopReason: 'end_turn' } }];
+  const { sdk, sent } = fakeSdk(turn);
+  const fetch = createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk });
+  const first = await fetch(ENDPOINT, post(request()));
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].destroyed, false, 'a call that is still being read keeps its client');
+  // A second call beside the first builds its own: one in use is not shared either.
+  const second = await fetch(ENDPOINT, post(request()));
+  assert.equal(sent.length, 2);
+  assert.notEqual(sent[1].config, sent[0].config);
+  assert.equal(frames(await first.text()).at(-1), '[DONE]');
+  assert.deepEqual(sent.map(call => call.destroyed), [true, false], 'destroyed as soon as its own call has ended');
+  assert.equal(frames(await second.text()).at(-1), '[DONE]');
+  // And a third, after both ended, finds nothing to reuse.
+  await (await fetch(ENDPOINT, post(request()))).text();
+  assert.deepEqual(sent.map(call => call.destroyed), [true, true, true]);
+  // A call given up (its reader cancels) and one refused before it began let go of theirs as well.
+  const endless = fakeSdk(signal => (async function* () { yield { messageStart: { role: 'assistant' } }; await new Promise((_, stop) => signal?.addEventListener('abort', () => stop(signal.reason))); })());
+  const open = await createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: endless.sdk })(ENDPOINT, post(request()));
+  await open.body?.cancel();
+  assert.equal(endless.sent[0].destroyed, true);
+  const refused = fakeSdk([], { fail: Object.assign(new Error('x'), { name: 'ThrottlingException', $metadata: { httpStatusCode: 429 } }) });
+  assert.equal((await createBedrockFetch({ region: REGION, model: MODEL, auth: BEARER, sdk: refused.sdk })(ENDPOINT, post(request()))).status, 429);
+  assert.equal(refused.sent[0].destroyed, true);
+});
+
 test('SigV4 credentials reach the client with a Date expiry, and options cannot override auth or endpoint', async () => {
   const { sdk, sent } = fakeSdk([{ messageStop: { stopReason: 'end_turn' } }]);
   const credentials = { accessKeyId: 'ASIAEXAMPLE000000000', secretAccessKey: 'secret-secret-secret-0000', sessionToken: 'token-token-token-token', expiration: '2026-10-03T12:00:00.000Z' };

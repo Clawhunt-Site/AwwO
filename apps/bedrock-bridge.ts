@@ -820,6 +820,12 @@ export function createBedrockFetch({ region, model, auth, sdk, clientOptions = {
     const forward = () => abort.abort(init.signal?.reason);
     if (init.signal?.aborted) forward(); else init.signal?.addEventListener('abort', forward, { once: true });
     const aborted = () => abort.signal.reason ?? new DOMException('Aborted', 'AbortError');
+    // A client of its own for every call, destroyed when the call ends (release): the call opens its own connection, so
+    // none waits between calls. On the path from the production host a connection left idle dies without a word (alive
+    // after 61 minutes, dead after 65, probed 2026-10-21 and 11-12), and a call sent on one hangs until its idle limit: the Python
+    // worker, which kept its client, lost the first Claude Fable 5.2 call after hours without one that way (15 minutes,
+    // 2026-11-11 and 11-12; BEDROCK_CLIENT_MAX_AGE_SECONDS in its bedrock_bridge.py). A client kept across calls would
+    // need that limit here too.
     const client = new sdk.BedrockRuntimeClient({
       // The SDK's own HTTP/2 handler settings (one stream per session) with a longer idle limit; a test or an explicit
       // request handler in clientOptions replaces them.

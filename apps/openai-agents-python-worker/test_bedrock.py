@@ -1,6 +1,7 @@
 """Bedrock through the Converse bridge: parity with the TypeScript bridge, configuration,
 and the real Agents SDK over the bridge transport with a fake boto3 client (no network)."""
 import asyncio
+import gc
 import json
 import os
 import socket
@@ -19,9 +20,10 @@ from botocore.exceptions import ClientError, EventStreamError
 from urllib3.exceptions import ProtocolError
 
 from bedrock_bridge import (
-    BEDROCK_CONNECTION_FAILURE, BRIDGE_API_KEY, REASONING_EFFORTS, SUMMARIZED_THINKING, BedrockConverseTransport, BridgeError, ChunkMapper, SummaryWatch, bedrock_fact_line,
-    bridge_base_url, bridge_failure, call_read_timeout, default_client, stream_read_timeout, to_converse_input, valid_auth, valid_reasoning_efforts,
-    with_claude_prompt_cache, with_summarized_thinking,
+    BEDROCK_CLIENT_MAX_AGE_SECONDS, BEDROCK_CONNECTION_FAILURE, BRIDGE_API_KEY, REASONING_EFFORTS, SUMMARIZED_THINKING, BedrockConverseTransport, BridgeError,
+    ChunkMapper, SummaryWatch, bedrock_fact_line,
+    bridge_base_url, bridge_failure, call_read_timeout, default_client, release_client, replaced_client_age, stream_read_timeout, to_converse_input, valid_auth,
+    valid_reasoning_efforts, with_claude_prompt_cache, with_summarized_thinking,
 )
 from bedrock_catalog import (
     catalog_selection, parse_catalog, parse_catalog_file, parse_platform_providers, platform_health, platform_providers_in_use, read_catalog,
@@ -1110,6 +1112,257 @@ class RealEventStreamTests(unittest.IsolatedAsyncioTestCase):
         error, facts = await self.call(self.START, length=len(self.START) + 64)
         self.assertEqual(error, {"message": "The Bedrock request failed", "type": "connection_error", "code": "connection_error"})
         self.assertEqual(facts, [{"event": "failed", "model": OPUS, "error": "connection_error", "status": 502, "stage": "stream", "upstream": True}])
+
+
+def keepalive_endpoint(test, body):
+    """A local endpoint that answers every ConverseStream request it reads whole with an event stream of `body` and keeps
+    the connection open for the next one, as Bedrock does. Returns its URL and a log of what each connection saw, in
+    order: (connection number, "request") and (connection number, "closed") when the client closed it."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    log = []
+    taken = []
+
+    def serve(number, conn):
+        with conn:
+            while True:
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    try:
+                        chunk = conn.recv(65536)
+                    except OSError:
+                        return
+                    if not chunk:
+                        log.append((number, "closed"))
+                        return
+                    request += chunk
+                head, _, rest = request.partition(b"\r\n\r\n")
+                sent = next((int(line.split(b":", 1)[1]) for line in head.split(b"\r\n") if line.lower().startswith(b"content-length:")), 0)
+                while len(rest) < sent:
+                    try:
+                        chunk = conn.recv(65536)
+                    except OSError:
+                        return
+                    if not chunk:
+                        return
+                    rest += chunk
+                log.append((number, "request"))
+                try:
+                    conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.amazon.eventstream\r\nx-amzn-RequestId: stub\r\n"
+                                 + f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+                except OSError:
+                    return
+
+    def accept():
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            taken.append(conn)
+            threading.Thread(target=serve, args=(len(taken), conn), daemon=True).start()
+    threading.Thread(target=accept, daemon=True).start()
+
+    def stop():
+        listener.close()
+        for conn in taken:
+            try:
+                conn.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+    test.addCleanup(stop)
+    return f"http://127.0.0.1:{listener.getsockname()[1]}", log
+
+
+def answer_stream(text="OK"):
+    """A whole ConverseStream answer as Bedrock sends it: one text block and its usage."""
+    def event(kind, payload):
+        return event_message({":message-type": "event", ":event-type": kind, ":content-type": "application/json"}, json.dumps(payload).encode())
+    return (event("messageStart", {"role": "assistant"}) + event("contentBlockDelta", {"contentBlockIndex": 0, "delta": {"text": text}})
+            + event("contentBlockStop", {"contentBlockIndex": 0}) + event("messageStop", {"stopReason": "end_turn"})
+            + event("metadata", {"usage": {"inputTokens": 1, "outputTokens": 1, "totalTokens": 2}, "metrics": {"latencyMs": 1}}))
+
+
+class ClientAgeTests(unittest.IsolatedAsyncioTestCase):
+    """A call never goes out on a connection that has been idle for long: the cached client, which keeps its connections
+    open between calls, serves new calls for BEDROCK_CLIENT_MAX_AGE_SECONDS only. On the production host a connection
+    left idle for 65 minutes or more was dead without a word (2026-10-21 and 11-12), and the first Claude Fable 5.2 call after hours without
+    one hung for its whole 15-minute read timeout (2026-11-11 and 11-12)."""
+
+    def setUp(self):
+        # Straight to the local endpoint: a proxy named in the environment answers for it with "Connection: close", and
+        # then no connection is ever kept (seen in WSL, 2026-11-12).
+        self.enterContext(mock.patch.dict(os.environ, {**STUB_AWS, "NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}))
+        self.enterContext(mock.patch("bedrock_bridge.SUMMARY_WATCH", SummaryWatch()))
+        # The worker's cache, empty, and its clock, which only the test moves.
+        self.enterContext(mock.patch("bedrock_bridge._CLIENTS", {}))
+        self.leases = self.enterContext(mock.patch("bedrock_bridge._LEASES", {}))
+        self.now = 50_000.0
+        self.enterContext(mock.patch("bedrock_bridge._client_clock", lambda: self.now))
+
+    def fake_clients(self):
+        built = []
+
+        class Client:
+            def __init__(self):
+                self.closed = 0
+
+            def close(self):
+                self.closed += 1
+
+        def build(region, auth, read_timeout):
+            built.append(Client())
+            return built[-1]
+        self.enterContext(mock.patch("bedrock_bridge._new_client", build))
+        return built
+
+    @staticmethod
+    def get():
+        return default_client("us-east-1", {"aws": True}, 900.0)
+
+    def test_a_client_serves_new_calls_for_five_minutes_and_no_longer(self):
+        self.assertEqual(BEDROCK_CLIENT_MAX_AGE_SECONDS, 300)
+        built = self.fake_clients()
+        first = self.get()
+        release_client(first)
+        # Within its age it is reused, by a call after the last one ended and by one beside a call still on it.
+        self.now += 300
+        self.assertIs(self.get(), first)
+        self.assertIs(self.get(), first, "a client in use serves a second call beside the first")
+        release_client(first)
+        release_client(first)
+        self.assertEqual((len(built), first.closed), (1, 0))
+        self.assertIsNone(replaced_client_age(first), "the first client replaced none")
+        # Past it, the next call gets a new client, and the old one, which no call is on, is closed at once.
+        self.now += 1
+        second = self.get()
+        self.assertIsNot(second, first)
+        self.assertEqual((len(built), first.closed, second.closed), (2, 1, 0))
+        self.assertEqual(replaced_client_age(second), 301.0)
+        self.assertIsNone(replaced_client_age(second), "told once: to the call that got the new client")
+        release_client(second)
+        self.assertEqual(second.closed, 0, "the client new calls get stays open between them")
+        # Its age counts from when it was built, whatever was used since: the pool hands out its most recent connection,
+        # so calls one after another leave the connections of an earlier burst unused beneath it.
+        for _ in range(5):
+            self.now += 60
+            self.assertIs(self.get(), second)
+            release_client(second)
+        self.now += 1
+        self.assertIsNot(self.get(), second, "in steady use, and still replaced at its age")
+        self.assertEqual((len(built), second.closed), (3, 1))
+        # Another region, key or read timeout has a client of its own, with its own age.
+        self.assertIsNot(default_client("us-east-1", {"aws": True}, 180.0), built[2])
+        self.assertEqual(len(built), 4)
+
+    def test_a_client_past_its_age_is_closed_only_when_the_calls_on_it_have_ended(self):
+        built = self.fake_clients()
+        old = self.get()
+        beside = self.get()
+        self.assertIs(beside, old)
+        self.now += 301
+        new = self.get()
+        self.assertIsNot(new, old)
+        self.assertEqual(old.closed, 0, "two calls are still on it")
+        release_client(old)
+        self.assertEqual(old.closed, 0, "one call is still on it")
+        self.assertIs(self.get(), new, "and no new call gets it meanwhile")
+        release_client(old)
+        self.assertEqual(old.closed, 1, "closed with its last call")
+        release_client(old)
+        self.assertEqual((old.closed, new.closed), (1, 0), "a release too many closes nothing")
+        self.assertEqual(list(self.leases), [id(new)], "a closed client is forgotten")
+        # A client default_client did not build (a test's, another factory's) is left alone.
+        other = type(old)()
+        release_client(other)
+        self.assertEqual(other.closed, 0)
+        self.assertIsNone(replaced_client_age(other))
+        self.assertEqual(len(built), 2)
+
+    def test_a_client_that_cannot_be_built_leaves_the_old_one_retired_and_nothing_cached(self):
+        from botocore.exceptions import NoCredentialsError
+        built = self.fake_clients()
+        old = self.get()
+        release_client(old)
+        self.now += 301
+        with mock.patch("bedrock_bridge._new_client", side_effect=NoCredentialsError()):
+            with self.assertRaises(NoCredentialsError):
+                self.get()
+        self.assertEqual(old.closed, 1, "past its age: closed, not handed out again")
+        new = self.get()
+        self.assertIsNot(new, old)
+        self.assertEqual(len(built), 2)
+
+    async def call(self, facts):
+        transport = BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, read_timeout=10.0, report=facts.append)
+        async with httpx2.AsyncClient(transport=transport) as http:
+            response = await http.post(f"{bridge_base_url('us-east-1')}/chat/completions",
+                                       json={"model": OPUS, "stream": True, "messages": [{"role": "user", "content": "hi"}]})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"content": "OK"', response.text)
+        self.assertTrue(response.text.rstrip().endswith("data: [DONE]"))
+
+    async def until(self, done, what):
+        # The call's thread gives its client back after the last event has crossed to the caller.
+        for _ in range(200):
+            if done():
+                return
+            await asyncio.sleep(0.01)
+        self.fail(what)
+
+    async def test_the_transport_gives_its_client_back_and_a_call_past_the_age_opens_a_new_connection(self):
+        # Real botocore and urllib3 against a local endpoint that keeps connections open, through the worker's own
+        # default_client: only the address is the test's.
+        url, log = keepalive_endpoint(self, answer_stream())
+        self.enterContext(mock.patch("bedrock_bridge._new_client", local_client(url)))
+        facts = []
+
+        def idle():
+            return all(lease.calls == 0 for lease in self.leases.values())
+        await self.call(facts)
+        await self.until(idle, "the first call gave its client back")
+        self.now += 300
+        await self.call(facts)
+        await self.until(idle, "the second call gave its client back")
+        self.assertEqual(log, [(1, "request"), (1, "request")], "within the client's age the open connection is used again")
+        self.assertEqual(facts, [])
+        # Past the age: the call goes out on a connection of its own. The old one is never written to again; it closes
+        # when urllib3 lets go of it (1.26: as the client is closed; 2.x: when the dropped pool is collected, which the
+        # test asks for, since nothing else here says when that is).
+        self.now += 1
+        await self.call(facts)
+        self.assertEqual([entry for entry in log[2:] if entry[1] == "request"], [(2, "request")])
+
+        def old_closed():
+            gc.collect()
+            return idle() and len(log) == 4
+        await self.until(old_closed, f"the old connection was closed: {log}")
+        self.assertEqual(sorted(log[2:]), [(1, "closed"), (2, "request")])
+        self.assertEqual(len(self.leases), 1)
+        self.assertEqual(facts, [{"event": "client_replaced", "age": 301}])
+        self.assertEqual(json.loads(bedrock_fact_line("awwo-openai-agents-python-worker", "run_1", facts[0])),
+                         {"service": "awwo-openai-agents-python-worker", "runId": "run_1", "event": "bedrock_client_replaced", "ageSeconds": 301})
+        for fact in ({"event": "client_replaced"}, {"event": "client_replaced", "age": -1}, {"event": "client_replaced", "age": True},
+                     {"event": "client_replaced", "age": 301.5}, {"event": "client_replaced", "age": "301"}):
+            with self.subTest(fact=fact):
+                self.assertIsNone(bedrock_fact_line("s", "run_1", fact))
+
+    async def test_a_failed_call_gives_its_client_back_too(self):
+        refused = ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no"}, "ResponseMetadata": {"HTTPStatusCode": 403}}, "ConverseStream")
+        built = []
+
+        def build(region, auth, read_timeout):
+            built.append(FakeClient({}, text_turn("x"), fail=refused))
+            return built[-1]
+        self.enterContext(mock.patch("bedrock_bridge._new_client", build))
+        transport = BedrockConverseTransport(region="us-east-1", model=OPUS, auth={"aws": True}, read_timeout=10.0)
+        async with httpx2.AsyncClient(transport=transport) as http:
+            response = await http.post(f"{bridge_base_url('us-east-1')}/chat/completions",
+                                       json={"model": OPUS, "stream": True, "messages": [{"role": "user", "content": "hi"}]})
+        self.assertEqual(response.status_code, 403)
+        await self.until(lambda: [lease.calls for lease in self.leases.values()] == [0], "the refused call gave its client back")
+        self.assertEqual(len(built), 1)
 
 
 class StalledStreamTests(unittest.IsolatedAsyncioTestCase):

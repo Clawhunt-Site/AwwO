@@ -216,6 +216,56 @@ test('the real AWS SDK gives a Bedrock stream the bridge\'s idle limit, not its 
   assert.ok(BEDROCK_STREAM_IDLE_MS >= 15 * 60_000);
 });
 
+test('with the real AWS SDK no connection to Bedrock outlives its call', { timeout: 15_000 }, async () => {
+  // A connection left idle on the way from the production host dies without a word (alive after 61 minutes, dead after
+  // 65, probed 2026-10-21 and 11-12), and a call sent on one hangs until the stream's idle limit. The bridge builds a client for
+  // every call, and the handler it asks the SDK for (disableConcurrentStreams) ends each request's HTTP/2 session with
+  // the request: a later call can only open its own. An SDK upgrade that began to keep sessions would fail here.
+  const real = await import('@aws-sdk/client-bedrock-runtime');
+  const clients = [];
+  class BedrockRuntimeClient extends real.BedrockRuntimeClient {
+    constructor(options) { super(options); clients.push(this); }
+    async send() { throw Object.assign(new Error('no network in tests'), { name: 'ServiceUnavailableException' }); }
+  }
+  const fetch = createBedrockFetch({ region: 'us-east-1', model: 'global.anthropic.claude-opus-5-5', auth: { bearerToken: BEDROCK_KEY }, sdk: { ...real, BedrockRuntimeClient } });
+  const call = () => fetch(`${bedrockBridgeBaseURL('us-east-1')}/chat/completions`, { method: 'POST', body: JSON.stringify({ model: 'global.anthropic.claude-opus-5-5', messages: [{ role: 'user', content: 'Hi' }], stream: true, max_tokens: 64 }) });
+  assert.equal((await call()).status, 503);
+  assert.equal((await call()).status, 503);
+  assert.equal(clients.length, 2, 'a client for each call');
+  const handlers = clients.map(client => client.config.requestHandler);
+  assert.notEqual(handlers[0], handlers[1], 'each with a handler, and so with connections, of its own');
+  const server = http2.createServer();
+  const sessions = [];
+  let closed = 0;
+  server.on('session', session => { sessions.push(session); session.on('close', () => { closed += 1; }); });
+  server.on('stream', stream => { stream.respond({ ':status': 200, 'content-type': 'application/vnd.amazon.eventstream' }); stream.end(); });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const send = async handler => {
+    const { response: answer } = await handler.handle({ protocol: 'http:', hostname: '127.0.0.1', port: server.address().port, path: '/model/x/converse-stream', method: 'POST', headers: {}, query: {} }, { isEventStream: true });
+    assert.equal(answer.statusCode, 200);
+    answer.body.resume();
+    await once(answer.body, 'end');
+  };
+  const until = async (done, what) => {
+    for (let i = 0; i < 200 && !done(); i += 1) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.ok(done(), what);
+  };
+  try {
+    // Even one handler asked twice opens a session for each request and closes it when the request has ended.
+    await send(handlers[0]);
+    await until(() => closed === 1, 'the first request\'s session was closed with it');
+    await send(handlers[0]);
+    await until(() => closed === 2, 'the second request\'s session was closed with it');
+    await send(handlers[1]);
+    await until(() => closed === 3, 'the other client\'s session was closed with its request');
+    assert.equal(sessions.length, 3, 'three requests, three sessions: none was used twice');
+  } finally {
+    for (const handler of handlers) handler.destroy();
+    server.close();
+  }
+});
+
 test('a Bedrock tool call runs the registered tool once and its result is the turn output', { timeout: 15_000 }, async () => {
   const bedrock = fakeBedrock(async function* () {
     yield { messageStart: { role: 'assistant' } };
