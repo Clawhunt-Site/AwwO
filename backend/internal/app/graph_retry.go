@@ -47,14 +47,18 @@ const (
 	// retryIfUnbilled: a generation runs again only when its provider provably charged nothing (mediaRunUnbilled): a
 	// lost answer to a submission or a result that could not be stored may already have been paid for.
 	retryIfUnbilled
+	// retryUnsentCall: the run's last call never reached a model, which is the whole run's state unless an earlier call
+	// of it was paid for: a run whose model asked for pages has had its first call when its second is refused
+	// (model_web_reads.go). The node runs again only when its run is still silent (graphRunSilent).
+	retryUnsentCall
 )
 
 // graphRetryableCodes are the run error codes a canvas node is retried for: the closed list of the Canvas RSI design,
 // each with the condition that keeps a retry from paying twice for work already done.
 var graphRetryableCodes = map[string]graphRetryClass{
-	"runtime_rejected":           retryUnsent,
-	"runtime_unavailable":        retryUnsent,
-	"runtime_session_busy":       retryUnsent,
+	"runtime_rejected":           retryUnsentCall,
+	"runtime_unavailable":        retryUnsentCall,
+	"runtime_session_busy":       retryUnsentCall,
 	"workspace_unavailable":      retryUnsent,
 	"workspace_busy":             retryUnsent,
 	"workspace_admission_failed": retryUnsent,
@@ -122,7 +126,7 @@ func graphRetryable(code string, silent, unbilled func() bool) bool {
 	switch graphRetryableCodes[code] {
 	case retryUnsent:
 		return true
-	case retryIfSilent:
+	case retryUnsentCall, retryIfSilent:
 		return silent()
 	case retryIfUnbilled:
 		return unbilled()
@@ -131,12 +135,13 @@ func graphRetryable(code string, silent, unbilled func() bool) bool {
 }
 
 // graphRunSilent reports whether a failed run produced nothing a retry would pay for twice: no output text stored and
-// no model call that streamed or reported output tokens. A run that only thought (a provider that cut the call before
-// its first event) is silent; its next attempt is the repair, not a duplicate.
+// no model call that completed, streamed or reported output tokens. A run that only thought (a provider that cut the
+// call before its first event) is silent; its next attempt is the repair, not a duplicate. A completed call is never
+// silent, reported usage or not: a run's first call when its model asked for pages, a team's finished turn.
 func (a *App) graphRunSilent(ctx context.Context, tid, runID string) bool {
 	var silent bool
 	err := a.db.QueryRow(ctx, `SELECT r.output='' AND NOT EXISTS(SELECT 1 FROM model_invocations i WHERE i.tenant_id=r.tenant_id AND i.run_id=r.id
-		AND (COALESCE(i.output_tokens,0)>0 OR i.worker_first_delta_ms IS NOT NULL)) FROM runs r WHERE r.tenant_id=$1 AND r.id=$2`, tid, runID).Scan(&silent)
+		AND (i.status='completed' OR COALESCE(i.output_tokens,0)>0 OR i.worker_first_delta_ms IS NOT NULL)) FROM runs r WHERE r.tenant_id=$1 AND r.id=$2`, tid, runID).Scan(&silent)
 	return err == nil && silent
 }
 

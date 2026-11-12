@@ -29,6 +29,10 @@ type Options struct {
 	MaxTextBytes int           // extracted text, cut on a character boundary; default 256 KiB
 	MaxRedirects int           // default 5
 	Robots       *RobotsCache  // nil skips robots.txt (production callers always pass one)
+	// CheckURL, when set, is a check of the caller's own that every address the read requests must pass besides
+	// ValidateURL: the page's, each redirect's, and each redirect of its site's robots.txt. A read whose address a model
+	// chose passes its own rules here (no query, short, no path a scanner tries), so a redirect cannot lead past them.
+	CheckURL func(*url.URL) error
 	// Proxy, when set, is a proxy on this computer (http://127.0.0.1:<port>, checked by the caller's configuration)
 	// that every connection goes through, and then the only address dialed: the site's name is resolved here and the
 	// proxy is asked for a tunnel to the public address found (proxyDial), never to the name.
@@ -47,6 +51,20 @@ func (o Options) now() time.Time {
 		return o.Now()
 	}
 	return time.Now()
+}
+
+// validate is ValidateURL, then the caller's own CheckURL when set.
+func (o Options) validate(raw string) (*url.URL, error) {
+	u, err := ValidateURL(raw)
+	if err != nil {
+		return nil, err
+	}
+	if o.CheckURL != nil {
+		if err = o.CheckURL(u); err != nil {
+			return nil, err
+		}
+	}
+	return u, nil
 }
 
 func (o Options) withDefaults() Options {
@@ -170,7 +188,7 @@ func Fetch(ctx context.Context, rawURL string, opt Options) (*Result, error) {
 	opt = opt.withDefaults()
 	ctx, cancel := context.WithTimeout(ctx, opt.Timeout)
 	defer cancel()
-	current, err := ValidateURL(rawURL)
+	current, err := opt.validate(rawURL)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +219,7 @@ func Fetch(ctx context.Context, rawURL string, opt Options) (*Result, error) {
 			if err != nil || location == "" {
 				return nil, failure("invalid_url", "The page redirects to an invalid address")
 			}
-			if current, err = ValidateURL(next.String()); err != nil {
+			if current, err = opt.validate(next.String()); err != nil {
 				return nil, err
 			}
 			result.Redirects = append(result.Redirects, current.String())

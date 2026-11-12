@@ -13,7 +13,7 @@ import { withAgentKind, type MediaCatalogueState } from '../src/canvas/MediaNode
 import { TileTranscript } from '../src/canvas/TileTranscript';
 import { NodeDeliverables } from '../src/canvas/NodeDeliverables';
 import type { Turn } from '../src/canvas/sessions';
-import { canvasFetch, clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
+import { canvasFetch, clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasSave, modelWebReadStatus } from '../src/saas/canvasBridge';
 
 const tenant = { id: 'tenant-a', name: 'A', status: 'active', role: 'owner', maxConcurrentRuns: 2, maxRunsPerDay: 10 };
 
@@ -352,6 +352,49 @@ describe('media results', () => {
     const answered = rows.findIndex(row => row.event === 'delta' && row.text);
     expect([thought.length, back > rows.indexOf(thought[0]), back < answered]).toEqual([1, true, true]);
     expect(rows.some(row => row.event === 'status' && row.status === '')).toBe(false);
+  });
+
+  it('says which page the run’s model had AwwO read, then that it is answering, from the run’s own events', async () => {
+    // The API reads the pages a model asked for between its two calls (model_web_reads.go) and records each as a run
+    // event. The row says which page is being read (its host only), then that the model answers, then the run's own
+    // status again before the answer's first text.
+    configureSaaSCanvas({ tenant, canvasId: 'canvas-a' });
+    configureSaaSCanvasSave(async () => {});
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('operationId=')) return new Response(JSON.stringify({ items: [] }));
+      if (url.endsWith('/runs')) return new Response(JSON.stringify({ id: 'run-a', sessionId: 'session-a', status: 'queued' }));
+      if (url.endsWith('/events')) return new Response(['{"type":"running"}',
+        JSON.stringify({ type: 'web_read', state: 'reading', index: 1, total: 2, host: 'docs.example.com', url: 'https://docs.example.com/guide' }),
+        JSON.stringify({ type: 'web_read', state: 'read', index: 1, total: 2, host: 'docs.example.com', url: 'https://docs.example.com/guide', title: 'Guide' }),
+        JSON.stringify({ type: 'web_read', state: 'reading', index: 2, total: 2, host: 'blog.example.org', url: 'https://blog.example.org/post' }),
+        JSON.stringify({ type: 'web_read', state: 'skipped', index: 2, total: 2, host: 'blog.example.org', url: 'https://blog.example.org/post', code: 'robots_disallowed' }),
+        // Malformed reads say nothing rather than something false.
+        JSON.stringify({ type: 'web_read', state: 'reading', index: 4, total: 2, host: 'x.example' }),
+        JSON.stringify({ type: 'text_delta', delta: 'answer' }), JSON.stringify({ type: 'completed', text: 'answer' })].map(row => `data: ${row}\n\n`).join(''));
+      throw new Error(`Unexpected ${url}`);
+    }));
+    const lang = document.documentElement.lang;
+    document.documentElement.lang = 'zh-CN';
+    let frames = '';
+    try {
+      const response = await canvasFetch('/gateway-api/conversations/tenant-a/agents/agent-a/messages', { method: 'POST', body: JSON.stringify({ message: 'look it up', operationId: 'op-pages', issueId: 'session-a' }) });
+      frames = await response.text();
+    } finally { document.documentElement.lang = lang; }
+    const rows = frames.split('\n\n').filter(Boolean).map(row => JSON.parse(row.replace(/^data: /, '')));
+    const statuses = rows.filter(row => row.event === 'status').map(row => row.status);
+    expect(statuses).toEqual(['running', '正在读取网页 docs.example.com（1/2）', '正在读取网页 blog.example.org（2/2）', '网页已读完，模型正在作答…', 'running']);
+    // Only the host reaches the row, and the answer still arrives after the status comes down.
+    expect(frames).not.toContain('docs.example.com/guide');
+    expect(rows.findIndex(row => row.event === 'status' && row.status === 'running' && rows.indexOf(row) > 1)).toBeLessThan(rows.findIndex(row => row.event === 'delta'));
+    expect(frames).toContain('"event":"delta","text":"answer"');
+    // English words for an English page (the Chinese ones are the frames above).
+    document.documentElement.lang = 'en';
+    try {
+      expect(modelWebReadStatus({ state: 'reading', index: 1, total: 3, host: 'a.example' })).toBe('Reading a.example (1 of 3)');
+      expect(modelWebReadStatus({ state: 'read', index: 3, total: 3, host: 'a.example' })).toBe('Pages read; the model is answering…');
+      expect(modelWebReadStatus({ state: 'read', index: 2, total: 3, host: 'a.example' })).toBeNull();
+      expect(modelWebReadStatus({ state: 'reading', index: 1, total: 3, host: 'x'.repeat(101) })).toBeNull();
+    } finally { document.documentElement.lang = lang; }
   });
 
   it('says when a generation moved to a backup model, and whose the states after it are', async () => {

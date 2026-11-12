@@ -189,6 +189,18 @@ const mediaStatusText = (status: unknown, backup = false): string | null => stat
       : status === 'saving' ? canvasText('正在保存结果…', 'Saving the result…')
         : status === 'rigging' ? canvasText('正在绑定骨骼…', 'Rigging the model…') : status === 'animating' ? canvasText('正在生成动作…', 'Animating the model…') : null;
 
+/** What a node row says while the API reads the pages its model asked for (a run's web_read events): the page being
+ *  read, in the words of a message's own reading line, then, once the last one is done, that the model is answering.
+ *  The host is all of the address it shows; anything malformed shows nothing. */
+export const modelWebReadStatus = (event: { state?: unknown; host?: unknown; index?: unknown; total?: unknown }): string | null => {
+  const { state, host, index, total } = event;
+  if (typeof host !== 'string' || !host || host.length > 100 || typeof index !== 'number' || typeof total !== 'number'
+    || !Number.isInteger(index) || !Number.isInteger(total) || index < 1 || total < index || total > 3) return null;
+  if (state === 'reading') return canvasText(`正在读取网页 ${host}（${index}/${total}）`, `Reading ${host} (${index} of ${total})`);
+  if ((state === 'read' || state === 'skipped') && index === total) return canvasText('网页已读完，模型正在作答…', 'Pages read; the model is answering…');
+  return null;
+};
+
 const operationStatus = (operationId: string, run?: any) => ({ operationId,
   state: !run ? 'not_started' : run.terminal ? 'terminal' : 'accepted',
   issueId: run?.sessionId ?? null, runId: run?.id ?? null, terminal: run?.terminal ?? false,
@@ -569,6 +581,12 @@ export async function canvasFetch(input: string | URL | Request, init: RequestIn
             // first token can be minutes away, and until then all the page can say is 运行中 / Running — that a run is
             // in flight, not that the model is working. The reader's own clock keeps running underneath it.
             else if (event.type === 'reasoning_started' && !thinking) { thinking = true; emit({ event: 'status', status: canvasText('模型正在思考…', 'The model is thinking…') }); }
+            // The run's model asked AwwO to read pages (model_web_reads.go): the page being read, then that the model is
+            // answering, until its answer's first text puts the run's own status back, as the thinking status does.
+            else if (event.type === 'web_read') {
+              const status = modelWebReadStatus(event);
+              if (status) { thinking = true; emit({ event: 'status', status }); }
+            }
             else if (event.type === 'media_status') {
               if (event.status === 'backup') backup = true;
               const status = mediaStatusText(event.status, backup);

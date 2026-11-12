@@ -47,13 +47,22 @@ func TestGraphRetryableCodesAreTheDesignedList(t *testing.T) {
 	// No retry pays twice for work already done: each code asks exactly the question that rules that out, and only it.
 	never := func() bool { t.Helper(); t.Fatal("asked a question this code does not depend on"); return false }
 	no := func() bool { return false }
-	unsent := []string{"runtime_rejected", "runtime_session_busy", "runtime_unavailable", "workspace_admission_failed", "workspace_busy", "workspace_unavailable"}
+	unsent := []string{"workspace_admission_failed", "workspace_busy", "workspace_unavailable"}
+	// A refused call is the whole run's state unless an earlier call of it was paid for (a run whose model asked for
+	// pages, model_web_reads.go): these ask whether the run is still silent, and only that.
+	unsentCalls := []string{"runtime_rejected", "runtime_session_busy", "runtime_unavailable"}
 	silent := []string{"provider_rate_limited", "provider_unavailable", "runtime_failed", "runtime_stream_ended"}
 	for _, code := range unsent {
 		if !graphRetryable(code, never, never) {
 			t.Fatal("a run that never reached a model not retried", code)
 		}
 	}
+	for _, code := range unsentCalls {
+		if !graphRetryable(code, free, never) || graphRetryable(code, no, never) {
+			t.Fatal("a refused call is retried exactly when its run is still silent", code)
+		}
+	}
+	silent = append(silent, unsentCalls...)
 	for _, code := range silent {
 		if graphRetryable(code, no, never) {
 			t.Fatal("retried a run that produced output", code)

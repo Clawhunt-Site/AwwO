@@ -1,5 +1,5 @@
-// Under the home's composer (AwwO's 需求发布): when the request names live data that AwwO's own Agents cannot fetch
-// (canvas/liveDataNeed.ts), a card recommends pairing treg, Superdesign's third-party tool catalog, with the person's own
+// Under the home's composer (AwwO's 需求发布): when the request names live data that AwwO's own Agents cannot search
+// for (canvas/liveDataNeed.ts), a card recommends pairing treg, Superdesign's third-party tool catalog, with the person's own
 // Agent. AwwO only links to treg and shows the lines that add it (AgentInvite.tsx tregSnippets): it hosts none of treg,
 // handles no treg sign-in, and treg bills its calls to the person's own treg account. The card never blocks sending; 不需要
 // hides it until the request names other needs.
@@ -50,10 +50,10 @@ export function ToolAdvice({ text, scope, connects = true }: { text: string; sco
     <p className="saas-home-advice-title" id={titleId}><Globe size={15} aria-hidden="true" />{t('推荐搭配 · treg（第三方工具目录）', 'Pairs well with treg (a third-party tool catalog)')}</p>
     {/* The 同屏 button shows a dot and avatars only (MultiplayerBar): the words say where it is and what it looks like. */}
     <p>{route.connects
-      ? t(`这个需求可能要用到实时数据：${list}。AwwO 自己的 Agent 不联网；生成画布后，${route.where}，用画布令牌接入你自己的 Claude Code 或 Codex，再给同一个 Agent 加上 treg，它就能去查，并把结果写进画布。`,
-        `This request may need live data: ${list}. AwwO’s own Agents have no live web. Once the canvas is made, ${route.where}; connect your own Claude Code or Codex with a canvas token, and add treg to that same Agent: it looks things up and writes them onto the canvas.`)
-      : t(`这个需求可能要用到实时数据：${list}。AwwO 自己的 Agent 不联网；生成画布后，请工作区的所有者或管理员${route.where}，生成一个画布令牌交给你，你用它接入自己的 Claude Code 或 Codex，再给同一个 Agent 加上 treg，它就能去查，并把结果写进画布。`,
-        `This request may need live data: ${list}. AwwO’s own Agents have no live web. Once the canvas is made, ask an owner or admin of the workspace to ${route.where} and make you a canvas token; connect your own Claude Code or Codex with it, and add treg to that same Agent: it looks things up and writes them onto the canvas.`)}</p>
+      ? t(`这个需求可能要用到实时数据：${list}。AwwO 自己的 Agent 不会联网搜索，也查不到这类数据；生成画布后，${route.where}，用画布令牌接入你自己的 Claude Code 或 Codex，再给同一个 Agent 加上 treg，它就能去查，并把结果写进画布。`,
+        `This request may need live data: ${list}. AwwO’s own Agents do not search the web or look up such data. Once the canvas is made, ${route.where}; connect your own Claude Code or Codex with a canvas token, and add treg to that same Agent: it looks things up and writes them onto the canvas.`)
+      : t(`这个需求可能要用到实时数据：${list}。AwwO 自己的 Agent 不会联网搜索，也查不到这类数据；生成画布后，请工作区的所有者或管理员${route.where}，生成一个画布令牌交给你，你用它接入自己的 Claude Code 或 Codex，再给同一个 Agent 加上 treg，它就能去查，并把结果写进画布。`,
+        `This request may need live data: ${list}. AwwO’s own Agents do not search the web or look up such data. Once the canvas is made, ask an owner or admin of the workspace to ${route.where} and make you a canvas token; connect your own Claude Code or Codex with it, and add treg to that same Agent: it looks things up and writes them onto the canvas.`)}</p>
     <p className="saas-home-advice-billing">{t('treg 按次计费，记在你自己的 treg 账户上，不经过 AwwO。', 'treg charges per call to your own treg account, never through AwwO.')}</p>
     <div className="saas-home-advice-actions">
       <button type="button" className="saas-home-advice-toggle" aria-expanded={open} aria-controls={open ? stepsId : undefined} onClick={() => setOpen(value => !value)}>{t('怎么接入', 'How to connect')}</button>

@@ -713,7 +713,7 @@ const EN = {
   'canvas.freePlanEndedOwner': 'The free trial has ended: subscribe to Pro, Max or Ultra to plan and run again. Your canvases and results are all still here.',
   'canvas.freePlanEndedOther': 'The free trial has ended: once the workspace owner subscribes to Pro, Max or Ultra, planning and runs work again. The canvases and results are all still here.',
   // treg (docs/awwo-canvas-live-collaboration.md): the newest request names live data AwwO's own Agents cannot reach.
-  'assistant.nextLiveData': 'This request may need live web data, which AwwO’s Agents cannot reach: click the Multiplayer button at the top right (a dot and your avatar), and in Invite an Agent connect your own Claude Code or Codex and add treg to it (a third-party tool catalog that bills each call to your own treg account), and it can look things up and write them onto the canvas.',
+  'assistant.nextLiveData': 'This request may need live web data, which AwwO’s Agents cannot search for: click the Multiplayer button at the top right (a dot and your avatar), and in Invite an Agent connect your own Claude Code or Codex and add treg to it (a third-party tool catalog that bills each call to your own treg account), and it can look things up and write them onto the canvas.',
   'assistant.nextAfterInputsCalls': 'Once they are in, the whole canvas can run (at least {calls} call(s)).',
   'assistant.nextAfterInputsCost': 'Once they are in, the whole canvas can run ({generations} generation(s), at least {calls} call(s)).',
   'assistant.nextTryFirst': 'Try “{node}” on its own',
@@ -1527,7 +1527,7 @@ const ZH: Record<CanvasTextKey, string> = {
   'assistant.nextAfterInputs': '填好后就能运行整张画布。',
   'canvas.freePlanEndedOwner': '免费试用已结束：订阅 Pro、Max 或 Ultra 后就能继续规划和运行，画布和成果都还在。',
   'canvas.freePlanEndedOther': '免费试用已结束：工作区所有者订阅 Pro、Max 或 Ultra 后，就能继续规划和运行，画布和成果都还在。',
-  'assistant.nextLiveData': '这个需求可能要用到实时网络数据，AwwO 的 Agent 不联网：点右上角的「同屏」按钮（一个圆点和你的头像），在「邀请 Agent」接入你自己的 Claude Code 或 Codex，再给它加上 treg（第三方工具目录，按次计费，记在你自己的 treg 账户），它就能查到实时资料写进画布。',
+  'assistant.nextLiveData': '这个需求可能要用到实时网络数据，AwwO 的 Agent 不会联网搜索：点右上角的「同屏」按钮（一个圆点和你的头像），在「邀请 Agent」接入你自己的 Claude Code 或 Codex，再给它加上 treg（第三方工具目录，按次计费，记在你自己的 treg 账户），它就能查到实时资料写进画布。',
   'assistant.nextAfterInputsCalls': '填好后就能运行整张画布（至少 {calls} 次）。',
   'assistant.nextAfterInputsCost': '填好后就能运行整张画布（{generations} 次生成，至少 {calls} 次调用）。',
   'assistant.nextTryFirst': '先单独试运行「{node}」',

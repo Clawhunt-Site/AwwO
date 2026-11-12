@@ -684,8 +684,11 @@ func (a *App) personalAdmission(ctx context.Context, runtime string, body []byte
 		return nil, errors.New("personal credential required")
 	}
 	var uid, parentSession, member string
+	// The third branch is a run's second call, after its model asked for pages (model_web_reads.go): its own ledger row,
+	// submitted under its own id, made for the run with no turn.
 	e := a.db.QueryRow(ctx, `SELECT actor_id,session_id,'' FROM runs WHERE id=$1 AND tenant_id=$2
- UNION ALL SELECT r.actor_id,r.session_id,t.member_id FROM run_turns t JOIN runs r ON r.id=t.run_id AND r.tenant_id=t.tenant_id WHERE t.id=$1 AND r.tenant_id=$2 LIMIT 1`, rid, tid).Scan(&uid, &parentSession, &member)
+ UNION ALL SELECT r.actor_id,r.session_id,t.member_id FROM run_turns t JOIN runs r ON r.id=t.run_id AND r.tenant_id=t.tenant_id WHERE t.id=$1 AND r.tenant_id=$2
+ UNION ALL SELECT r.actor_id,r.session_id,'' FROM model_invocations i JOIN runs r ON r.id=i.run_id AND r.tenant_id=i.tenant_id WHERE i.id=$1 AND i.tenant_id=$2 AND i.turn_id IS NULL AND i.id<>i.run_id LIMIT 1`, rid, tid).Scan(&uid, &parentSession, &member)
 	if e != nil {
 		return nil, errors.New("run owner unavailable")
 	}

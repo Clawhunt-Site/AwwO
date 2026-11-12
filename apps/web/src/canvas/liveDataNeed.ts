@@ -1,5 +1,6 @@
 // The live data a written request names: web research, SEO numbers, social data, company and people data, market prices,
-// ad research. AwwO's own Agents have no live web (they reach no address of their own choosing), so where a request
+// ad research. AwwO's own Agents search no web and query no data service (where the server lets them, a node's model
+// may have AwwO read up to three public pages it names: model_web_reads.go), so where a request
 // names one, the home's composer says that a person can bring their own Agent with a tool registry to the canvas
 // (saas/home/ToolAdvice.tsx), and a canvas's Next card says so too. It is advice for the person only: nothing a canvas
 // plans or runs reads it, and both say "may": a match is a guess from words, never a judgement of the request.

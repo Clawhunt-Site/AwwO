@@ -44,10 +44,13 @@ type invocationFacts struct {
 
 	Runtime, Model, Provider, ProviderModel, Protocol, TurnID, AgentID string
 	Admission                                                          string
-	Version                                                            *int
-	Terminal                                                           bool
-	Usage                                                              InvocationUsage
-	Timing                                                             InvocationTiming
+	// InvocationID is the ledger row of a run's call that is not the run's own id: the second call of a run whose model
+	// asked for pages (model_web_reads.go). Empty, the run's id is the call's (finishOnce).
+	InvocationID string
+	Version      *int
+	Terminal     bool
+	Usage        InvocationUsage
+	Timing       InvocationTiming
 	// The bytes the call sent to its worker and the bytes it streamed back, and when its stream began, its
 	// first text arrived and its terminal event came: what a paid-route call is charged from when its usage is not
 	// reported (plans.go creditCharge). Zero where a path does not count them.

@@ -264,7 +264,7 @@ func robotsNormalize(s string) string {
 func fetchRobots(ctx context.Context, client *http.Client, robotsURL string, opt Options) (robotsEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, robotsTimeout)
 	defer cancel()
-	current, err := ValidateURL(robotsURL)
+	current, err := opt.validate(robotsURL)
 	if err != nil {
 		return robotsEntry{}, err
 	}
@@ -283,7 +283,7 @@ func fetchRobots(ctx context.Context, client *http.Client, robotsURL string, opt
 			if err != nil {
 				return robotsEntry{}, failure("invalid_url", "robots.txt redirects to an invalid address")
 			}
-			if current, err = ValidateURL(next.String()); err != nil {
+			if current, err = opt.validate(next.String()); err != nil {
 				return robotsEntry{}, err
 			}
 			continue

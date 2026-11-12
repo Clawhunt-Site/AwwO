@@ -5269,7 +5269,7 @@ export function CanvasSurface({ readOnly = false, multiplayer, multiplayerExpect
     }
   };
   const fillSteps = suggested?.steps.flatMap(step => step.kind === 'fill-inputs' ? [step] : []) ?? [];
-  // Live data the canvas's newest request names (liveDataNeed): AwwO's Agents have no live web, so the next steps say how
+  // Live data the canvas's newest request names (liveDataNeed): AwwO's Agents search no web, so the next steps say how
   // the person's own Agent brings it (treg through 邀请 Agent), where no checklist's footnote is said.
   const newestRequest = [...planning.messages].reverse().find(message => message.role === 'user');
   const liveData = !readOnly && newestRequest ? liveDataNeed(newestRequest.request ?? newestRequest.content ?? '').length > 0 : false;

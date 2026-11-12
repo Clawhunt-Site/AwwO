@@ -57,6 +57,9 @@ type executionSnapshot struct {
 	Vision *visionPlan `json:"vision,omitempty"`
 	// VisionFrom is the model this run's node chose, when the run moved to one that sees its pictures (vision.go).
 	VisionFrom string `json:"visionFrom,omitempty"`
+	// WebReads: this run's model may ask the API to read pages for it (model_web_reads.go). Absent on every run admitted
+	// while the switch was off, which then sends exactly what it sent before.
+	WebReads *webReadPlan `json:"webReads,omitempty"`
 
 	Runtime        string          `json:"runtime,omitempty"`
 	RuntimeHealth  runtimeCatalog  `json:"runtimeHealth,omitempty"`

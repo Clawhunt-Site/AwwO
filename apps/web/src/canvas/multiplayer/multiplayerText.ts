@@ -171,7 +171,7 @@ const EN = {
   'invite.cancel': 'Cancel',
   // treg in 邀请 Agent: lines with no credential that give the connected Agent treg's tools too.
   'treg.toggle': 'Add treg: live data for your Agent',
-  'treg.intro': 'treg (treg.to, a third-party tool catalog by Superdesign) lets the Claude Code, Codex or Cursor you connect here search the web and read pages, look up keywords and backlinks, social trends, and company and market data, then write what it found onto this canvas. AwwO’s own Agents have no live web: your Agent brings it.',
+  'treg.intro': 'treg (treg.to, a third-party tool catalog by Superdesign) lets the Claude Code, Codex or Cursor you connect here search the web and read pages, look up keywords and backlinks, social trends, and company and market data, then write what it found onto this canvas. AwwO’s own Agents do not search the web or look up such data: your Agent brings them.',
   'treg.billing': 'treg charges per call, to your own treg team, and shows the price before a call. AwwO takes no part of that money and never sees or keeps your treg sign-in. What you send to treg leaves AwwO.',
   'treg.stepsLabel': 'How to add it',
   'treg.step1': 'Sign up at treg.to and create a team: the team pays for the calls.',
@@ -431,7 +431,7 @@ const ZH: Record<MultiplayerTextKey, string> = {
   'invite.revokeFailed': '没能撤销：{detail}',
   'invite.cancel': '取消',
   'treg.toggle': '加上 treg：让 Agent 查实时数据',
-  'treg.intro': 'treg（treg.to，Superdesign 出品的第三方工具目录）能让你接进来的 Claude Code、Codex 或 Cursor 联网搜索、读网页，查关键词与外链、社媒趋势、公司与市场数据，再把查到的写进这张画布。AwwO 自己的 Agent 不联网，实时资料交给你自己的 Agent。',
+  'treg.intro': 'treg（treg.to，Superdesign 出品的第三方工具目录）能让你接进来的 Claude Code、Codex 或 Cursor 联网搜索、读网页，查关键词与外链、社媒趋势、公司与市场数据，再把查到的写进这张画布。AwwO 自己的 Agent 不会联网搜索，也查不到这类数据，实时资料交给你自己的 Agent。',
   'treg.billing': 'treg 按次计费，记在你自己的 treg 团队账户上，调用前会先给出价格。AwwO 不收这笔钱，也不经手、不保存你的 treg 登录。发给 treg 的内容会离开 AwwO。',
   'treg.stepsLabel': '怎么加上',
   'treg.step1': '先在 treg.to 注册并建一个团队：调用的费用由这个团队付。',

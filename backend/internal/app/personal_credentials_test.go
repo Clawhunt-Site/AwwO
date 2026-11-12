@@ -388,6 +388,30 @@ func TestPostgresPersonalCredentialsIsolationAndDispatch(t *testing.T) {
 	if _, err = h.a.personalAdmission(context.Background(), runtimePI, raw); err != nil {
 		t.Fatal("background admission depends on HTTP session", err)
 	}
+	// A run's second call, after its model asked for pages (model_web_reads.go), goes out under its own ledger id: that
+	// id resolves to the run's owner as the run's own does, and an id that no run, turn or call holds does not.
+	second := randomID()
+	tx, err := h.db.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = h.a.reserveInvocationFacts(context.Background(), tx, tid, run["id"].(string), second, &invocationFacts{Runtime: runtimePI, Model: selector}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	request["runId"] = second
+	viaCall, _ := json.Marshal(request)
+	if _, err = h.a.personalAdmission(context.Background(), runtimePI, viaCall); err != nil {
+		t.Fatal("a run's second call did not resolve to the run's owner", err)
+	}
+	request["runId"] = randomID()
+	unknown, _ := json.Marshal(request)
+	if _, err = h.a.personalAdmission(context.Background(), runtimePI, unknown); err == nil {
+		t.Fatal("an id no run, turn or call holds was admitted")
+	}
+	request["runId"] = run["id"]
 	// A catalog saved before modality filtering must not let a stale canvas
 	// dispatch an ASR-only model through the text worker.
 	if _, err = h.db.Exec(t.Context(), "UPDATE user_connections SET models=$2::jsonb WHERE id=$1", id, `["test-chat-model","qwen3-asr-flash"]`); err != nil {

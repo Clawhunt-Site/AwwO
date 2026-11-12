@@ -8,7 +8,7 @@ import { canvasText, LocaleProvider, type CanvasTextKey } from '../src/canvas/i1
 import { resetAllSessions } from '../src/canvas/sessions';
 import { clearSaaSCanvas, configureSaaSCanvas, configureSaaSCanvasInitialize, configureSaaSCanvasSave } from '../src/saas/canvasBridge';
 
-// The Next card under a canvas whose newest request names live data (liveDataNeed): AwwO's own Agents have no live web,
+// The Next card under a canvas whose newest request names live data (liveDataNeed): AwwO's own Agents search no web,
 // so its footnote says how the person's own Agent brings it, treg through 同屏 → 邀请 Agent, naming the 同屏 button by what
 // it shows (a dot and the person's avatar: it has no visible word). A request that names none gets no such line.
 type Locale = 'zh' | 'en';

@@ -724,6 +724,11 @@ func (a *App) createRun(w http.ResponseWriter, r *http.Request) {
 		history := []json.RawMessage{}
 		snapshot.History = &history
 	}
+	// A node's own message may let its model ask for pages (model_web_reads.go): frozen with the run, so a switch turned
+	// on later changes no run admitted before it.
+	if a.webReadsEligible(kind, team, market, snapshot) {
+		snapshot.WebReads = &webReadPlan{Pages: modelReadPagesMax}
+	}
 	budget, overhead := snapshot.Budget, snapshot.Overhead
 	snapshot.Knowledge, e = freezeKnowledgeContext(r.Context(), tx, tid, b.KnowledgeRevisionIDs)
 	if e != nil {
@@ -1007,6 +1012,8 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		a.executeTeam(ctx, tid, id, sid, prompt, snapshot)
 		return
 	}
+	// The run's own words, for a second call after its model asked for pages (model_web_reads.go).
+	rawInstructions, rawPrompt := instructions, prompt
 	instructions = lessonsSystemPrompt(memorySystemPrompt(knowledgeSystemPrompt(skillsSystemPrompt(instructions, snapshot.Skills), snapshot.Knowledge), snapshot.Memory), snapshot.Lessons)
 	prompt = evidenceUserPrompt(prompt, snapshot.Knowledge, snapshot.Memory)
 	if kind == "computer" {
@@ -1017,13 +1024,18 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 		a.executeWorkspace(ctx, tid, id, sid, prompt, instructions, kind, snapshot)
 		return
 	}
-	instructions = a.sentInstructions(taskFrameSystemPrompt(instructions, snapshot.TaskFrame), snapshot)
+	framedBase := taskFrameSystemPrompt(instructions, snapshot.TaskFrame)
+	instructions = a.sentInstructions(framedBase, snapshot)
 	if (snapshot.TaskFrame != nil || snapshot.Knowledge != nil || snapshot.Skills != nil || snapshot.Memory != nil || snapshot.Lessons != nil) && (snapshot.tokens(prompt)+snapshot.tokens(instructions)+overhead+outputContractReserve(snapshot) > budget || len(utf16.Encode([]rune(instructions))) > 32768) {
 		a.finish(tid, id, "failed", "", "context_limit")
 		return
 	}
-	facts := invocationMetadata(snapshot, nil)
-	facts.Timing.QueueMs = int64ptr(queueDuration.Milliseconds())
+	// A run whose model may ask for pages says so in its instructions, where its call leaves room for a page and the
+	// instructions stay within their bound; otherwise it runs as one that may not, sending what it always sent.
+	readRoom := 0
+	if offered, room := a.offerPageReads(snapshot, kind, framedBase, rawInstructions, prompt, overhead, budget); room > 0 {
+		instructions, readRoom = offered, room
+	}
 	// The pictures the model is shown are read back and checked before any call is reserved: one that is gone or
 	// changed fails the run at no cost (vision.go).
 	var images []visionImage
@@ -1038,307 +1050,389 @@ func (a *App) execute(ctx context.Context, tid, id, sid, prompt, instructions, k
 			return
 		}
 	}
-	// What the call will send at least; the full request, history included, replaces it once built. The call is
-	// reserved before the history is read, so a run counts against its allowances from the moment it starts.
-	facts.InputBytes = int64(len(prompt) + len(instructions))
-	if e = a.reserveInvocation(ctx, tid, id, id, snapshot.Model, facts); e != nil {
-		a.finish(tid, id, "failed", "", e.Error())
-		return
-	}
-	finish := func(status, output, code string) {
-		// The stream's end, stamped before the commit and its retries, bounds its hidden time.
-		if facts.Ended.IsZero() && !facts.Streamed.IsZero() {
-			facts.Ended = time.Now()
-		}
-		a.finishWithFacts(tid, id, status, output, code, facts)
-	}
-	var history []json.RawMessage
-	if snapshot.History != nil {
-		history = *snapshot.History
-	} else {
-		history, e = rowsJSON(ctx, a.db, "SELECT jsonb_build_object('role',m.role,'content',m.content) FROM (SELECT m.role,m.content,m.created_at,m.id FROM messages m JOIN runs r ON r.id=m.run_id WHERE m.tenant_id=$1 AND m.session_id=$2 AND m.run_id<>$3 AND r.status='completed' ORDER BY m.created_at DESC,m.id DESC LIMIT 100) m ORDER BY m.created_at,m.id", tid, sid, id)
-	}
-	if e != nil {
-		finish("failed", "", "history_unavailable")
-		return
-	}
-	if kind == "planner" || kind == "knowledge" || kind == "computer" {
-		history = []json.RawMessage{}
-	} else {
-		history = boundedHistoryAt(history, snapshot.tokens(prompt)+snapshot.tokens(instructions)+outputContractReserve(snapshot), budget, overhead, snapshot.ProseRate,
-			snapshot.Health.textUnitsLimit()-utf16Len(prompt)-utf16Len(instructions))
-	}
-	request := map[string]any{"runId": id, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": workerRuntime(snapshot.Runtime)}
-	if snapshot.Effort != "" {
-		request["effort"] = snapshot.Effort
-	}
-	// Sent only when it was frozen at admission. The worker derives the schema from
-	// this contract alone, so the request still carries no schema text.
-	if snapshot.OutputContract != nil {
-		request["outputContract"] = snapshot.OutputContract
-	}
-	if len(images) > 0 {
-		request["images"] = images
-	}
-	body, e := json.Marshal(request)
-	if e != nil {
-		finish("failed", "", "invalid_request")
-		return
-	}
-	// A picture's base64 is not what the model reads: estimates count each one as visionImageEstimateBytes.
-	facts.InputBytes = int64(len(body) - imageChars + len(images)*visionImageEstimateBytes)
-	runtimeCompleted := false
-	defer func() {
-		if !runtimeCompleted {
-			a.cancelRuntime(defaultRuntime(snapshot.Runtime), id)
-		}
-	}()
-	if e = a.markInvocationAdmission(ctx, tid, id, facts, "unknown"); e != nil {
-		if status, code, ended := runContextOutcome(ctx); ended {
-			finish(status, "", code)
-			return
-		}
-		finish("failed", "", "accounting_commit_failed")
-		return
-	}
-	// Every run that reaches here opts in to reasoning activity; only a planner run keeps its counts. A media, team,
-	// computer or workspace run returns above and never asks (teams.go and workspace.go admit with no header), so a
-	// sandbox node still shows only how its run stands.
-	//
-	// A planner run's output is withheld while it streams, so its progress is the only signal it has. A node run
-	// streams its output as it goes, which used to be reason enough to ask for nothing — but that holds only for a
-	// model that answers as it reasons. On a reasoning model the first text_delta can be minutes away, and all the
-	// page can say until then is 运行中 / Running: that a run is in flight, not that the model is working. A reader
-	// cannot tell the two apart (docs: the Opus 5.5 stalls, where nothing came back at all). The activity header
-	// turns the difference into one fact.
-	//
-	// A node run keeps nothing of the counts the worker sends: it records that reasoning began, once, and drops the
-	// rest. Reporting every count would write a row about twice a second (REASONING_REPORT_MS) — up to about 1,800
-	// for a quarter-hour of reasoning, on far more runs than the planner's — and the page needs no more than the
-	// fact to start its own clock (owner 2026-10-23, asked as a cost decision).
-	//
-	// What a charge reads of them is separate and is not a count either: whether any reasoning carried something,
-	// which settles a call the provider refused before it streamed anything (owner 2026-10-24). See `case
-	// "reasoning"` below.
-	var progress *plannerProgress
-	activity := plannerActivityHeader()
-	if kind == "planner" {
-		progress = &plannerProgress{}
-	}
-	admissionStart := time.Now()
-	facts.Sent = admissionStart
-	resp, e := a.admitRuntimeWith(ctx, defaultRuntime(snapshot.Runtime), body, activity)
-	facts.Timing.AdmissionMs = int64ptr(time.Since(admissionStart).Milliseconds())
-	if errors.Is(e, errSessionBusy) || errors.Is(e, errNotSent) {
-		facts.Admission = "rejected_before_start"
-	}
-	if e != nil {
-		if errors.Is(e, errSessionBusy) {
-			finish("failed", "", "runtime_session_busy")
-		} else if status, code, ended := runContextOutcome(ctx); ended {
-			// An expired deadline here is a timeout, not a cancellation; reporting it as the latter
-			// hid real admission timeouts behind a state that looks deliberate.
-			finish(status, "", code)
-		} else {
-			finish("failed", "", "runtime_unavailable")
-		}
-		return
-	}
-	defer resp.Body.Close()
-	facts.Admission = "accepted"
-	if resp.StatusCode != http.StatusOK {
-		facts.Admission = "unknown"
-		if resp.StatusCode == 400 || resp.StatusCode == 401 || resp.StatusCode == 413 || resp.StatusCode == 422 || resp.StatusCode == 429 || resp.StatusCode == 503 {
-			facts.Admission = "rejected_before_start"
-		}
-	}
-	if e = a.markInvocationAdmission(ctx, tid, id, facts, facts.Admission); e != nil {
-		if status, code, ended := runContextOutcome(ctx); ended {
-			finish(status, "", code)
-			return
-		}
-		finish("failed", "", "accounting_commit_failed")
-		return
-	}
-	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
-		code := "runtime_rejected"
-		if resp.StatusCode == 413 {
-			code = "context_limit"
-		}
-		finish("failed", "", code)
-		return
-	}
-	facts.Streamed = time.Now()
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 4096), 2<<20)
-	var output strings.Builder
-	// A reasoning model's scratchpad is removed from the deliverable but still
-	// counted here, so the output cap stays a bound on what the provider actually
-	// produced and a model that reasons past it still fails instead of running on.
-	produced := 0
-	// Reasoning a planner run is told about but never sees counts towards what an unreported call is charged
-	// from, a token a character.
-	reasoned := 0
 	// Whether this run has already said that its model began reasoning, and whether a failed write was noted. A node
 	// run says it once and no more, and notes a refusal to record it once.
 	reasoningSaid, reasoningWarned := false, false
-	var reasoning reasoningStream
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
+	// A run that offers page reads holds back the start of its first call's text until it is plainly not a page request,
+	// and of its second call's too, since a second request is never read (model_web_reads.go).
+	var gate *pageRequestGate
+	if readRoom > 0 {
+		gate = &pageRequestGate{}
+	}
+	// A run makes one call, or two when its model asked for pages: the first is the run's own ledger row, the second one
+	// of its own (call), settled when the run ends (finishOnce). The history is read once, at the first.
+	call, historyRead := id, false
+	var fullHistory []json.RawMessage
+calls:
+	for pass := 0; ; pass++ {
+		facts := invocationMetadata(snapshot, nil)
+		if pass == 0 {
+			facts.Timing.QueueMs = int64ptr(queueDuration.Milliseconds())
+		} else {
+			facts.InvocationID = call
 		}
-		var ev struct {
-			Type          string          `json:"type"`
-			Delta         string          `json:"delta"`
-			Text          string          `json:"text"`
-			Code          string          `json:"code"`
-			Message       string          `json:"message"`
-			Characters    *int            `json:"characters"`
-			Observability json.RawMessage `json:"observability"`
-		}
-		if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &ev) != nil {
-			finish("failed", output.String(), "invalid_runtime_event")
+		// What the call will send at least; the full request, history included, replaces it once built. The call is
+		// reserved before the history is read, so a run counts against its allowances from the moment it starts.
+		facts.InputBytes = int64(len(prompt) + len(instructions))
+		if e = a.reserveInvocation(ctx, tid, id, call, snapshot.Model, facts); e != nil {
+			// A second call may wait for a slot its first gave back (a workspace's concurrent calls): one the run's end
+			// overtook ends as the run's other exits do.
+			if status, code, ended := runContextOutcome(ctx); ended && pass > 0 {
+				a.finish(tid, id, status, "", code)
+				return
+			}
+			a.finish(tid, id, "failed", "", e.Error())
 			return
 		}
-		if ev.Type == "completed" || ev.Type == "failed" || ev.Type == "cancelled" {
-			facts.Ended = time.Now()
-			facts.receive(ev.Observability, a.cfg.RunTimeout)
+		finish := func(status, output, code string) {
+			// The stream's end, stamped before the commit and its retries, bounds its hidden time.
+			if facts.Ended.IsZero() && !facts.Streamed.IsZero() {
+				facts.Ended = time.Now()
+			}
+			a.finishWithFacts(tid, id, status, output, code, facts)
 		}
-		switch ev.Type {
-		case "text_delta":
-			if produced+len(ev.Delta) > 2<<20 {
-				finish("failed", output.String(), "output_limit")
-				return
-			}
-			produced += len(ev.Delta)
-			facts.OutputBytes = int64(produced)
-			if facts.FirstOutput.IsZero() && ev.Delta != "" {
-				facts.FirstOutput = time.Now()
-			}
-			spanned := reasoning.inSpan()
-			delta := reasoning.push(ev.Delta)
-			output.WriteString(delta)
-			// Structured proposals are emitted only after schema validation and
-			// normalization; unvalidated token fragments are not a canvas plan.
-			// What a planner run publishes meanwhile is progress, never the text.
-			if progress != nil {
-				if spanned || reasoning.inSpan() {
-					// Whatever this delta carried beyond what it released belongs to a
-					// leading reasoning span, or to the whitespace that closed one.
-					progress.reasonInline(utf8.RuneCountInString(ev.Delta) - utf8.RuneCountInString(delta))
-				}
-				progress.write(delta)
-				a.reportPlannerProgress(ctx, tid, id, progress)
-				continue
-			}
-			// A withheld delta has nothing to persist or replay either.
-			if delta == "" {
-				continue
-			}
-			if !a.appendDelta(ctx, tid, id, delta) {
-				status, code := deltaWriteFailure(ctx)
-				finish(status, output.String(), code)
-				return
-			}
-		case "reasoning":
-			// Reasoning activity is a count the worker sends only to a run that asked for it, and every run asks
-			// now. A malformed one is still the same failure as any other event this run cannot account for.
-			if ev.Characters == nil || *ev.Characters < 0 {
-				finish("failed", output.String(), "invalid_runtime_event")
-				return
-			}
-			// Reasoning that carried something is what two places settle a call on as proof the provider did work:
-			// creditCharge's refusal branch and sizeRefusal (plans.go, below). Both read that proof from the
-			// reasoning a run was told about, and only a planner run told them, so on a money path the same guards
-			// held for a planner call and were vacuous for a node one: a node call the provider refused inside
-			// quickRefusal after its model had produced reasoning settled at nothing, which is what this closes
-			// (owner 2026-10-24: 「计费缺口按你的建议改」). For sizeRefusal it is defence in depth rather than a
-			// live gap — no shipped worker reports a context limit once reasoning has begun (pi-task.mjs gates on
-			// !reasoningStarted, and the Python worker's on a 400/413 before any stream) — so it guards the
-			// combination against a worker that one day could.
-			//
-			// Only above zero, which is the worker's own distinction: its contract is "null for nothing, 0 when it
-			// only began" (agent-runtime.mjs reasoningActivity), and a responses-protocol model reports that zero
-			// the moment it opens a reasoning item, unthrottled. Having begun is not having worked, and a refusal
-			// answered before anything was generated is one this product does not bill (refusedBeforeOutput).
-			//
-			// What stays out of it on both paths is the magnitude. These are characters — code points the worker
-			// counted — and the one place that would read a number from them prices tokens, around two characters
-			// to one by this module's own deliberately low estimate, so passing them on would bill reasoning at
-			// several times its size. Nothing about what a call costs per token changes here.
-			if *ev.Characters > 0 {
-				facts.Reasoned = true
-			}
-			if progress == nil {
-				// A node run keeps the fact for its page too, once, and none of the counts.
-				//
-				// The flag is set only once the row is in: a write that failed would otherwise lose the signal for
-				// the whole run, since every later count is dropped. The planner's equivalent retries the same way.
-				if !reasoningSaid {
-					if e := a.appendRunProgress(ctx, tid, id, reasoningStartedEvent); e != nil {
-						if ctx.Err() == nil && !reasoningWarned {
-							reasoningWarned = true
-							a.log.Warn("the run's reasoning was not recorded; the run continues", "event", "run_reasoning_skipped")
-						}
-					} else {
-						reasoningSaid = true
-					}
-				}
-				continue
-			}
-			progress.reasonReported(*ev.Characters)
-			reasoned = max(reasoned, *ev.Characters)
-			facts.HiddenTokens = int64(reasoned)
-			a.reportPlannerProgress(ctx, tid, id, progress)
-		case "completed":
-			facts.OutputBytes = max(facts.OutputBytes, int64(len(ev.Text)))
-			answer, delivered := reasoningAnswer(ev.Text)
-			if !strings.HasPrefix(answer, output.String()) {
-				finish("failed", output.String(), "inconsistent_runtime_output")
-				return
-			}
-			if !delivered {
-				// Only a scratchpad arrived. Storing it would leak model internals,
-				// and completing with nothing would claim a deliverable that does
-				// not exist, so neither the text nor a success is published.
-				finish("failed", "", "reasoning_only_output")
-				return
-			}
-			if len(ev.Text) > 2<<20 {
-				finish("failed", output.String(), "output_limit")
-				return
-			}
-			if answer != "" {
-				output.Reset()
-				output.WriteString(answer)
-			}
-			runtimeCompleted = true
-			finish("completed", output.String(), "")
+		var history []json.RawMessage
+		switch {
+		case historyRead:
+			history = fullHistory
+		case snapshot.History != nil:
+			history = *snapshot.History
+		default:
+			history, e = rowsJSON(ctx, a.db, "SELECT jsonb_build_object('role',m.role,'content',m.content) FROM (SELECT m.role,m.content,m.created_at,m.id FROM messages m JOIN runs r ON r.id=m.run_id WHERE m.tenant_id=$1 AND m.session_id=$2 AND m.run_id<>$3 AND r.status='completed' ORDER BY m.created_at DESC,m.id DESC LIMIT 100) m ORDER BY m.created_at,m.id", tid, sid, id)
+		}
+		if e != nil {
+			finish("failed", "", "history_unavailable")
 			return
-		case "failed":
-			facts.WorkerCode = ev.Code
-			if sizeRefusal(facts) {
+		}
+		fullHistory, historyRead = history, true
+		if kind == "planner" || kind == "knowledge" || kind == "computer" {
+			history = []json.RawMessage{}
+		} else {
+			history = boundedHistoryAt(history, snapshot.tokens(prompt)+snapshot.tokens(instructions)+outputContractReserve(snapshot), budget, overhead, snapshot.ProseRate,
+				snapshot.Health.textUnitsLimit()-utf16Len(prompt)-utf16Len(instructions))
+		}
+		request := map[string]any{"runId": call, "tenantId": tid, "sessionId": sid, "prompt": prompt, "messages": history, "systemPrompt": instructions, "model": snapshot.Model, "runtime": workerRuntime(snapshot.Runtime)}
+		if snapshot.Effort != "" {
+			request["effort"] = snapshot.Effort
+		}
+		// Sent only when it was frozen at admission. The worker derives the schema from
+		// this contract alone, so the request still carries no schema text.
+		if snapshot.OutputContract != nil {
+			request["outputContract"] = snapshot.OutputContract
+		}
+		if len(images) > 0 {
+			request["images"] = images
+		}
+		body, e := json.Marshal(request)
+		if e != nil {
+			finish("failed", "", "invalid_request")
+			return
+		}
+		// A picture's base64 is not what the model reads: estimates count each one as visionImageEstimateBytes.
+		facts.InputBytes = int64(len(body) - imageChars + len(images)*visionImageEstimateBytes)
+		// A worker request is keyed by the id it was submitted under: this call's.
+		runtimeCompleted, submitted := false, call
+		defer func() {
+			if !runtimeCompleted {
+				a.cancelRuntime(defaultRuntime(snapshot.Runtime), submitted)
+			}
+		}()
+		if e = a.markInvocationAdmission(ctx, tid, call, facts, "unknown"); e != nil {
+			if status, code, ended := runContextOutcome(ctx); ended {
+				finish(status, "", code)
+				return
+			}
+			finish("failed", "", "accounting_commit_failed")
+			return
+		}
+		// Every run that reaches here opts in to reasoning activity; only a planner run keeps its counts. A media, team,
+		// computer or workspace run returns above and never asks (teams.go and workspace.go admit with no header), so a
+		// sandbox node still shows only how its run stands.
+		//
+		// A planner run's output is withheld while it streams, so its progress is the only signal it has. A node run
+		// streams its output as it goes, which used to be reason enough to ask for nothing — but that holds only for a
+		// model that answers as it reasons. On a reasoning model the first text_delta can be minutes away, and all the
+		// page can say until then is 运行中 / Running: that a run is in flight, not that the model is working. A reader
+		// cannot tell the two apart (docs: the Opus 5.5 stalls, where nothing came back at all). The activity header
+		// turns the difference into one fact.
+		//
+		// A node run keeps nothing of the counts the worker sends: it records that reasoning began, once, and drops the
+		// rest. Reporting every count would write a row about twice a second (REASONING_REPORT_MS) — up to about 1,800
+		// for a quarter-hour of reasoning, on far more runs than the planner's — and the page needs no more than the
+		// fact to start its own clock (owner 2026-10-23, asked as a cost decision).
+		//
+		// What a charge reads of them is separate and is not a count either: whether any reasoning carried something,
+		// which settles a call the provider refused before it streamed anything (owner 2026-10-24). See `case
+		// "reasoning"` below.
+		var progress *plannerProgress
+		activity := plannerActivityHeader()
+		if kind == "planner" {
+			progress = &plannerProgress{}
+		}
+		admissionStart := time.Now()
+		facts.Sent = admissionStart
+		resp, e := a.admitRuntimeWith(ctx, defaultRuntime(snapshot.Runtime), body, activity)
+		facts.Timing.AdmissionMs = int64ptr(time.Since(admissionStart).Milliseconds())
+		if errors.Is(e, errSessionBusy) || errors.Is(e, errNotSent) {
+			facts.Admission = "rejected_before_start"
+		}
+		if e != nil {
+			if errors.Is(e, errSessionBusy) {
+				finish("failed", "", "runtime_session_busy")
+			} else if status, code, ended := runContextOutcome(ctx); ended {
+				// An expired deadline here is a timeout, not a cancellation; reporting it as the latter
+				// hid real admission timeouts behind a state that looks deliberate.
+				finish(status, "", code)
+			} else {
+				finish("failed", "", "runtime_unavailable")
+			}
+			return
+		}
+		defer resp.Body.Close()
+		facts.Admission = "accepted"
+		if resp.StatusCode != http.StatusOK {
+			facts.Admission = "unknown"
+			if resp.StatusCode == 400 || resp.StatusCode == 401 || resp.StatusCode == 413 || resp.StatusCode == 422 || resp.StatusCode == 429 || resp.StatusCode == 503 {
 				facts.Admission = "rejected_before_start"
 			}
-			code := runtimeFailureCode(ev.Code, snapshot.OutputContract != nil)
-			if kind == "planner" && code == "runtime_failed" && plannerSpentOutput(facts.Usage, snapshot) {
-				code = "output_limit"
+		}
+		if e = a.markInvocationAdmission(ctx, tid, call, facts, facts.Admission); e != nil {
+			if status, code, ended := runContextOutcome(ctx); ended {
+				finish(status, "", code)
+				return
 			}
-			finish("failed", output.String(), code)
-			return
-		case "cancelled":
-			finish("cancelled", output.String(), "")
-			return
-		default:
-			finish("failed", output.String(), "invalid_runtime_event")
+			finish("failed", "", "accounting_commit_failed")
 			return
 		}
-	}
-	if status, code, ended := runContextOutcome(ctx); ended {
-		finish(status, output.String(), code)
-	} else {
-		finish("failed", output.String(), "runtime_stream_ended")
+		if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+			code := "runtime_rejected"
+			if resp.StatusCode == 413 {
+				code = "context_limit"
+			}
+			finish("failed", "", code)
+			return
+		}
+		facts.Streamed = time.Now()
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 4096), 2<<20)
+		var output strings.Builder
+		// A reasoning model's scratchpad is removed from the deliverable but still
+		// counted here, so the output cap stays a bound on what the provider actually
+		// produced and a model that reasons past it still fails instead of running on.
+		produced := 0
+		// Reasoning a planner run is told about but never sees counts towards what an unreported call is charged
+		// from, a token a character.
+		reasoned := 0
+		var reasoning reasoningStream
+		// What a run that ends during this call keeps of its text: none while the gate still holds the call's start back (it
+		// may be a page request, which is never stored), all of it otherwise.
+		visible := func() string {
+			if gate.holding() {
+				return ""
+			}
+			return output.String()
+		}
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			var ev struct {
+				Type          string          `json:"type"`
+				Delta         string          `json:"delta"`
+				Text          string          `json:"text"`
+				Code          string          `json:"code"`
+				Message       string          `json:"message"`
+				Characters    *int            `json:"characters"`
+				Observability json.RawMessage `json:"observability"`
+			}
+			if json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &ev) != nil {
+				finish("failed", visible(), "invalid_runtime_event")
+				return
+			}
+			if ev.Type == "completed" || ev.Type == "failed" || ev.Type == "cancelled" {
+				facts.Ended = time.Now()
+				facts.receive(ev.Observability, a.cfg.RunTimeout)
+			}
+			switch ev.Type {
+			case "text_delta":
+				if produced+len(ev.Delta) > 2<<20 {
+					finish("failed", visible(), "output_limit")
+					return
+				}
+				produced += len(ev.Delta)
+				facts.OutputBytes = int64(produced)
+				if facts.FirstOutput.IsZero() && ev.Delta != "" {
+					facts.FirstOutput = time.Now()
+				}
+				spanned := reasoning.inSpan()
+				delta := reasoning.push(ev.Delta)
+				output.WriteString(delta)
+				// Structured proposals are emitted only after schema validation and
+				// normalization; unvalidated token fragments are not a canvas plan.
+				// What a planner run publishes meanwhile is progress, never the text.
+				if progress != nil {
+					if spanned || reasoning.inSpan() {
+						// Whatever this delta carried beyond what it released belongs to a
+						// leading reasoning span, or to the whitespace that closed one.
+						progress.reasonInline(utf8.RuneCountInString(ev.Delta) - utf8.RuneCountInString(delta))
+					}
+					progress.write(delta)
+					a.reportPlannerProgress(ctx, tid, id, progress)
+					continue
+				}
+				// What may still be a page request is held back, never persisted or replayed (model_web_reads.go).
+				delta = gate.push(delta)
+				// A withheld delta has nothing to persist or replay either.
+				if delta == "" {
+					continue
+				}
+				if !a.appendDelta(ctx, tid, id, delta) {
+					status, code := deltaWriteFailure(ctx)
+					finish(status, visible(), code)
+					return
+				}
+			case "reasoning":
+				// Reasoning activity is a count the worker sends only to a run that asked for it, and every run asks
+				// now. A malformed one is still the same failure as any other event this run cannot account for.
+				if ev.Characters == nil || *ev.Characters < 0 {
+					finish("failed", visible(), "invalid_runtime_event")
+					return
+				}
+				// Reasoning that carried something is what two places settle a call on as proof the provider did work:
+				// creditCharge's refusal branch and sizeRefusal (plans.go, below). Both read that proof from the
+				// reasoning a run was told about, and only a planner run told them, so on a money path the same guards
+				// held for a planner call and were vacuous for a node one: a node call the provider refused inside
+				// quickRefusal after its model had produced reasoning settled at nothing, which is what this closes
+				// (owner 2026-10-24: 「计费缺口按你的建议改」). For sizeRefusal it is defence in depth rather than a
+				// live gap — no shipped worker reports a context limit once reasoning has begun (pi-task.mjs gates on
+				// !reasoningStarted, and the Python worker's on a 400/413 before any stream) — so it guards the
+				// combination against a worker that one day could.
+				//
+				// Only above zero, which is the worker's own distinction: its contract is "null for nothing, 0 when it
+				// only began" (agent-runtime.mjs reasoningActivity), and a responses-protocol model reports that zero
+				// the moment it opens a reasoning item, unthrottled. Having begun is not having worked, and a refusal
+				// answered before anything was generated is one this product does not bill (refusedBeforeOutput).
+				//
+				// What stays out of it on both paths is the magnitude. These are characters — code points the worker
+				// counted — and the one place that would read a number from them prices tokens, around two characters
+				// to one by this module's own deliberately low estimate, so passing them on would bill reasoning at
+				// several times its size. Nothing about what a call costs per token changes here.
+				if *ev.Characters > 0 {
+					facts.Reasoned = true
+				}
+				if progress == nil {
+					// A node run keeps the fact for its page too, once, and none of the counts.
+					//
+					// The flag is set only once the row is in: a write that failed would otherwise lose the signal for
+					// the whole run, since every later count is dropped. The planner's equivalent retries the same way.
+					if !reasoningSaid {
+						if e := a.appendRunProgress(ctx, tid, id, reasoningStartedEvent); e != nil {
+							if ctx.Err() == nil && !reasoningWarned {
+								reasoningWarned = true
+								a.log.Warn("the run's reasoning was not recorded; the run continues", "event", "run_reasoning_skipped")
+							}
+						} else {
+							reasoningSaid = true
+						}
+					}
+					continue
+				}
+				progress.reasonReported(*ev.Characters)
+				reasoned = max(reasoned, *ev.Characters)
+				facts.HiddenTokens = int64(reasoned)
+				a.reportPlannerProgress(ctx, tid, id, progress)
+			case "completed":
+				facts.OutputBytes = max(facts.OutputBytes, int64(len(ev.Text)))
+				answer, delivered := reasoningAnswer(ev.Text)
+				if !strings.HasPrefix(answer, output.String()) {
+					finish("failed", visible(), "inconsistent_runtime_output")
+					return
+				}
+				if !delivered {
+					// Only a scratchpad arrived. Storing it would leak model internals,
+					// and completing with nothing would claim a deliverable that does
+					// not exist, so neither the text nor a success is published.
+					finish("failed", "", "reasoning_only_output")
+					return
+				}
+				if len(ev.Text) > 2<<20 {
+					finish("failed", visible(), "output_limit")
+					return
+				}
+				if answer != "" {
+					output.Reset()
+					output.WriteString(answer)
+				}
+				runtimeCompleted = true
+				// An answer that is a page request (model_web_reads.go): the first call's is read, a second call's is not.
+				// Asked of the whole answer, as a worker may send its text only here, with no delta before.
+				if gate != nil && gate.state != gatePass && pageRequestStart(output.String()) == gateRequest {
+					if pass > 0 {
+						// A second call that asks again is never read. One whose answer only starts like a request (it
+						// explains the request line, say) answered: that is the run's output, held until now.
+						if _, problem := parsePageRequest(output.String()); problem == "" || problem == pageRequestNoAddress {
+							finish("failed", "", "web_read_repeat")
+							return
+						}
+						finish("completed", output.String(), "")
+						return
+					}
+					resp.Body.Close()
+					// A first call that could not be settled on its own is settled with the run, as any call is.
+					if !a.settleRunCall(tid, call, "completed", "", facts) {
+						finish("failed", "", "accounting_commit_failed")
+						return
+					}
+					urls, problem := parsePageRequest(output.String())
+					reads := a.readRunPages(ctx, tid, id, urls, problem, readRoom, knowledgeSlotsLeft(snapshot))
+					if status, code, ended := runContextOutcome(ctx); ended {
+						a.finish(tid, id, status, "", code)
+						return
+					}
+					evidence, err := pageEvidence(snapshot.Knowledge, reads)
+					if err != nil {
+						a.finish(tid, id, "failed", "", "context_limit")
+						return
+					}
+					// The second call: the same instructions with the pages' evidence boundary, the run's words with the pages
+					// quoted ahead of them and the note after them, and a ledger row of its own.
+					prompt = pageAnswerPrompt(snapshot, rawPrompt, evidence, reads)
+					instructions = a.pageAnswerInstructions(snapshot, rawInstructions, evidence)
+					if !pageAnswerFits(snapshot, prompt, instructions, overhead, budget) {
+						a.finish(tid, id, "failed", "", "context_limit")
+						return
+					}
+					call, gate = randomID(), &pageRequestGate{}
+					continue calls
+				}
+				finish("completed", output.String(), "")
+				return
+			case "failed":
+				facts.WorkerCode = ev.Code
+				if sizeRefusal(facts) {
+					facts.Admission = "rejected_before_start"
+				}
+				code := runtimeFailureCode(ev.Code, snapshot.OutputContract != nil)
+				if kind == "planner" && code == "runtime_failed" && plannerSpentOutput(facts.Usage, snapshot) {
+					code = "output_limit"
+				}
+				finish("failed", visible(), code)
+				return
+			case "cancelled":
+				finish("cancelled", visible(), "")
+				return
+			default:
+				finish("failed", visible(), "invalid_runtime_event")
+				return
+			}
+		}
+		if status, code, ended := runContextOutcome(ctx); ended {
+			finish(status, visible(), code)
+		} else {
+			finish("failed", visible(), "runtime_stream_ended")
+		}
+		return
 	}
 }
 
@@ -1549,8 +1643,12 @@ func (a *App) finishOnce(ctx context.Context, tid, id, status, output, code stri
 	runKind, runRuntime := "unknown", "unknown"
 	settle := func(tx pgx.Tx) error {
 		if facts != nil {
+			call := id
+			if facts.InvocationID != "" {
+				call = facts.InvocationID
+			}
 			var err error
-			committed, err = a.settleInvocation(ctx, tx, tid, id, status, code, facts)
+			committed, err = a.settleInvocation(ctx, tx, tid, call, status, code, facts)
 			if err != nil {
 				return err
 			}

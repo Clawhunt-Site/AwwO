@@ -477,6 +477,11 @@ func (a *App) createGraphRun(w http.ResponseWriter, r *http.Request) {
 						contractOutcomes = append(contractOutcomes, outcome)
 					}
 				}
+				// A plain node's model may ask for pages (model_web_reads.go), decided after the contract (which leaves no
+				// room for the request); a collaboration's turns are framed by their own conversation and do not.
+				if b.Collaboration == nil && a.webReadsEligible("graph", team, market, snap) {
+					snap.WebReads = &webReadPlan{Pages: modelReadPagesMax}
+				}
 			}
 			sid = n.IssueID
 			if sid != "" {

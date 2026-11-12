@@ -237,7 +237,10 @@ Evidence paths are repo-relative and were checked against this tree on 2026-10-1
   `backend/internal/app/graph_file_inputs_test.go`
   (`TestGraphTextFilePromptPreservesExactStoredBytesAndReferences`). Imported web pages become knowledge
   sources (`backend/internal/app/webread_import.go`) and memory notes are framed by `memoryNotesBoundary`
-  (`backend/internal/app/memory.go`); no automated check yet follows either path end to end.
+  (`backend/internal/app/memory.go`); no automated check yet follows either path end to end. Pages a run's model
+  asked for (`backend/internal/app/model_web_reads.go`) are followed end to end:
+  `backend/internal/app/model_web_reads_test.go` (`TestPostgresModelPageReadsReadThenAnswer`: the page is quoted
+  in the second call's user message, whose system prompt carries `knowledgeEvidenceBoundary`).
 
 ### AWWO-LAW-011: Workers expose no tool outside the fixed allowlist
 
@@ -275,7 +278,9 @@ Evidence paths are repo-relative and were checked against this tree on 2026-10-1
 - **Why.** A field or prompt line that leaks into every request silently changes model behaviour, cost and
   prompt-cache hits for every tenant; a closed feature gate must be invisible.
 - **Evidence.** `backend/internal/app/request_characterization_test.go` and
-  `backend/internal/app/testdata/golden/`. Goldens are regenerated only on purpose
+  `backend/internal/app/testdata/golden/`; `backend/internal/app/model_web_reads_test.go`
+  (`TestPostgresModelPageReadsOffChangesNothing`: with `AWWO_MODEL_WEB_READS` off, no frame and no frozen
+  `webReads`). Goldens are regenerated only on purpose
   (`AWWO_UPDATE_GOLDEN=1 AWWO_TEST_DATABASE_URL=... go test -count=1 -p 1 -run RequestCharacterization
   ./internal/app`) and the diff is reviewed before it is committed.
 
@@ -305,15 +310,27 @@ Evidence paths are repo-relative and were checked against this tree on 2026-10-1
 
 - **Law.** AwwO MUST NOT scan or probe networks or hosts (port scans, host discovery, vulnerability probes)
   unless a person has approved that exact target and scope, and without such an approval it MUST refuse.
-- **Why.** Probing systems AwwO does not own is abuse that lands on AwwO's addresses and accounts. Today no
-  model-reachable path can open a connection of its own choosing; each new network feature must keep it so,
-  as the web reader does by fetching only http and https on the default ports.
+- **Why.** Probing systems AwwO does not own is abuse that lands on AwwO's addresses and accounts. Since
+  2026-11-12 (the owner's 「就让模型现在能够自己抓网页吧」) a node's model may name pages for the API to read
+  (`backend/internal/app/model_web_reads.go`, off unless `AWWO_MODEL_WEB_READS=on`), but only as page reads
+  through the web reader (http and https on the default ports, public addresses checked at connect time,
+  robots.txt), at most three a run, counted in the workspace's and the site's daily allowances, with no query,
+  short hosts and paths, and no path a scanner tries (dot files, `wp-admin`, `cgi-bin`, backups and keys), on
+  every address a read requests, its redirects' and its robots.txt's included. A
+  sandbox run's commands reach public sites through the egress proxy where it is configured
+  (`apps/openai-agents-worker/workspace-sandbox.ts`). Each new network feature must keep scanning impossible.
 - **Evidence.** Structural only: the tool allowlists of AWWO-LAW-011;
   `apps/openai-agents-worker/workspace-sandbox.test.ts` (the execution sandbox runs with `--network=none`);
   `backend/internal/webread/url_test.go` (`TestValidateURLRefusesUnsafeAddresses`: any other port is
-  `blocked_port`). The managed-execution sandbox's lack of network is stated in
-  `apps/openmaus-worker/transport.ts` but not tested in this repository. No approval gate exists, because
-  nothing may scan; no automated check yet for scanning intent.
+  `blocked_port`); `backend/internal/app/model_web_url_test.go`
+  (`TestCheckModelReadURLRefusesWhatCarriesOrProbes`: a model's address with a query, a long host or path, or a
+  probe-shaped path is refused before anything is counted or fetched); `backend/internal/webread/checkurl_test.go`
+  (`TestFetchCheckURLHoldsOnEveryHop`: a redirect, or a robots.txt redirect, to a refused address is never
+  requested); `backend/internal/app/model_web_reads_test.go` (`TestPostgresModelPageReadsReadThenAnswer`: a
+  model's reads are counted in `web_reads`, robots.txt holds, and a redirect to a probe path is not followed).
+  The managed-execution sandbox's lack of network is stated in `apps/openmaus-worker/transport.ts` but not tested
+  in this repository. No approval gate exists, because nothing may scan; no automated check yet for scanning
+  intent.
 
 ## Secrets and product
 

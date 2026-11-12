@@ -35,7 +35,11 @@ attribution: <empty, or the source, licence, copyright holder and "modified for 
 ## Writing rules
 
 - Most nodes' models have no tools: no shell, browser, file system or network. Never tell them to fetch, install or
-  run anything, and never let them claim a render, test or visual check happened. A skill written for the sandbox
+  run anything, and never let them claim a render, test or visual check happened. (Where the server allows it, a
+  node's model may ask AwwO once to read up to three pages, and the run's own instructions then say how:
+  model_web_reads.go. A skill never assumes that, and never changes for it: a skill's body is in every request that
+  attaches it, the switch off or on. Pages read that way are quoted like imported ones, so `web-research`'s rules for
+  sources hold for them unchanged.) A skill written for the sandbox
   computer or 直接执行, where the agent does run commands, says so and says what to do without a sandbox
   (rea-app-reading, self-test-oracle).
 - Media models are shown to users by generic names only, so skills never name vendors or model brands. An identifier
