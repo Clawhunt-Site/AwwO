@@ -8,6 +8,15 @@
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
   },
+  "aldermoor": {
+    "completed": 10,
+    "total": 10,
+    "seconds": 1672,
+    "delivered": true,
+    "capturedOn": "2026-11-12",
+    "model": "Claude Fable 5.2",
+    "runtime": "openai-agents + blender"
+  },
   "aurora-gt": {
     "completed": 2,
     "total": 2,
@@ -177,6 +186,15 @@
     "model": "Claude Opus 5.5",
     "runtime": "sandbox"
   },
+  "onda-k2": {
+    "completed": 11,
+    "total": 11,
+    "seconds": 932,
+    "delivered": true,
+    "capturedOn": "2026-11-12",
+    "model": "Claude Fable 5.2",
+    "runtime": "openai-agents + blender"
+  },
   "pallward": {
     "completed": 28,
     "total": 28,
@@ -216,6 +234,15 @@
     "capturedOn": "2026-10-13",
     "model": "Claude Opus 5.5",
     "runtime": "openai-agents"
+  },
+  "port-solana": {
+    "completed": 13,
+    "total": 13,
+    "seconds": 1262,
+    "delivered": true,
+    "capturedOn": "2026-11-12",
+    "model": "Claude Fable 5.2",
+    "runtime": "openai-agents + blender"
   },
   "port-twin": {
     "completed": 6,

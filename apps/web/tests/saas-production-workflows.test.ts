@@ -22,22 +22,27 @@ const stagesOf = (id: string) => {
 // A film case's canvas is the run's own document, stored beside its record (recordedCanvas.ts), never a workflow here;
 // tests/saas-production-film.test.tsx holds its rules.
 const RECORDED = Object.keys(import.meta.glob('../src/saas/production-canvases/*.ts')).map(file => file.replace(/^.*\/|\.ts$/g, ''));
+// A carried case's canvas was laid out on the live site to carry a piece made before it: no workflow here, no stored
+// canvas; tests/saas-production-carried.test.tsx holds its rules.
+const CARRIED = PRODUCTION_CASES.filter(item => item.carried).map(item => item.id);
+const OWN_CANVAS = [...RECORDED, ...CARRIED];
 
 it('gives every case its canvas here, the knowledge base’s too, unless its canvas is a recorded one', () => {
-  expect(Object.keys(PRODUCTION_WORKFLOWS).sort()).toEqual(PRODUCTION_CASES.map(item => item.id).filter(id => !RECORDED.includes(id)).sort());
-  for (const id of RECORDED) expect(PRODUCTION_WORKFLOWS[id], id).toBeUndefined();
+  expect(Object.keys(PRODUCTION_WORKFLOWS).sort()).toEqual(PRODUCTION_CASES.map(item => item.id).filter(id => !OWN_CANVAS.includes(id)).sort());
+  for (const id of OWN_CANVAS) expect(PRODUCTION_WORKFLOWS[id], id).toBeUndefined();
+  for (const id of CARRIED) expect(RECORDED, id).not.toContain(id);
   for (const item of WORKFLOWS) expect(PRODUCTION_WORKFLOWS[item.id]).toBe(item);
 });
 
 it('shows on each card exactly the team its canvas has, stage by stage', () => {
-  for (const item of PRODUCTION_CASES.filter(value => !RECORDED.includes(value.id)))
+  for (const item of PRODUCTION_CASES.filter(value => !OWN_CANVAS.includes(value.id)))
     expect(item.stages.map(stage => stage.length), item.id).toEqual(stagesOf(item.id));
 });
 
 it('counts on each card the agents its canvas has, and nothing else, whatever its stage members are called', () => {
   // An assembly or a recorder (an assemble node) runs no agent, nor does a media node; every other node is one. A marker
   // that an agent's name shares (the summer ad's "Edit" was one) would drop that agent from the count.
-  for (const item of PRODUCTION_CASES.filter(value => !RECORDED.includes(value.id)))
+  for (const item of PRODUCTION_CASES.filter(value => !OWN_CANVAS.includes(value.id)))
     expect(agentCount(item), item.id).toBe(PRODUCTION_WORKFLOWS[item.id].nodes.filter(node => !node.assemble).length);
   expect(agentCount(PRODUCTION_CASES.find(item => item.id === 'summer-ad')!)).toBe(6);
 });

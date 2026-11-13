@@ -108,3 +108,52 @@ was checked before publishing says what the operator looked at.
 Words into motion (2026-11-09) is a recorded canvas of the same kind, built on the product's own nodes: a Motion brief, two Code film nodes (the film and its fix) and two Delivery review nodes, each of these five carrying the built-in motion-language or motion-review skill, then an Editor (no skill) and the edit; every agent works in a sandbox computer. The reviews' findings are a JSON array in their issues field, so the dialog shows them as the agents wrote them. Unlike the eight films above, its second review is published: it reads the fixed page beside the Editor, both after the Fix, off the film's chain, and shows whether the fix resolved the first review's findings.
 
 Tests: `saas-production-workflows`, `saas-production-runs`, `saas-production-copy`, `saas-production-cases` (and `saas-production-film`, which pins a film case's record, stored canvas, files and dialog, and `saas-staged-showcase`, the dev server's staged files), `saas-production-cases-placement`, `saas-work-mode-tutorial` and `saas-onboarding-host`. They pin, among other things, record ↔ canvas identity, summary ↔ record identity, checksums, the absence of private identifiers, and that delivery is claimed only where a run delivered.
+
+## Carried cases (2026-11-13)
+
+Three cases whose canvas CARRIES a piece that was made before it: ALDERMOOR and PORT SOLANA (two games Claude Fable 5.2
+built in coding sessions, from generated models) and ONDA K2 (a 26-second launch film it made by code). The owner's
+word (2026-11-12): the pieces are made already, so no canvas builds them again; a rough canvas carries each, runs, and
+shows what the model can do.
+
+- **What such a canvas is.** Agent nodes only, laid out through the API on the live site (no workflow in
+  `productionWorkflows.ts`). A Direction node writes the piece's direction sheet from its plan and its measurements.
+  Carrier nodes in the Blender workstation each receive up to eight of the piece's files as attachments of their
+  task (an upload the task names: at most 8 files, 2 MiB each and 8 MiB together reach a workstation), measure them
+  and publish them unchanged into file outputs. A page node unpacks the piece's code, checks the list of files it
+  names against the carriers' tables, writes the page and publishes it. A Hand-over node writes what is checked and
+  where. The page plays in the canvas's own preview: the preview takes the page's scripts from the canvas's files and
+  hands the page every file a script names as a whole `"<node id>/<file name>"` string (24 MiB in all).
+- **The runs** (the operator's own workspace, model `bedrock.claude-fable-5-2`; chat nodes on `openai-agents`, the
+  nodes that handle files on `blender`, where Fable 5.2 has a workspace):
+  - ALDERMOOR, 2026-11-12: 10 nodes. First run 19 min 4 s: eight done; the Game page node failed because its two
+    code attachments were uploaded as text (24 KiB of each is quoted into every call, and its fifth call passed the
+    context's text limit); the code went in again gzipped and the last two nodes ran again (4 min 49 s). 56 files
+    handed on, each with the SHA-256 of the file put in; 174 model calls.
+  - PORT SOLANA, 2026-11-12: 13 nodes, one run of 21 min 2 s; 80 files handed on, the same; 164 model calls.
+  - ONDA K2, 2026-11-12: 11 nodes, one run of 15 min 32 s; 33 files handed on, the same; 109 model calls. The film
+    is carried as an init file and nine parts of three seconds, fed to one video element through Media Source
+    Extensions, with its sound as one AAC file.
+  Carriers that found no free workstation waited and started again by themselves (`workspace_busy`).
+- **What is published.** The record (`production-runs/<case>.ts`, `canvas: 'carried'`): every agent's brief and what it
+  delivered as text, the page as delivered, the run's times, model calls and revisions. Written by
+  `scripts/showcase/publish-carried-run.mjs <raw.json>` from the raw run gathered from the site after it ended (the
+  canvas as the site holds it, each graph run, each node's run and model calls), which refuses a run that is not
+  whole, a text that is not English, a placeholder note, a provider's name, a machine path and AwwO's own
+  identifiers. `node --test scripts/showcase/publish-carried-run.test.mjs` covers it.
+- **What is not published, and why.** The files the agents handed on and the page's own files stay in the canvas:
+  they are 13 to 24.5 MB a case, the models' metadata names the tool that reduced them (a published model's must say AwwO and name no other:
+  `saas-production-runs.test.ts`), and a published case's files ship with every release. So the case dialog
+  shows the result as a recording (the piece running in the canvas's own preview, in the results studio at full
+  screen) and says so; it never shows the delivered page without its files. Showing the result itself there needs
+  the files published and the dialog handing a page the files its scripts name; that is not built.
+- **No copy.** A carried canvas's files are uploads, which belong to the canvas they were made in; a member's copy
+  would carry nothing. The dialog offers none (`ProductionShowcase.tsx`).
+- **The card.** `carried: true` in `productionCatalog.ts`; the stages are the run's own, ending in `Hand-over`; the
+  cover (`showcase/<stem>.mp4` and `.jpg`, under 10 MiB) is a recording of the piece running in the canvas's preview.
+- **Tests.** `apps/web/tests/saas-production-carried.test.tsx` (the card against the record, the record's shape, the
+  cover on disk, the dialog's result pane and wording); the catalog tests leave carried cases to it
+  (`saas-production-workflows`, `saas-production-cases`, `saas-production-runs`).
+- **Found on the way, for the product.** The site's edge refuses an upload of an `.hdr` file by its content (403);
+  both games carry their sky's light inside a script instead. `workspace_view` in the workstation often returned no
+  picture (one carrier made 63 model calls, most of them to look again).

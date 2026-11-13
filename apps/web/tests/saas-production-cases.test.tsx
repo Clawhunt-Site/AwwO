@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ProductionCases, COMPACT_CASE_COUNT } from '../src/saas/ProductionCases';
-import { EDIT_ROLE, PRODUCTION_CASES, PRODUCTION_KIND_LABELS } from '../src/saas/productionCatalog';
+import { EDIT_ROLE, HAND_OVER, PRODUCTION_CASES, PRODUCTION_KIND_LABELS } from '../src/saas/productionCatalog';
 import { PRODUCTION_RUN_SUMMARY } from '../src/saas/productionRuns';
 import { PRODUCTION_WORKFLOWS, PUBLISHED_BLENDER } from '../src/saas/productionWorkflows';
 import { SaaSPreferencesProvider } from '../src/saas/preferences';
@@ -52,7 +52,8 @@ it('tells every case in English as a brief, a staged team and a deliverable, wit
     // A film case ends in the edit that joins its film; a Blender case in its site, which tests itself in its sandbox
     // computer (saas-blender-workflows.test.ts); every other canvas in a review.
     const site = (PUBLISHED_BLENDER as readonly string[]).includes(item.id) ? PRODUCTION_WORKFLOWS[item.id].nodes.find(node => node.outputType === 'html')!.title : 'Review';
-    expect(item.stages.at(-1), item.id).toEqual(item.excerpt ? [EDIT_ROLE] : [site]);
+    // A carried case ends in its hand-over (saas-production-carried.test.tsx).
+    expect(item.stages.at(-1), item.id).toEqual(item.carried ? [HAND_OVER] : item.excerpt ? [EDIT_ROLE] : [site]);
     expect(item.excerpt === undefined || item.kind === 'film', item.id).toBe(true);
     expect('facts' in item, item.id).toBe(false);   // what a run did is read from its record, not written here
     for (const extension of ['mp4', 'jpg']) expect(existsSync(`${SHOWCASE}${item.footage}.${extension}`), `${item.footage}.${extension}`).toBe(true);

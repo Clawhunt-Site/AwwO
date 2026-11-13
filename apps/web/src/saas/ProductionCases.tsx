@@ -123,8 +123,11 @@ function CaseDialog({ item, onClose, onReuse, onCopyRecorded }: { item: Producti
       <div className="production-dialog-grid">
         <figure className="production-dialog-media">
           <video src={`/showcase/${item.footage}.mp4`} poster={`/showcase/${item.footage}.jpg`} muted loop playsInline autoPlay={!still} controls={still}
-            aria-label={item.excerpt ? `${item.title}: an excerpt of the delivered film, without sound` : item.recording ? `${item.title}: the delivered interface, recorded` : `${item.title}: AI-generated illustration`} />
-          <figcaption>{item.excerpt
+            aria-label={item.carried ? `${item.title}: the carried ${item.kind === 'film' ? 'film' : 'game'} running in its canvas’s preview, recorded`
+              : item.excerpt ? `${item.title}: an excerpt of the delivered film, without sound` : item.recording ? `${item.title}: the delivered interface, recorded` : `${item.title}: AI-generated illustration`} />
+          <figcaption>{item.carried
+            ? `Recorded on AwwO: the ${item.kind === 'film' ? 'film' : 'game'} this canvas carries, running in the canvas’s own preview after the run of ${PRODUCTION_RUN_SUMMARY[item.id]?.capturedOn ?? ''}. What each agent checked and handed on is below, under “How it was made”.`
+            : item.excerpt
             ? `An excerpt, without sound, of the film a real AwwO run delivered on ${PRODUCTION_RUN_SUMMARY[item.id]?.capturedOn ?? ''}; the whole film, with its sound, plays below, under “How it was made”.`
             : item.recording
             ? `Recorded: the page a real AwwO run delivered on ${PRODUCTION_RUN_SUMMARY[item.id]?.capturedOn ?? ''}, running as delivered and played by a script; try it yourself below, under “How it was made”.`

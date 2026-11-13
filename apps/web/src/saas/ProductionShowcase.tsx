@@ -134,6 +134,9 @@ export default function ProductionShowcase({ item, onReuse, onCopyRecorded }: { 
   const nodesDone = record.completed + (record.media ?? []).filter(value => value.status === 'done').length, nodeCount = record.total + (record.media?.length ?? 0);
   const deliveryNode = record.nodes.find(value => value.id === record.artifactNodeId);
   const artifact = deliveryNode?.status === 'done' && deliveryNode.outputType === 'html' && deliveryNode.output ? deliveryNode : undefined;
+  // A carried case's page loads the piece's files from its canvas's nodes, which are not published with the record: its
+  // result is shown as it was recorded running in the canvas's own preview, never as a page without its files.
+  const carried = record.canvas === 'carried';
   const node = record.nodes.find(value => value.id === (selected ?? artifact?.id ?? record.nodes[0].id)) ?? record.nodes[0];
   const spec = workflow?.nodes.find(value => value.id === node.id);
   const title = (target: string) => record.nodes.find(value => value.id === target)?.title ?? target;
@@ -171,15 +174,19 @@ export default function ProductionShowcase({ item, onReuse, onCopyRecorded }: { 
         </article>
       </div>
       <div className="production-made-result">
-        <header><span>{artifact ? 'The delivered result · runs in a sandbox' : 'Delivery'}</span>
-          {artifact && <div><button type="button" onClick={() => { setRevision(value => value + 1); if (mediaFailed) retryMedia(); }} aria-label="Reload the result" title="Reload the result"><RotateCcw size={14} aria-hidden="true" /></button>
+        <header><span>{carried && artifact ? 'The delivered result · recorded in the canvas’s preview' : artifact ? 'The delivered result · runs in a sandbox' : 'Delivery'}</span>
+          {artifact && <div>{!carried && <button type="button" onClick={() => { setRevision(value => value + 1); if (mediaFailed) retryMedia(); }} aria-label="Reload the result" title="Reload the result"><RotateCcw size={14} aria-hidden="true" /></button>}
             <button type="button" aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}Focus the result</button></div>}</header>
-        {artifact?.output ? (files ? <Fragment key={revision}><ResultFrame html={artifact.output} media={files} title={`${item.title}: the result an AwwO run delivered`} /></Fragment>
+        {carried && artifact ? <video className="production-made-frame is-recording" src={`/showcase/${item.footage}.mp4`} poster={`/showcase/${item.footage}.jpg`} controls muted loop playsInline preload="metadata"
+            aria-label={`${item.title}: the result running in its canvas’s preview on AwwO, recorded`} />
+          : artifact?.output ? (files ? <Fragment key={revision}><ResultFrame html={artifact.output} media={files} title={`${item.title}: the result an AwwO run delivered`} /></Fragment>
           : mediaFailed ? <p className="production-made-empty" role="alert">The pictures, clips or models this page uses could not be loaded, so it is not shown without them.
             <button type="button" onClick={retryMedia}>Try again</button></p>
           : <p className="production-made-empty" role="status">Loading the result…</p>)
           : <p className="production-made-empty">This run did not deliver the result; the failed and blocked nodes are on the left.</p>}
-        {artifact && <p className="production-made-hint">Click the page, then use the keyboard. The result is model-generated and runs as delivered, without manual edits.</p>}
+        {artifact && (carried
+          ? <p className="production-made-hint">A recording, not the page itself: the page loads the piece’s files from this canvas’s nodes, and they are not published with this record. The piece was made before the canvas, by the same model; the canvas checked its files, handed them on unchanged and put the page together.</p>
+          : <p className="production-made-hint">Click the page, then use the keyboard. The result is model-generated and runs as delivered, without manual edits.</p>)}
       </div>
     </div>
     <footer className="production-made-notes">

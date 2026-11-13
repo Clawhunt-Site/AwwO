@@ -212,7 +212,9 @@ it('keeps every record internally consistent: counts, statuses, outputs and the 
 
 it('records each SaaS case run on the very canvas a member can copy today', () => {
   // A film case's copyable canvas is the run's own, stored beside its record: saas-production-film.test.tsx pins it.
-  for (const record of RECORDS.filter(value => value.canvas !== 'recorded')) {
+  // A carried case's canvas cannot be copied (its files belong to the canvas they were uploaded to):
+  // saas-production-carried.test.tsx.
+  for (const record of RECORDS.filter(value => value.canvas !== 'recorded' && value.canvas !== 'carried')) {
     const workflow = PRODUCTION_WORKFLOWS[record.caseId];
     expect(workflow, record.caseId).toBeDefined();
     expect(record.nodes.map(node => [node.id, node.title, node.column, node.row, node.outputType])).toEqual(

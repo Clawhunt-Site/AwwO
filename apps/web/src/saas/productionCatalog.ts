@@ -15,6 +15,10 @@ export interface ProductionCase {
   recording?: true;
   /** The cover footage is a few seconds of the film the run delivered (a film case), not a screen recording. */
   excerpt?: true;
+  /** The canvas carries a piece made before it (a game, a film): its agents checked the piece's files and handed them
+   * on unchanged, and its page node put the page together. It has no workflow here and no copy (productionRuns.ts
+   * `canvas: 'carried'`); its cover is a recording of the piece running in the canvas's own preview on AwwO. */
+  carried?: true;
   title: string;
   brief: string;
   /** Short role names of the canvas's agents, stage by stage; the roles in one stage work in parallel. */
@@ -37,6 +41,8 @@ const DESIGN = 'Design', ART = 'Art', LEVELS = 'Levels', CODE = 'Code';
 const SOUND = 'Sound', PHYSICS = 'Physics', MODELLING = 'Modelling';
 const RENDERING = 'Rendering', FRONT_END = 'Front end', PRODUCT = 'Product';
 const REVIEW = 'Review', BACKEND = 'Backend';
+/** A carried case's last agent: it writes what the canvas carries, what was checked and where, and what is left open. */
+export const HAND_OVER = 'Hand-over';
 /** The media nodes of a stage, shown as one slot of the team: they generate pictures and clips and are not agents. */
 export const MEDIA_ROLE = 'Media';
 /** A flagship's assembly: a stage member that makes the page from the modules with no model, so not an agent. */
@@ -54,6 +60,30 @@ const NOT_AGENTS: ReadonlySet<string> = new Set([MEDIA_ROLE, ASSEMBLY_ROLE, RECO
 export const agentCount = (item: ProductionCase) => item.stages.reduce((sum, stage) => sum + stage.filter(role => !NOT_AGENTS.has(role)).length, 0);
 
 export const PRODUCTION_CASES: ReadonlyArray<ProductionCase> = [
+  // The carried cases (2026-11-13): three pieces Claude Fable 5.2 made in coding sessions, each carried by a canvas that
+  // ran on the live site on the same model. The canvas does not make the piece again: it checks the piece's files, hands
+  // them on unchanged and puts its page together, and the piece runs in the canvas's own preview.
+  {
+    id: 'aldermoor', kind: 'game', recording: true, carried: true, footage: 'aldermoor-real',
+    title: 'ALDERMOOR',
+    brief: 'An evening at an invented school of spellcraft, in one web page: two spells in the court, then a broom through sixteen rings over the lake and home at blue hour. Claude Fable 5.2 built it in one coding session from generated models; this canvas carries the finished game, checks its files and puts its page together.',
+    stages: [['Direction'], ['Castle models', 'Court models', 'Land models', 'Wren and sky'], ['Ground', 'Place sounds', 'Play sounds'], ['Game page'], [HAND_OVER]],
+    deliverable: 'A playable game, in the canvas',
+  },
+  {
+    id: 'port-solana', kind: 'game', recording: true, carried: true, footage: 'port-solana-real',
+    title: 'PORT SOLANA',
+    brief: 'An evening drive into an invented coast city, in one web page: a pickup on a causeway toward the sunset, a neon street at dusk, then a walk to the sea. Claude Fable 5.2 built it in one coding session from generated models; this canvas carries the finished game, checks its files and puts its page together.',
+    stages: [['Direction'], ['Cars', 'Hotels', 'Far city', 'Street'], ['People and sky', 'Road', 'Walls', 'Radio'], ['Engine', 'Place sounds'], ['Game page'], [HAND_OVER]],
+    deliverable: 'A playable game, in the canvas',
+  },
+  {
+    id: 'onda-k2', kind: 'film', recording: true, carried: true, footage: 'onda-k2-real',
+    title: 'ONDA K2',
+    brief: 'A 26-second product launch film made by code for an invented robot joint: modelled by scripts, path traced, animated to the beat of its music, finished by a 2D layer and synthesized sound. Claude Fable 5.2 made it in one day; this canvas carries the finished film, reads its sources and puts it into a page.',
+    stages: [['Direction'], ['Object', 'Look', 'Animation', '2D layer'], ['Sound', 'Film 1 to 3', 'Film 4 to 6', 'Film 7 to 9'], ['Film page'], [HAND_OVER]],
+    deliverable: 'The film, playing in the canvas',
+  },
   // The epic case (epicWorkflows.ts): a game written by twenty agents in sandbox computers from three design specs and
   // the pictures and 3D models its canvas made, assembled with no model and tested and fixed in two passes.
   {

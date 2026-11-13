@@ -109,7 +109,11 @@ export interface ProductionRunRecord {
   readonly canvasSHA256: string;
   /** The case's canvas is the run's own document, stored beside its record (production-canvases/<case>.ts), not a
    * workflow definition compiled into one: a film case, whose clips, takes and timelines name each other by node id. */
-  readonly canvas?: 'recorded';
+  readonly canvas?: 'recorded' | 'carried';
+  // 'carried': the canvas carries a piece made before it (a game, a film). It was laid out through the API on the live
+  // site, not from a workflow here, and no copy of it is stored: its files are uploads, which belong to the canvas they
+  // were made in. Its agents read and checked the piece's files and handed them on unchanged, and its page node put the
+  // piece's page together; the record holds what they delivered as text (scripts/showcase/publish-carried-run.mjs).
   readonly artifactNodeId?: string;
   readonly artifactSHA256?: string;
   readonly nodes: ReadonlyArray<ProductionRunNode>;
